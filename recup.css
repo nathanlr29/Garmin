@@ -50,6 +50,10 @@ html.night .chip[aria-pressed="true"]{background:var(--accent);border-color:var(
 .factors .f .tr div{height:100%;border-radius:999px}
 .factors .f .num{text-align:right;color:var(--muted)}
 
+/* ------------------------------------------------------------------ Navigation par jour */
+.mnav{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-4px 0 6px}
+.mnav input[type=date]{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:4px 8px;font:inherit;font-size:13px;color-scheme:dark;min-height:28px}
+
 /* ------------------------------------------------------------------ Nuit */
 .navn{display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted)}
 .navn button{border:1px solid var(--line);background:var(--bg);color:var(--ink);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:14px}
@@ -63,17 +67,15 @@ html.night .chip[aria-pressed="true"]{background:var(--accent);border-color:var(
 
 /* ------------------------------------------------------------------ Contexte de la nuit */
 .ctx{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
-.ctx .moonrow{grid-column:1/-1;display:flex;gap:14px;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--line)}
-.ctx .moonrow svg{width:52px;height:52px;flex:0 0 auto}
-.ctx .moonrow b{display:block;font-size:16px}
-.ctx .moonrow span{font-size:12.5px;color:var(--muted)}
+.ctx .moonrow{grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.ctx .moonrow svg{width:22px;height:22px;flex:0 0 auto}
+.ctx .moonrow b{color:var(--ink);font-weight:600}
 .ctx .it .l{font-size:11.5px;color:var(--muted)}
 .ctx .it .v{font-size:15px;font-weight:700}
 .ctx .it .v small{font-weight:500;color:var(--muted);font-size:11.5px}
 .flag{grid-column:1/-1;font-size:12.5px;background:var(--accent-soft);color:var(--ink);padding:8px 10px;border-radius:10px}
 
 /* ------------------------------------------------------------------ Lune + comparaisons */
-.moonstrip{overflow-x:auto;padding-bottom:6px}
 .cmp{display:grid;gap:10px}
 .cmp .row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 92px;gap:12px;align-items:center;font-size:13.5px;padding:8px 0;border-bottom:1px solid var(--line)}
 .cmp .row:last-child{border-bottom:0}

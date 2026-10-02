@@ -105,7 +105,8 @@ function prep() {
   const days = Object.values(RC.data.days || {}).filter(d => d.f).sort((a, b) => a.d < b.d ? -1 : 1);
   days.forEach(d => { d.dt = parseLocal(d.d); d.bedDt = d.bed ? parseLocal(d.bed) : null; d.wakeDt = d.wake ? parseLocal(d.wake) : null; d.m = moon(new Date(d.dt.getTime() - 3 * 36e5)); });
   RC.days = days; RC.nights = days.filter(d => d.sl);
-  if (RC.night < 0 || RC.night >= RC.nights.length) RC.night = RC.nights.length - 1;
+  RC.pick = days.filter(d => d.sl || d.tr != null);   // jours consultables dans le bilan
+  if (RC.sel == null || RC.sel < 0 || RC.sel >= RC.pick.length) RC.sel = RC.pick.length - 1;
 }
 
 // ------------------------------------------------------------------ Mise en page
@@ -125,7 +126,7 @@ function renderRecup() {
     <div class="pending">${D.pending ? `<i></i>Historique en cours de récupération : encore ${D.pending} jours ·` : ""}${u ? ` Données du ${u.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${clock(u)}` : ""} · <button class="linkbtn" id="rLock">Verrouiller</button></div>
   </div>
   <div class="grid">
-    <section class="card span12"><div class="morning" id="rMorning"></div></section>
+    <section class="card span12"><div class="mnav"><span class="navn"><button id="rMPrev" aria-label="Jour précédent">‹</button><input type="date" id="rDate" aria-label="Choisir un jour"><button id="rMNext" aria-label="Jour suivant">›</button></span><button class="linkbtn" id="rToday">Dernier jour</button></div><div class="morning" id="rMorning"></div></section>
     <section class="card span8"><h2>La nuit <span class="navn"><button id="rPrev" aria-label="Nuit précédente">‹</button><span id="rNightLbl"></span><button id="rNext" aria-label="Nuit suivante">›</button></span></h2><div id="rHyp"></div><div id="rStages"></div></section>
     <section class="card span4"><h2>Contexte de la nuit</h2><div class="ctx" id="rCtx"></div></section>
     <section class="card span12"><h2>Fréquence cardiaque <span class="legend" id="rHrLeg"></span></h2><div id="rHr"></div></section>
@@ -133,26 +134,38 @@ function renderRecup() {
     <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><div id="rSleep"></div></section>
     <section class="card span6"><h2>Heures de coucher et de lever <small id="rRegInfo"></small></h2><div id="rReg"></div></section>
     <section class="card span6"><h2>Body Battery <small id="rBBInfo"></small></h2><div id="rBB"></div></section>
-    <section class="card span12"><h2>Lune et sommeil <small id="rMoonInfo"></small></h2><div class="moonstrip" id="rMoon"></div></section>
     <section class="card span12"><h2>Ce qui semble jouer sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><div class="cmp" id="rCmp"></div>
       <p class="note">Comparaison de tes nuits entre elles (score de sommeil et durée) : ce sont des tendances observées, pas des causes prouvées. Un facteur n'apparaît qu'avec au moins 4 nuits concernées.</p></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
   </div>`;
   $("rPeriod").onclick = e => { const b = e.target.closest("[data-p]"); if (!b) return; RC.period = b.dataset.p === "year" ? "year" : +b.dataset.p; renderRecup(); };
   $("rLock").onclick = () => { try { localStorage.removeItem(CODE_KEY); } catch (e) {} RC.data = null; showLock(); };
-  $("rPrev").onclick = () => { if (RC.night > 0) { RC.night--; renderNight(); } };
-  $("rNext").onclick = () => { if (RC.night < RC.nights.length - 1) { RC.night++; renderNight(); } };
+  const step = k => selectDay(RC.sel + k);
+  $("rPrev").onclick = $("rMPrev").onclick = () => step(-1);
+  $("rNext").onclick = $("rMNext").onclick = () => step(1);
+  $("rToday").onclick = () => selectDay(RC.pick.length - 1);
+  $("rDate").onchange = e => { const v = e.target.value; if (!v) return; let i = RC.pick.findIndex(d => d.d >= v); if (i < 0) i = RC.pick.length - 1; selectDay(i); };
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
-  renderMorning(); renderNight();
-  renderHr(P); renderHrv(P); renderSleep(P); renderReg(P); renderBB(P); renderMoon(P); renderCmp(); renderFacts();
+  selectDay(RC.sel);
+  renderHr(P); renderHrv(P); renderSleep(P); renderReg(P); renderBB(P); renderCmp(); renderFacts();
 }
+function selectDay(i) {
+  if (!RC.pick.length) return;
+  RC.sel = Math.max(0, Math.min(RC.pick.length - 1, i));
+  const d = RC.pick[RC.sel], last = RC.sel === RC.pick.length - 1;
+  $("rMPrev").disabled = $("rPrev").disabled = RC.sel <= 0;
+  $("rMNext").disabled = $("rNext").disabled = last;
+  const inp = $("rDate"); inp.min = RC.pick[0].d; inp.max = RC.pick[RC.pick.length - 1].d; inp.value = d.d;
+  $("rToday").hidden = last;
+  renderMorning(); renderNight();
+}
+const isLatest = d => d === RC.pick[RC.pick.length - 1];
 
 // ------------------------------------------------------------------ Bilan du matin
 function scoreColor(s) { return s >= 75 ? "var(--teal)" : s >= 50 ? "var(--accent-2)" : s >= 25 ? "var(--amber)" : "var(--rose)"; }
 function renderMorning() {
-  const last = [...RC.days].reverse().find(d => d.tr != null || d.sl) || {};
-  const n = RC.nights[RC.nights.length - 1] || {};
+  const last = RC.pick[RC.sel] || {}, n = last, latest = isLatest(last);
   const r = 70, C = 2 * Math.PI * r, s = last.tr;
   const ring = s != null ? `<div class="ring"><svg viewBox="0 0 168 168"><circle cx="84" cy="84" r="${r}" fill="none" stroke="var(--h0)" stroke-width="14"/>
       <circle cx="84" cy="84" r="${r}" fill="none" stroke="${scoreColor(s)}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 84 84)" id="rRingArc"/></svg>
@@ -161,20 +174,21 @@ function renderMorning() {
   const lvl = LEVELS[last.trLvl] || "";
   const fb = FEEDBACK[last.trTxt] || "";
   const when = last.dt ? last.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) : "";
+  const today = last.dt && last.dt.toDateString() === new Date().toDateString();
   const k = (l, v, u, sub) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}<small>${u || ""}</small></div><div class="s">${sub || "&nbsp;"}</div></div>`;
   const kpis = [
     k("Sommeil", n.sl ? hm(n.sl / 60) : "–", "", n.score != null ? `score ${n.score}/100` : ""),
     k("Coucher → lever", n.bedDt ? `${clock(n.bedDt)}` : "–", n.wakeDt ? ` → ${clock(n.wakeDt)}` : "", ""),
     k("VFC", n.hrv ?? "–", n.hrv ? "ms" : "", n.hrvSt ? (HRV_ST[n.hrvSt] || n.hrvSt.toLowerCase()) + (n.hrvLo ? ` · zone ${n.hrvLo}–${n.hrvUp}` : "") : ""),
     k("FC au repos", n.rhr ?? n.srhr ?? "–", "bpm", n.hrMin ? `min. ${n.hrMin} bpm sur 24 h` : ""),
-    k("Body Battery", n.bbch != null ? `+${n.bbch}` : "–", "", n.bbHi ? `max. ${n.bbHi} aujourd'hui` : "cette nuit"),
+    k("Body Battery", n.bbch != null ? `+${n.bbch}` : "–", "", n.bbHi ? `max. ${n.bbHi} ${today ? "aujourd'hui" : "ce jour-là"}` : "cette nuit"),
     k("Respiration", n.resp ?? "–", n.resp ? "/min" : "", n.sstress != null ? `stress nocturne ${n.sstress}` : ""),
   ].join("");
   const f = (l, v) => v == null ? "" : `<div class="f"><span>${l}</span><div class="tr"><div style="width:${v}%;background:${scoreColor(v)}"></div></div><span class="num">${v} %</span></div>`;
   const factors = [f("Sommeil", last.trSleep), f("VFC", last.trHrv), f("Récupération", last.trRec), f("Charge", last.trLoad), f("Stress récent", last.trStress)].join("");
   $("rMorning").innerHTML = `${ring}
-    <div><div class="mtitle">${s != null ? `Disponibilité ${lvl || ""}` : "Ta dernière nuit"}</div>
-      <div class="msub">${when ? `Ce matin, ${when}` : ""}${fb ? ` · Garmin : ${fb}` : ""}${last.recov >= 60 ? ` · récupération estimée ${Math.round(last.recov / 60)} h` : ""}</div>
+    <div><div class="mtitle">${s != null ? `Disponibilité ${lvl || ""}` : latest ? "Ta dernière nuit" : "La nuit"}</div>
+      <div class="msub">${when ? (today ? `Ce matin, ${when}` : `Le matin du ${when}`) : ""}${fb ? ` · Garmin : ${fb}` : ""}${last.recov >= 60 ? ` · récupération estimée ${Math.round(last.recov / 60)} h` : ""}</div>
       <div class="kpis">${kpis}</div></div>
     <div class="factors">${factors ? `<div class="msub" style="margin:0 0 6px">Ce qui compose le score</div>${factors}` : ""}</div>`;
   const arc = $("rRingArc");
@@ -183,10 +197,10 @@ function renderMorning() {
 
 // ------------------------------------------------------------------ La nuit (hypnogramme + contexte)
 function renderNight() {
-  const n = RC.nights[RC.night];
+  const n = RC.pick[RC.sel];
   if (!n) { $("rHyp").innerHTML = `<div class="empty">Aucune nuit enregistrée</div>`; return; }
   $("rNightLbl").textContent = n.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
-  $("rPrev").disabled = RC.night <= 0; $("rNext").disabled = RC.night >= RC.nights.length - 1;
+  if (!n.sl) { $("rHyp").innerHTML = `<div class="note">Pas de sommeil enregistré cette nuit-là.</div>`; $("rStages").innerHTML = ""; renderCtx(n); return; }
   const box = $("rHyp");
   if (n.hyp && n.hyp.length) {
     const W = Math.max(300, box.clientWidth), rowH = 30, rows = ["awake", "rem", "light", "deep"], H = rows.length * rowH + 26, L = 64;
@@ -230,7 +244,7 @@ function renderCtx(n) {
   const it = (l, v, u) => `<div class="it"><div class="l">${l}</div><div class="v">${v}${u ? `<small> ${u}</small>` : ""}</div></div>`;
   const nfo = nightFacts(n), dst = dstNight(n.dt);
   const sport = nfo.acts.length ? `${nf(nfo.km, 0)} km${nfo.gapH != null ? ` <small>fini ${nfo.gapH < 0 ? "après" : `${nf(nfo.gapH, 1)} h avant`} le coucher</small>` : ""}` : "repos";
-  $("rCtx").innerHTML = `<div class="moonrow">${moonSvg(m)}<div><b>${m.name}</b><span>éclairée à ${Math.round(m.illum * 100)} % · ${Math.round(m.age)}<sup>e</sup> jour du cycle</span></div></div>
+  $("rCtx").innerHTML = `<div class="moonrow">${moonSvg(m, 22)}<span>Lune : <b>${m.name.toLowerCase()}</b> · ${Math.round(m.illum * 100)} %</span></div>
     ${it("Température la nuit", w.tMin != null ? `${nf1(w.tMin, 1)} → ${nf1(w.tAvg, 1)}` : "–", "°C min → moy.")}
     ${it("Humidité", nf1(w.hum), "%")}
     ${it("Pression (24 h)", w.dP != null ? `${w.dP > 0 ? "+" : ""}${nf(w.dP, 1)}` : "–", "hPa")}
@@ -354,33 +368,11 @@ function renderBB(P) {
   box.innerHTML = s + "</svg>";
 }
 
-// ------------------------------------------------------------------ Lune
-function renderMoon(P) {
-  const box = $("rMoon"), N = P.slice(-90);
-  if (!N.length) { box.innerHTML = ""; return; }
-  const cw = 22, W = Math.max(box.clientWidth, N.length * cw + 4), H = 78;
-  const col = s => s == null ? "var(--h0)" : s >= 85 ? "var(--teal)" : s >= 70 ? "var(--accent-2)" : s >= 55 ? "var(--accent)" : s >= 40 ? "var(--amber)" : "var(--rose)";
-  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="width:${W}px" role="img" aria-label="Phases de la lune et score de sommeil"><g class="axis">`;
-  N.forEach((d, i) => { const x0 = 2 + i * cw;
-    s += `<g transform="translate(${x0},2)">${moonSvg(d.m, 18).replace(/<svg[^>]*>/, "").replace("</svg>", "")}</g>`;
-    s += `<rect x="${x0 + 1}" y="26" width="${cw - 4}" height="26" rx="5" fill="${col(d.score)}" data-i="${i}" ${d.m.full ? 'stroke="#f4ecd2" stroke-width="1.5"' : ""}/>`;
-    if (d.score != null && cw >= 20) s += `<text x="${x0 + cw / 2 - 1}" y="43" text-anchor="middle" style="fill:#0c0f1d;font-size:9.5px;font-weight:700;pointer-events:none">${d.score}</text>`;
-    if (d.dt.getDate() === 1 || i === 0) s += `<text x="${x0}" y="68">${d.dt.getDate()} ${MONTHS[d.dt.getMonth()]}</text>`; });
-  box.innerHTML = s + "</g></svg>";
-  box.scrollLeft = box.scrollWidth;
-  box.querySelector("svg").addEventListener("pointermove", e => { const r = e.target.closest("rect[data-i]"); if (!r) return hideTip(); const d = N[+r.dataset.i];
-    showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${d.m.name} (${Math.round(d.m.illum * 100)} %)<br>${d.score != null ? `Score de sommeil ${d.score}` : "Pas de score"}${d.sl ? ` · ${hm(d.sl / 60)}` : ""}`); });
-  box.querySelector("svg").addEventListener("pointerleave", hideTip);
-  const full = RC.nights.filter(d => d.m.full && d.score != null), other = RC.nights.filter(d => !d.m.full && d.score != null);
-  $("rMoonInfo").textContent = full.length >= 3 ? `pleine lune : score moyen ${nf(avgOf(full, "score"))} · autres nuits ${nf(avgOf(other, "score"))}` : "";
-}
-
 // ------------------------------------------------------------------ Comparaisons
 function renderCmp() {
   const N = RC.nights.filter(d => d.score != null || d.sl);
   const F = [
     ["Autour de la pleine lune", "± 2 jours", d => d.m.full],
-    ["Autour de la nouvelle lune", "± 2 jours", d => d.m.nouv],
     ["Nuit chaude", "min. ≥ 15 °C", d => d.wx?.tMin != null ? d.wx.tMin >= 15 : null],
     ["Nuit froide", "min. ≤ 3 °C", d => d.wx?.tMin != null ? d.wx.tMin <= 3 : null],
     ["Air très humide", "≥ 90 %", d => d.wx?.hum != null ? d.wx.hum >= 90 : null],
@@ -421,7 +413,7 @@ function renderFacts() {
   add(`${nf(tot / 86400, 1)} j`, "dormis depuis janvier", `${nf(tot / 3600)} heures au total`, 3);
   add(hm(avgOf(N, "sl") / 60), "de sommeil par nuit en moyenne", `sur ${N.length} nuits`, 2);
   const best = maxBy(N.filter(d => d.score != null), d => d.score);
-  if (best) add(best.score, "ta meilleure note de sommeil", `${best.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} · ${best.m.name.toLowerCase()}`, 3);
+  if (best) add(best.score, "ta meilleure note de sommeil", best.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 3);
   const longest = maxBy(N, d => d.sl); add(hm(longest.sl / 60), "ta plus longue nuit", longest.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2);
   const bsW = N.filter(d => d.bedDt && [0, 1, 2, 3, 6].includes(d.bedDt.getDay())).map(d => minsFrom18(d.bedDt)), bsE = N.filter(d => d.bedDt && [5, 6].includes(new Date(d.bedDt.getTime() - 6 * 36e5).getDay())).map(d => minsFrom18(d.bedDt));
   if (bsW.length > 3 && bsE.length > 3) { const diff = bsE.reduce((a, b) => a + b, 0) / bsE.length - bsW.reduce((a, b) => a + b, 0) / bsW.length; add(`${diff >= 0 ? "+" : "−"}${nf(Math.abs(diff))} min`, diff >= 0 ? "plus tard au lit le week-end" : "plus tôt au lit le week-end", "vendredi et samedi soir vs semaine", 2); }
@@ -431,7 +423,6 @@ function renderFacts() {
   let run = 0, br = 0; N.forEach(d => { run = d.sl >= 7 * 3600 ? run + 1 : 0; br = Math.max(br, run); }); if (br > 1) add(br, "nuits de 7 h ou plus d'affilée", "ta meilleure série", 2);
   const early = minBy(N.filter(d => d.wakeDt), d => minsFrom18(d.wakeDt)); if (early) add(clock(early.wakeDt), "ton réveil le plus matinal", early.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2);
   const awake = N.reduce((s, d) => s + (d.awake || 0), 0); add(hm(awake / 60), "passées éveillé au lit", "réveils nocturnes cumulés", 1);
-  const full = N.filter(d => d.m.full); if (full.length > 3) add(hm(avgOf(full, "sl") / 60), "dormies en moyenne autour de la pleine lune", `contre ${hm(avgOf(N.filter(d => !d.m.full), "sl") / 60)} les autres nuits`, 2);
   const big = N.filter(d => nightFacts(d).km >= 200); if (big.length) add(hm(avgOf(big, "sl") / 60), "de sommeil après tes sorties de 200 km et plus", `${big.length} nuits${avgOf(big, "score") != null ? ` · score moyen ${nf(avgOf(big, "score"))}` : ""}`, 3);
   let seed = RC.factSeed * 9301 + 777; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const pool = F.map(f => ({ f, k: Math.pow(rnd(), 1 / f.w) })).sort((a, b) => b.k - a.k).slice(0, 6).map(x => x.f);
@@ -441,7 +432,7 @@ function minBy(arr, f) { let b = null, bv = Infinity; for (const a of arr) { con
 
 // ------------------------------------------------------------------ Démarrage
 mountTabs();
-document.addEventListener("velo:loaded", () => { if (curTab() === "recup" && RC.data) renderRecup(); });
+document.addEventListener("velo:loaded", () => { if (curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
 addEventListener("hashchange", applyTab);
 let rT2, lastW2 = innerWidth;
 addEventListener("resize", () => { if (innerWidth === lastW2) return; lastW2 = innerWidth; clearTimeout(rT2); rT2 = setTimeout(() => { if (curTab() === "recup" && RC.data) renderRecup(); }, 150); });
