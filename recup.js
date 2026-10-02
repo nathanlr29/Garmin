@@ -129,11 +129,11 @@ function renderRecup() {
     <section class="card span12"><div class="mnav"><span class="navn"><button id="rMPrev" aria-label="Jour précédent">‹</button><input type="date" id="rDate" aria-label="Choisir un jour"><button id="rMNext" aria-label="Jour suivant">›</button></span><button class="linkbtn" id="rToday">Dernier jour</button></div><div class="morning" id="rMorning"></div></section>
     <section class="card span8"><h2>La nuit <span class="navn"><button id="rPrev" aria-label="Nuit précédente">‹</button><span id="rNightLbl"></span><button id="rNext" aria-label="Nuit suivante">›</button></span></h2><div id="rHyp"></div><div id="rStages"></div></section>
     <section class="card span4"><h2>Contexte de la nuit</h2><div class="ctx" id="rCtx"></div></section>
-    <section class="card span12"><h2>Fréquence cardiaque <span class="legend" id="rHrLeg"></span></h2><div id="rHr"></div></section>
-    <section class="card span6"><h2>VFC nocturne <span class="legend" id="rHrvLeg"></span></h2><div id="rHrv"></div></section>
+    <section class="card span6"><h2>Cœur pendant la nuit <small id="rHrInfo"></small></h2><div id="rHr"></div><div class="note" id="rHrNote"></div></section>
+    <section class="card span6"><h2>VFC pendant la nuit <small id="rHrvInfo"></small></h2><div id="rHrv"></div><div class="note" id="rHrvNote"></div></section>
     <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><div id="rSleep"></div></section>
     <section class="card span6"><h2>Heures de coucher et de lever <small id="rRegInfo"></small></h2><div id="rReg"></div></section>
-    <section class="card span6"><h2>Body Battery <small id="rBBInfo"></small></h2><div id="rBB"></div></section>
+    <section class="card span12"><h2>Body Battery <small id="rBBInfo"></small></h2><div id="rBB"></div></section>
     <section class="card span12"><h2>Ce qui semble jouer sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><div class="cmp" id="rCmp"></div>
       <p class="note">Comparaison de tes nuits entre elles (score de sommeil et durée) : ce sont des tendances observées, pas des causes prouvées. Un facteur n'apparaît qu'avec au moins 4 nuits concernées.</p></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
@@ -148,7 +148,7 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderHr(P); renderHrv(P); renderSleep(P); renderReg(P); renderBB(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderBB(P); renderCmp(); renderFacts();
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -158,41 +158,85 @@ function selectDay(i) {
   $("rMNext").disabled = $("rNext").disabled = last;
   const inp = $("rDate"); inp.min = RC.pick[0].d; inp.max = RC.pick[RC.pick.length - 1].d; inp.value = d.d;
   $("rToday").hidden = last;
-  renderMorning(); renderNight();
+  renderMorning(); renderNight(); renderNightHr(); renderNightHrv();
 }
 const isLatest = d => d === RC.pick[RC.pick.length - 1];
 
 // ------------------------------------------------------------------ Bilan du matin
 function scoreColor(s) { return s >= 75 ? "var(--teal)" : s >= 50 ? "var(--accent-2)" : s >= 25 ? "var(--amber)" : "var(--rose)"; }
 function renderMorning() {
-  const last = RC.pick[RC.sel] || {}, n = last, latest = isLatest(last);
-  const r = 70, C = 2 * Math.PI * r, s = last.tr;
+  const n = RC.pick[RC.sel] || {}, latest = isLatest(n);
+  const R = recoScore(n), s = R.score;
+  const r = 70, C = 2 * Math.PI * r;
   const ring = s != null ? `<div class="ring"><svg viewBox="0 0 168 168"><circle cx="84" cy="84" r="${r}" fill="none" stroke="var(--h0)" stroke-width="14"/>
       <circle cx="84" cy="84" r="${r}" fill="none" stroke="${scoreColor(s)}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 84 84)" id="rRingArc"/></svg>
-      <div class="c"><div><div class="n">${s}</div><div class="l">disponibilité</div></div></div></div>`
-    : `<div class="ring"><div class="c"><div><div class="n" style="font-size:40px">${n.score ?? "–"}</div><div class="l">score de sommeil</div></div></div></div>`;
-  const lvl = LEVELS[last.trLvl] || "";
-  const fb = FEEDBACK[last.trTxt] || "";
-  const when = last.dt ? last.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) : "";
-  const today = last.dt && last.dt.toDateString() === new Date().toDateString();
+      <div class="c"><div><div class="n">${s}</div><div class="l">récupération</div></div></div></div>`
+    : `<div class="ring"><div class="c"><div><div class="n" style="font-size:40px">–</div><div class="l">pas assez de données</div></div></div></div>`;
+  const when = n.dt ? n.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) : "";
+  const today = n.dt && n.dt.toDateString() === new Date().toDateString();
   const k = (l, v, u, sub) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}<small>${u || ""}</small></div><div class="s">${sub || "&nbsp;"}</div></div>`;
   const kpis = [
-    k("Sommeil", n.sl ? hm(n.sl / 60) : "–", "", n.score != null ? `score ${n.score}/100` : ""),
+    k("Sommeil", n.sl ? hm(n.sl / 60) : "–", "", n.score != null ? `score Garmin ${n.score}/100` : ""),
     k("Coucher → lever", n.bedDt ? `${clock(n.bedDt)}` : "–", n.wakeDt ? ` → ${clock(n.wakeDt)}` : "", ""),
     k("VFC", n.hrv ?? "–", n.hrv ? "ms" : "", n.hrvSt ? (HRV_ST[n.hrvSt] || n.hrvSt.toLowerCase()) + (n.hrvLo ? ` · zone ${n.hrvLo}–${n.hrvUp}` : "") : ""),
     k("FC au repos", n.rhr ?? n.srhr ?? "–", "bpm", n.hrMin ? `min. ${n.hrMin} bpm sur 24 h` : ""),
     k("Body Battery", n.bbch != null ? `+${n.bbch}` : "–", "", n.bbHi ? `max. ${n.bbHi} ${today ? "aujourd'hui" : "ce jour-là"}` : "cette nuit"),
     k("Respiration", n.resp ?? "–", n.resp ? "/min" : "", n.sstress != null ? `stress nocturne ${n.sstress}` : ""),
   ].join("");
-  const f = (l, v) => v == null ? "" : `<div class="f"><span>${l}</span><div class="tr"><div style="width:${v}%;background:${scoreColor(v)}"></div></div><span class="num">${v} %</span></div>`;
-  const factors = [f("Sommeil", last.trSleep), f("VFC", last.trHrv), f("Récupération", last.trRec), f("Charge", last.trLoad), f("Stress récent", last.trStress)].join("");
+  const factors = R.parts.map(p => `<div class="f"><span>${p.label}</span><div class="tr"><div style="width:${p.score}%;background:${scoreColor(p.score)}"></div></div><span class="num">${p.score}</span><small>${p.detail}</small></div>`).join("");
   $("rMorning").innerHTML = `${ring}
-    <div><div class="mtitle">${s != null ? `Disponibilité ${lvl || ""}` : latest ? "Ta dernière nuit" : "La nuit"}</div>
-      <div class="msub">${when ? (today ? `Ce matin, ${when}` : `Le matin du ${when}`) : ""}${fb ? ` · Garmin : ${fb}` : ""}${last.recov >= 60 ? ` · récupération estimée ${Math.round(last.recov / 60)} h` : ""}</div>
+    <div><div class="mtitle">${s != null ? R.label : latest ? "Ta dernière nuit" : "La nuit"}</div>
+      <div class="msub">${when ? (today ? `Ce matin, ${when}` : `Le matin du ${when}`) : ""}${n.tr != null ? ` · disponibilité Garmin ${n.tr}` : ""}</div>
+      ${R.text ? `<div class="mtext">${R.text}</div>` : ""}
       <div class="kpis">${kpis}</div></div>
     <div class="factors">${factors ? `<div class="msub" style="margin:0 0 6px">Ce qui compose le score</div>${factors}` : ""}</div>`;
   const arc = $("rRingArc");
   if (arc) requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.transition = "stroke-dashoffset 1.1s cubic-bezier(.2,.8,.2,1)"; arc.setAttribute("stroke-dashoffset", C * (1 - s / 100)); }));
+}
+
+// ------------------------------------------------------------------ Score de récupération maison
+// 5 composantes notées sur 100, pondérées ; chacune est comparée à TES 30 jours précédents.
+const clamp = (v, a = 0, b = 100) => Math.max(a, Math.min(b, v));
+function baseline(d, key, floor) {
+  const i = RC.days.indexOf(d), prev = RC.days.slice(Math.max(0, i - 30), i).map(x => key(x)).filter(v => v != null && v > 0);
+  if (prev.length < 7) return null;
+  const m = prev.reduce((a, b) => a + b, 0) / prev.length, sd = Math.sqrt(prev.reduce((a, b) => a + (b - m) ** 2, 0) / prev.length);
+  return { m, sd: Math.max(sd, floor) };
+}
+function dayLoad(dt) { // charge d'une journée : charge d'entraînement Garmin, sinon minutes d'effort
+  const key = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  return (S.all || []).filter(a => a.d.slice(0, 10) === key).reduce((s, a) => s + (a.tl || a.mt / 60), 0);
+}
+function recoScore(d) {
+  const parts = [];
+  const add = (key, label, w, score, detail, good, bad) => { if (score != null && !isNaN(score)) parts.push({ key, label, w, score: Math.round(clamp(score)), detail, good, bad }); };
+  if (d.sl) {
+    add("dur", "Durée", 25, (d.sl / 3600 - 5) / 3 * 100, `${hm(d.sl / 60)} dormies, objectif 8 h`, "nuit longue", "nuit courte");
+    const tot = (d.deep || 0) + (d.light || 0) + (d.rem || 0);
+    if (tot) { const share = ((d.deep || 0) + (d.rem || 0)) / tot, aw = (d.awake || 0) / 60;
+      add("qual", "Qualité", 15, (share - .25) / .2 * 100 - Math.min(30, aw * .5), `profond + paradoxal ${Math.round(share * 100)} %, éveillé ${Math.round(aw)} min`, "sommeil profond et paradoxal bien présents", "sommeil morcelé ou léger"); }
+  }
+  const bh = baseline(d, x => x.hrv, 4);
+  if (d.hrv && bh) { const z = (d.hrv - bh.m) / bh.sd, dv = d.hrv - bh.m;
+    add("hrv", "VFC", 25, 55 + 22 * z, `${d.hrv} ms, ${dv >= 0 ? "+" : "−"}${nf(Math.abs(dv))} vs ta moyenne 30 j (${nf(bh.m)})`, "VFC au-dessus de ta moyenne", "VFC sous ta moyenne"); }
+  const rh = v => v.rhr ?? v.srhr, br = baseline(d, rh, 1.5);
+  if (rh(d) && br) { const z = (rh(d) - br.m) / br.sd, dv = rh(d) - br.m;
+    add("rhr", "Cœur au repos", 15, 55 - 22 * z, `${rh(d)} bpm, ${dv >= 0 ? "+" : "−"}${nf(Math.abs(dv), 1)} vs ta moyenne 30 j (${nf(br.m, 1)})`, "cœur au repos plus bas que d'habitude", "cœur au repos plus haut que d'habitude"); }
+  if (S.all && S.all.length) {
+    const day = k => { const t = new Date(d.dt); t.setDate(t.getDate() - k); return t; };
+    const acute = dayLoad(day(1)) + .5 * dayLoad(day(2));
+    let chronic = 0; for (let k = 2; k <= 29; k++) chronic += dayLoad(day(k)); chronic = chronic / 28 * 1.5;
+    if (chronic > 0) { const ratio = acute / chronic, km = (S.all || []).filter(a => a.d.slice(0, 10) === `${day(1).getFullYear()}-${pad(day(1).getMonth() + 1)}-${pad(day(1).getDate())}`).reduce((s, a) => s + a.km, 0);
+      add("load", "Charge récente", 20, 100 - 35 * Math.max(0, ratio - .6), `${km ? `${nf(km)} km la veille · ` : "repos la veille · "}${nf(ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces deux derniers jours"); }
+  }
+  if (parts.length < 2) return { score: null, parts };
+  const W = parts.reduce((a, p) => a + p.w, 0), score = Math.round(parts.reduce((a, p) => a + p.score * p.w, 0) / W);
+  const label = score >= 80 ? "Bien récupéré" : score >= 65 ? "Plutôt en forme" : score >= 50 ? "Récupération moyenne" : score >= 35 ? "Fatigue probable" : "Grosse fatigue";
+  const pos = parts.filter(p => p.score >= 70).sort((a, b) => b.score * b.w - a.score * a.w).slice(0, 2).map(p => p.good);
+  const neg = parts.filter(p => p.score < 45).sort((a, b) => a.score * b.w - b.score * a.w).slice(0, 2).map(p => p.bad);
+  const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const text = [pos.length ? `${cap(pos.join(" et "))}.` : "", neg.length ? `À surveiller : ${neg.join(", ")}.` : ""].filter(Boolean).join(" ");
+  return { score, label, parts, text };
 }
 
 // ------------------------------------------------------------------ La nuit (hypnogramme + contexte)
@@ -258,6 +302,70 @@ function renderCtx(n) {
     ${dst ? `<div class="flag">${dst}</div>` : ""}${nfo.late ? `<div class="flag">Effort terminé moins de 3 h avant le coucher</div>` : ""}`;
 }
 
+// ------------------------------------------------------------------ Cœur et VFC de la nuit sélectionnée
+function nightChart(el, d, key, opt) {
+  const box = $(el), pts = d[key] || [];
+  if (pts.length < 3 || !d.bedDt) { box.innerHTML = ""; return false; }
+  const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(260, Math.max(190, W * .5))), m = { l: 34, r: 10, t: 14, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const end = Math.max(pts[pts.length - 1][0], d.wakeDt ? (d.wakeDt - d.bedDt) / 6e4 : 0), start = Math.min(0, pts[0][0]);
+  const vals = pts.map(p => p[1]).concat(opt.band ? opt.band.filter(v => v != null) : []);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pv = (hi - lo) * .15 || 5; lo = Math.max(0, lo - pv); hi += pv;
+  const x = t => m.l + (t - start) / (end - start || 1) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.title}">`;
+  (d.hyp || []).forEach(([st, mins, k]) => { const a = (parseLocal(st) - d.bedDt) / 6e4; s += `<rect x="${x(a)}" y="${m.t}" width="${Math.max(0, x(a + mins) - x(a))}" height="${ih}" fill="${STAGES[k][1]}" opacity=".10"/>`; });
+  const stp = niceTicks(hi - lo, 4)[1] || 1; s += `<g class="axis">`;
+  for (let t = Math.ceil(lo / stp) * stp; t <= hi; t += stp) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${nf(t)}</text>`;
+  const h0 = new Date(d.bedDt); h0.setMinutes(0, 0, 0);
+  for (let t = h0.getTime() + 36e5; t < d.bedDt.getTime() + end * 6e4; t += 36e5) { const hh = new Date(t); if (W < 480 && hh.getHours() % 2) continue; s += `<text x="${x((t - d.bedDt) / 6e4)}" y="${H - 5}" text-anchor="middle">${pad(hh.getHours())} h</text>`; }
+  s += "</g>";
+  if (opt.band && opt.band[0] != null) s += `<rect x="${m.l}" y="${y(opt.band[1])}" width="${iw}" height="${Math.max(0, y(opt.band[0]) - y(opt.band[1]))}" fill="var(--teal)" opacity=".12"/>`;
+  const avg = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(avg)}" y2="${y(avg)}" stroke="var(--muted)" stroke-dasharray="4 4"/>`;
+  const dd = pts.map((p, i) => (i && p[0] - pts[i - 1][0] > 20 ? "M" : i ? "L" : "M") + x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join("");
+  s += `<path d="${dd}" fill="none" stroke="${opt.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const mn = pts.reduce((a, p) => p[1] < a[1] ? p : a), mx = pts.reduce((a, p) => p[1] > a[1] ? p : a);
+  const lab = (p, c, t, above) => { const tx = x(p[0]), anchor = tx > W - 60 ? "end" : tx < m.l + 40 ? "start" : "middle";
+    return `<circle cx="${tx}" cy="${y(p[1])}" r="4" fill="${c}" stroke="var(--card)" stroke-width="2"/><text x="${tx}" y="${y(p[1]) + (above ? -9 : 17)}" text-anchor="${anchor}" font-size="11.5" font-weight="700" fill="var(--ink)">${t} ${p[1]}</text>`; };
+  s += lab(mx, "var(--amber)", "max.", true) + lab(mn, "var(--accent)", "min.", false);
+  s += `<line id="${el}Cur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="${el}Hit"/></svg>`;
+  box.innerHTML = s;
+  const svg = box.querySelector("svg"), cur = $(el + "Cur"), hit = $(el + "Hit");
+  const stageAt = t => { const at = d.bedDt.getTime() + t * 6e4; const seg = (d.hyp || []).find(([st, mins]) => { const a = parseLocal(st).getTime(); return at >= a && at < a + mins * 6e4; }); return seg ? STAGES[seg[2]][0] : ""; };
+  const mv = e => { const r = svg.getBoundingClientRect(), t = start + ((e.clientX - r.left) * W / r.width - m.l) / iw * (end - start);
+    const p = pts.reduce((a, q) => Math.abs(q[0] - t) < Math.abs(a[0] - t) ? q : a);
+    cur.setAttribute("x1", x(p[0])); cur.setAttribute("x2", x(p[0])); cur.setAttribute("opacity", .5);
+    const st = stageAt(p[0]); showTip(e, `<b>${clock(new Date(d.bedDt.getTime() + p[0] * 6e4))}</b><br>${p[1]} ${opt.unit}${st ? ` · ${st}` : ""}`); };
+  hit.addEventListener("pointermove", mv); hit.addEventListener("pointerdown", mv); hit.addEventListener("pointerleave", () => { hideTip(); cur.setAttribute("opacity", 0); });
+  return { avg, mn, mx };
+}
+function prevNights(d, key, n = 20) { const i = RC.days.indexOf(d); return RC.days.slice(Math.max(0, i - n), i).filter(x => x[key] && x[key].length > 2); }
+const avgPts = p => p.reduce((a, q) => a + q[1], 0) / p.length;
+function renderNightHr() {
+  const d = RC.pick[RC.sel]; if (!d) return;
+  const st = nightChart("rHr", d, "nhr", { title: "Fréquence cardiaque pendant la nuit", color: "var(--rose)", unit: "bpm" });
+  if (st) {
+    $("rHrInfo").textContent = `moy. ${nf(st.avg)} · min. ${st.mn[1]} · max. ${st.mx[1]} bpm`;
+    const prev = prevNights(d, "nhr"), ref = prev.length >= 3 ? prev.reduce((a, x) => a + avgPts(x.nhr), 0) / prev.length : null;
+    const minAt = clock(new Date(d.bedDt.getTime() + st.mn[0] * 6e4));
+    $("rHrNote").innerHTML = `Point le plus bas à ${minAt}${ref != null ? ` · moyenne de la nuit <b>${Math.abs(st.avg - ref) < .5 ? "identique à" : `${nf(Math.abs(st.avg - ref), 1)} bpm ${st.avg < ref ? "sous" : "au-dessus de"}`}</b> tes ${prev.length} nuits précédentes` : ""}. Les bandes colorées suivent les phases de sommeil.`;
+  } else {
+    $("rHrInfo").textContent = "";
+    $("rHrNote").innerHTML = `${d.hrMin ? `Sur la journée : min. <b>${d.hrMin}</b> · moy. <b>${d.hrAvg ?? "–"}</b> · max. <b>${d.hrMax ?? "–"}</b> bpm. ` : ""}La courbe de nuit détaillée est disponible pour les 21 dernières nuits.`;
+  }
+}
+function renderNightHrv() {
+  const d = RC.pick[RC.sel]; if (!d) return;
+  const st = nightChart("rHrv", d, "nhrv", { title: "VFC pendant la nuit", color: "var(--accent)", unit: "ms", band: [d.hrvLo, d.hrvUp] });
+  if (st) {
+    $("rHrvInfo").textContent = `moy. ${nf(st.avg)} · pic ${st.mx[1]} ms`;
+    const bh = baseline(d, x => x.hrv, 4);
+    $("rHrvNote").innerHTML = `${d.hrv ? `Garmin retient <b>${d.hrv} ms</b> pour la nuit` : ""}${bh ? ` (ta moyenne 30 j : ${nf(bh.m)} ms)` : ""}. ${d.hrvLo ? `Zone verte : ta plage habituelle ${d.hrvLo}–${d.hrvUp} ms.` : ""}`;
+  } else {
+    $("rHrvInfo").textContent = "";
+    $("rHrvNote").innerHTML = `${d.hrv ? `VFC moyenne de la nuit : <b>${d.hrv} ms</b>${d.hrvLo ? ` (zone habituelle ${d.hrvLo}–${d.hrvUp})` : ""}. ` : "Pas de VFC pour cette nuit. "}La courbe détaillée est disponible pour les 21 dernières nuits.`;
+  }
+}
+
 // ------------------------------------------------------------------ Courbes temporelles génériques
 function tsChart(el, days, series, opt = {}) {
   const box = $(el);
@@ -295,16 +403,6 @@ function tsChart(el, days, series, opt = {}) {
 const legend = items => items.map(([l, c, dash]) => `<span><i style="background:${dash ? `repeating-linear-gradient(90deg,${c} 0 3px,transparent 3px 6px)` : c}"></i>${l}</span>`).join("");
 const avgOf = (arr, k) => { const v = arr.map(d => d[k]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
 
-function renderHr(P) {
-  const ser = [{ k: "hrMax", l: "Plus haut", c: "var(--amber)", u: "bpm" }, { k: "hrAvg", l: "Moyenne", c: "var(--accent-2)", u: "bpm", w: 2.4 }, { k: "hrMin", l: "Plus bas", c: "var(--accent)", u: "bpm" }, { k: "rhr", l: "Repos", c: "var(--teal)", u: "bpm", dash: "4 4", w: 1.6 }];
-  const a = k => { const v = avgOf(P, k); return v == null ? "" : ` ${nf(v)}`; };
-  $("rHrLeg").innerHTML = legend([[`Plus haut${a("hrMax")}`, "var(--amber)"], [`Moyenne${a("hrAvg")}`, "var(--accent-2)"], [`Plus bas${a("hrMin")}`, "var(--accent)"], [`Repos${a("rhr")}`, "var(--teal)", 1]]);
-  tsChart("rHr", P, ser, { band: ["hrMin", "hrMax", "var(--accent-2)", .08], h: 260 });
-}
-function renderHrv(P) {
-  $("rHrvLeg").innerHTML = legend([["Nuit", "var(--accent)"], ["Moy. 7 j", "var(--muted)", 1], ["Zone habituelle", "var(--teal)"]]);
-  tsChart("rHrv", P, [{ k: "hrv", l: "VFC", c: "var(--accent)", u: "ms" }, { k: "hrv7", l: "Moy. 7 j", c: "var(--muted)", u: "ms", dash: "4 4", w: 1.5 }], { band: ["hrvLo", "hrvUp", "var(--teal)", .16], tipExtra: d => d.hrvSt ? `<br>Statut : ${HRV_ST[d.hrvSt] || d.hrvSt}` : "" });
-}
 function renderSleep(P) {
   const box = $("rSleep"), N = P.filter(d => d.sl);
   if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; return; }

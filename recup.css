@@ -45,10 +45,12 @@ html.night .chip[aria-pressed="true"]{background:var(--accent);border-color:var(
 .kpi .v{font-size:22px;font-weight:800;font-stretch:108%;letter-spacing:-.01em;white-space:nowrap}
 .kpi .v small{font-size:.55em;color:var(--muted);font-weight:600;margin-left:2px}
 .kpi .s{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.factors .f{display:grid;grid-template-columns:110px 1fr 38px;gap:10px;align-items:center;font-size:13px;margin:7px 0}
+.factors .f{display:grid;grid-template-columns:110px 1fr 30px;gap:2px 10px;align-items:center;font-size:13px;margin:9px 0}
 .factors .f .tr{height:8px;background:var(--h0);border-radius:999px;overflow:hidden}
 .factors .f .tr div{height:100%;border-radius:999px}
 .factors .f .num{text-align:right;color:var(--muted)}
+.factors .f small{grid-column:1/-1;margin-top:-5px;font-size:11.5px;color:var(--muted)}
+.mtext{font-size:14px;margin:-6px 0 14px;line-height:1.4}
 
 /* ------------------------------------------------------------------ Navigation par jour */
 .mnav{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-4px 0 6px}
