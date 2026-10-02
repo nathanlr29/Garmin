@@ -465,7 +465,7 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
 function renderRecords(acts){
   const out=acts.filter(a=>!isIndoor(a));
   const longest=maxBy(acts,a=>a.km),climb=maxBy(acts,a=>a.el),fast=maxBy(out.filter(a=>a.km>=40&&a.mt>0),a=>a.km/a.mt),
-        watts=maxBy(acts.filter(a=>a.w>0&&a.mt>=1800),a=>a.w),vmax=maxBy(out,a=>a.vmax),dur=maxBy(acts,a=>a.mt);
+        watts=maxBy(acts.filter(a=>RIDE_TYPES.has(a.t)&&a.w>0&&a.mt>=1800),a=>a.w),vmax=maxBy(out,a=>a.vmax),dur=maxBy(acts,a=>a.mt);
   const wk={};acts.forEach(a=>{const k=weekKey(a.dt);wk[k]=(wk[k]||0)+a.km});
   const bw=Object.entries(wk).sort((a,b)=>b[1]-a[1])[0];
   const r=[];
