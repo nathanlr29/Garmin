@@ -109,11 +109,13 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 
 /* Records */
 .records{display:grid;gap:2px}
-.rec{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:baseline}
 .rec:last-child{border-bottom:0}
 .rec .k{color:var(--muted);font-size:13.5px}
-.rec .val{font-weight:700;text-align:right}
-.rec .val small{display:block;font-weight:400;color:var(--muted);font-size:12px;max-width:52vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec .val{font-weight:700;text-align:right;min-width:0}
+.rec .rs{grid-column:1/-1;display:flex;justify-content:flex-end;gap:4px;color:var(--muted);font-size:12px;white-space:nowrap;min-width:0}
+.rec .rs .rn{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.rec .rs .rd{flex:0 0 auto}
 
 /* Rides */
 .rides{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -467,14 +469,14 @@ function renderRecords(acts){
   const wk={};acts.forEach(a=>{const k=weekKey(a.dt);wk[k]=(wk[k]||0)+a.km});
   const bw=Object.entries(wk).sort((a,b)=>b[1]-a[1])[0];
   const r=[];
-  const add=(k,v,a)=>r.push(`<div class="rec"><span class="k">${k}</span><span class="val">${v}${a?`<small>${esc(a.n)} · ${fmtDate(a.dt)}</small>`:""}</span></div>`);
+  const add=(k,v,a,sub)=>r.push(`<div class="rec"><span class="k">${k}</span><span class="val">${v}</span>${a?`<small class="rs"><span class="rn">${esc(a.n)}</span><span class="rd">· ${fmtDate(a.dt)}</span></small>`:sub?`<small class="rs"><span class="rd">${sub}</span></small>`:""}</div>`);
   if(longest) add("Plus longue",`${nf(longest.km,1)} km`,longest);
   if(climb&&climb.el) add("Plus de dénivelé",`${nf(climb.el)} m`,climb);
   if(dur) add("Plus longue durée",hfmt(dur.mt),dur);
   if(fast) add("Plus rapide (≥ 40 km)",`${nf(fast.km/fast.mt*3600,1)} km/h`,fast);
   if(watts) add("Puissance moyenne",`${nf(watts.w)} W`,watts);
   if(vmax&&vmax.vmax) add("Vitesse max",`${nf(vmax.vmax,1)} km/h`,vmax);
-  if(bw) add("Plus grosse semaine",`${nf(bw[1])} km<small>sem. du ${new Date(+bw[0]).toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}</small>`);
+  if(bw) add("Plus grosse semaine",`${nf(bw[1])} km`,null,`sem. du ${new Date(+bw[0]).toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`);
   document.getElementById("records").innerHTML=r.join("")||`<div class="empty">Aucune sortie</div>`;
 }
 
