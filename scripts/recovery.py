@@ -69,6 +69,29 @@ def local_from_gmt_ms(ms):
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).astimezone(TZ)
 
 
+def any_time(v):
+    """Horodatage Garmin (ms epoch ou chaîne GMT) -> datetime locale."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return local_from_gmt_ms(v)
+    return parse_gmt(v)
+
+
+def series(items, bed, val_keys, time_keys):
+    """[[minutes depuis le coucher, valeur], ...] moyenné par tranches de 5 min."""
+    buckets = {}
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        v = next((it[k] for k in val_keys if isinstance(it.get(k), (int, float)) and not isinstance(it.get(k), bool)), None)
+        t = next((any_time(it[k]) for k in time_keys if it.get(k)), None)
+        if v is None or v <= 0 or t is None:
+            continue
+        m = int((t - bed).total_seconds() // 60)
+        if -30 <= m <= 16 * 60:
+            buckets.setdefault(m // 5 * 5, []).append(v)
+    return [[m, round(sum(v) / len(v))] for m, v in sorted(buckets.items())]
+
+
 def parse_gmt(s):
     """'2026-10-01T22:10:00.0' (GMT) -> datetime locale."""
     if not s:
@@ -78,6 +101,10 @@ def parse_gmt(s):
     except ValueError:
         return None
     return dt.replace(tzinfo=timezone.utc).astimezone(TZ)
+
+
+def parse_local_iso(s):
+    return datetime.fromisoformat(s).replace(tzinfo=TZ)
 
 
 def safe(fn, *a):
@@ -149,8 +176,18 @@ def fetch_day(api, d, with_hypno):
                 if s and e and k:
                     segs.append([s.strftime("%Y-%m-%dT%H:%M"), round((e - s).total_seconds() / 60), k])
             rec["hyp"] = segs
+        if with_hypno and st:
+            rec["nhr"] = series(sl.get("sleepHeartRate"), st, ("value",), ("startGMT", "startTimeGMT"))
+            rec["nv"] = 2
 
-    hrv = (safe(api.get_hrv_data, ds) or {}).get("hrvSummary") or {}
+    hrv_full = safe(api.get_hrv_data, ds) or {}
+    hrv = hrv_full.get("hrvSummary") or {}
+    if with_hypno and rec.get("bed"):
+        bed = parse_local_iso(rec["bed"])
+        pts = series(hrv_full.get("hrvReadings"), bed, ("hrvValue", "value"), ("readingTimeGMT", "startGMT"))
+        if not pts:
+            pts = series(sl.get("hrvData"), bed, ("value", "hrvValue"), ("startGMT", "readingTimeGMT"))
+        rec["nhrv"] = pts
     if hrv:
         b = hrv.get("baseline") or {}
         rec.update({
@@ -310,8 +347,11 @@ def run(api):
     today = datetime.now(TZ).date()
     all_dates = [START + timedelta(days=i) for i in range((today - START).days + 1)]
     recent = all_dates[-REFRESH_DAYS:]
-    missing = [d for d in reversed(all_dates[:-REFRESH_DAYS]) if not days.get(d.isoformat(), {}).get("f")][:BACKFILL_PER_RUN]
     hypno_from = today - timedelta(days=HYPNO_NIGHTS)
+    def todo(d):
+        r = days.get(d.isoformat(), {})
+        return not r.get("f") or (d >= hypno_from and r.get("sl") and r.get("nv") != 2)
+    missing = [d for d in reversed(all_dates[:-REFRESH_DAYS]) if todo(d)][:BACKFILL_PER_RUN]
 
     for d in recent + missing:
         old_wx = days.get(d.isoformat(), {}).get("wx")
@@ -322,7 +362,8 @@ def run(api):
     # on retire le détail des phases des nuits trop anciennes (fichier léger)
     for k, v in days.items():
         if k < hypno_from.isoformat():
-            v.pop("hyp", None)
+            for f in ("hyp", "nhr", "nhrv"):
+                v.pop(f, None)
 
     wx = weather(lat, lon, START, today)
     for k, v in wx.items():
