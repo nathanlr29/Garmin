@@ -1,0 +1,86 @@
+name: Mise à jour Garmin
+
+on:
+  schedule:
+    - cron: "17 * * * *"      # toutes les heures (GitHub peut décaler de quelques minutes)
+  workflow_dispatch:           # bouton « Run workflow » pour forcer une mise à jour
+    inputs:
+      full:
+        description: "Tout re-télécharger"
+        type: boolean
+        default: false
+  push:
+    branches: [main]           # quand tu modifies config.json ou la page
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: garmin-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer la bibliothèque Garmin
+        run: pip install --quiet "garminconnect>=0.3.17,<0.4"
+
+      - name: Récupérer les activités Garmin
+        env:
+          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
+          GARMIN_KEY: ${{ secrets.GARMIN_KEY }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}         # facultatif (plan B)
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}   # facultatif (plan B)
+          FULL_SYNC: ${{ inputs.full && '1' || '0' }}
+        run: python scripts/fetch_garmin.py
+
+      - name: Sauvegarder les données dans le dépôt
+        id: save
+        if: success() || failure()   # garde les jetons renouvelés même si la récup a échoué
+        run: |
+          git config user.name "garmin-bot"
+          git config user.email "garmin-bot@users.noreply.github.com"
+          git add data/ .garmin/ 2>/dev/null || git add data/
+          if git diff --cached --quiet -- data/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --cached --quiet; then
+            echo "Rien de nouveau."
+          else
+            git commit -m "Mise à jour Garmin"
+            git push
+          fi
+
+      - name: Préparer le site
+        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        run: |
+          mkdir -p _site
+          cp -r index.html config.json manifest.webmanifest icon-180.png icon-512.png data _site/
+
+      - uses: actions/configure-pages@v5
+        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+
+      - uses: actions/upload-pages-artifact@v3
+        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        with:
+          path: _site
+
+      - name: Publier le site
+        id: deploy
+        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        uses: actions/deploy-pages@v4
