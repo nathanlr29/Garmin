@@ -36,12 +36,13 @@ jobs:
           python-version: "3.12"
 
       - name: Installer la bibliothèque Garmin
-        run: pip install --quiet "garminconnect>=0.3.17,<0.4"
+        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography
 
       - name: Récupérer les activités Garmin
         env:
           GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
           GARMIN_KEY: ${{ secrets.GARMIN_KEY }}
+          RECUP_CODE: ${{ secrets.RECUP_CODE }}             # code de l'onglet Récup
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}         # facultatif (plan B)
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}   # facultatif (plan B)
           FULL_SYNC: ${{ inputs.full && '1' || '0' }}
@@ -70,7 +71,7 @@ jobs:
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
         run: |
           mkdir -p _site
-          cp -r index.html config.json manifest.webmanifest icon-180.png icon-512.png data _site/
+          cp -r index.html recup.js recup.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
 
       - uses: actions/configure-pages@v5
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
