@@ -111,6 +111,17 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 .records{display:grid;gap:2px}
 .rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:baseline}
 .rec:last-child{border-bottom:0}
+a.rec{color:inherit;text-decoration:none;border-radius:8px}
+a.rec:hover .val{color:var(--accent)}
+a.rec:hover .rn{text-decoration:underline}
+a.rec .rd::after{content:" ↗";color:var(--accent)}
+#heat rect.has{cursor:pointer}
+.pop{position:fixed;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px -12px rgba(0,0,0,.35);padding:8px;min-width:220px;max-width:min(320px,calc(100vw - 16px));display:none}
+.pop b{display:block;font-size:12px;color:var(--muted);font-weight:600;padding:4px 8px 6px}
+.pop a{display:flex;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:13.5px}
+.pop a:hover{background:var(--bg)}
+.pop a span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pop a span:last-child{flex:0 0 auto;color:var(--accent);font-weight:600}
 .rec .k{color:var(--muted);font-size:13.5px}
 .rec .val{font-weight:700;text-align:right;min-width:0}
 .rec .rs{grid-column:1/-1;display:flex;justify-content:flex-end;gap:4px;color:var(--muted);font-size:12px;white-space:nowrap;min-width:0}
@@ -169,6 +180,7 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
   <footer>Données Garmin Connect · Page générée automatiquement</footer>
 </div>
 <div class="tip" id="tip"></div>
+<div class="pop" id="pop" role="dialog"></div>
 
 <script>
 "use strict";
@@ -370,6 +382,13 @@ function renderTiles(acts,Y){
 const tip=document.getElementById("tip");
 function showTip(e,html){tip.innerHTML=html;tip.style.opacity=1;const x=Math.min(innerWidth-tip.offsetWidth-8,Math.max(8,e.clientX-tip.offsetWidth/2));tip.style.left=x+"px";tip.style.top=(e.clientY-tip.offsetHeight-12)+"px"}
 function hideTip(){tip.style.opacity=0}
+function actUrl(a){return `https://connect.garmin.com/modern/activity/${a.id}`}
+const pop=document.getElementById("pop");
+function showPop(e,html){pop.innerHTML=html;pop.style.display="block";const x=Math.min(innerWidth-pop.offsetWidth-8,Math.max(8,e.clientX-pop.offsetWidth/2));let y=e.clientY+12;if(y+pop.offsetHeight>innerHeight-8)y=e.clientY-pop.offsetHeight-12;pop.style.left=x+"px";pop.style.top=Math.max(8,y)+"px"}
+function hidePop(){pop.style.display="none"}
+document.addEventListener("click",e=>{if(!pop.contains(e.target))hidePop()});
+document.addEventListener("scroll",hidePop,{passive:true});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")hidePop()});
 document.addEventListener("scroll",hideTip,{passive:true});
 
 function renderCum(cur,prev,todayIdx,isCur,Y){
@@ -459,6 +478,12 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
   box.querySelector("svg").addEventListener("pointermove",e=>{const r=e.target.closest("rect[data-i]");if(!r)return hideTip();const i=+r.dataset.i,d=new Date(Y,0,1+i);
     const L=byDay[i]||[];showTip(e,`<b>${d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</b><br>${L.length?L.map(a=>`${esc(a.n).slice(0,34)} · ${nf(a.km,1)} km`).join("<br>"):"Repos"}`)});
   box.querySelector("svg").addEventListener("pointerleave",hideTip);
+  box.querySelectorAll("rect[data-i]").forEach(r=>{if(byDay[+r.dataset.i])r.classList.add("has")});
+  box.querySelector("svg").addEventListener("click",e=>{const r=e.target.closest("rect[data-i]");if(!r)return;const L=byDay[+r.dataset.i];if(!L)return;
+    hideTip();e.stopPropagation();
+    if(L.length===1){window.open(actUrl(L[0]),"_blank","noopener");return}
+    const d=new Date(Y,0,1+(+r.dataset.i));
+    showPop(e,`<b>${d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</b>`+L.map(a=>`<a href="${actUrl(a)}" target="_blank" rel="noopener"><span>${esc(a.n)}</span><span>${nf(a.km,1)} km ↗</span></a>`).join(""))});
   if(isCur) wrap.scrollLeft=Math.max(0,30+Math.floor((todayIdx+off)/7)*pitch-wrap.clientWidth+60);
 }
 
@@ -469,7 +494,7 @@ function renderRecords(acts){
   const wk={};acts.forEach(a=>{const k=weekKey(a.dt);wk[k]=(wk[k]||0)+a.km});
   const bw=Object.entries(wk).sort((a,b)=>b[1]-a[1])[0];
   const r=[];
-  const add=(k,v,a,sub)=>r.push(`<div class="rec"><span class="k">${k}</span><span class="val">${v}</span>${a?`<small class="rs"><span class="rn">${esc(a.n)}</span><span class="rd">· ${fmtDate(a.dt)}</span></small>`:sub?`<small class="rs"><span class="rd">${sub}</span></small>`:""}</div>`);
+  const add=(k,v,a,sub)=>r.push(a?`<a class="rec" href="${actUrl(a)}" target="_blank" rel="noopener" title="Ouvrir dans Garmin Connect"><span class="k">${k}</span><span class="val">${v}</span><small class="rs"><span class="rn">${esc(a.n)}</span><span class="rd">· ${fmtDate(a.dt)}</span></small></a>`:`<div class="rec"><span class="k">${k}</span><span class="val">${v}</span>${sub?`<small class="rs"><span class="rd">${sub}</span></small>`:""}</div>`);
   if(longest) add("Plus longue",`${nf(longest.km,1)} km`,longest);
   if(climb&&climb.el) add("Plus de dénivelé",`${nf(climb.el)} m`,climb);
   if(dur) add("Plus longue durée",hfmt(dur.mt),dur);
@@ -546,7 +571,7 @@ function traceSvg(pts){
 function renderRides(){
   const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];
   const L=S.all.filter(sp.f).slice(innerWidth<520?-5:-9).reverse();
-  document.getElementById("rides").innerHTML=L.map(a=>`<a class="ride" href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">
+  document.getElementById("rides").innerHTML=L.map(a=>`<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
     <div class="map">${isIndoor(a)?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
     <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${isIndoor(a)?' · <span class="indoor">HOME TRAINER</span>':""}</div>
     <div class="st"><span><b>${nf(a.km,1)}</b> km</span>${a.el?`<span><b>${nf(a.el)}</b> m D+</span>`:""}<span><b>${hfmt(a.mt)}</b></span>${a.mt&&!isIndoor(a)?`<span><b>${nf(a.km/a.mt*3600,1)}</b> km/h</span>`:a.w?`<span><b>${a.w}</b> W</span>`:""}</div></div></a>`).join("")||`<div class="empty">Aucune sortie</div>`;
