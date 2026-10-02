@@ -225,6 +225,14 @@ def main():
                 # None = pas de GPS : mémorisé pour ne pas redemander à chaque passage
                 new_traces[i] = fetch_trace(api, i, radius)
                 time.sleep(0.3)
+        # Onglet Récup (sommeil, VFC, FC…) : une erreur ici ne bloque pas les sorties vélo
+        try:
+            import recovery
+            recovery.run(api)
+        except GarminConnectTooManyRequestsError:
+            print("Récup : Garmin limite les requêtes (429), on réessaiera au prochain passage.")
+        except Exception as e:
+            print(f"Récup : erreur {type(e).__name__} : {e}")
     except GarminConnectTooManyRequestsError:
         sys.exit("Garmin limite les requêtes (429). Le prochain passage réessaiera.")
     finally:
