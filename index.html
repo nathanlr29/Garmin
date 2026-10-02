@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mes kilomètres</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Mes km">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f3ee; --card:#fffdf9; --ink:#1b1a18; --muted:#77716a; --line:#e7e1d8;
+  --accent:#e8501c; --accent-2:#f39a3d; --accent-soft:#fbe3d6; --ghost:#cfc7bb;
+  --good:#2f8f5b; --bad:#c2410c;
+  --h0:#ece7df; --h1:#f9cfb6; --h2:#f4a274; --h3:#ec7238; --h4:#d2460f; --h5:#8f2a05;
+  --shadow:0 1px 0 rgba(0,0,0,.03),0 8px 24px -16px rgba(60,40,20,.25);
+  --radius:20px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#121110; --card:#1c1a18; --ink:#f3efe9; --muted:#9a938a; --line:#2c2926;
+  --accent:#ff6a2b; --accent-2:#ffab52; --accent-soft:#3a2216; --ghost:#4a4540;
+  --h0:#262321; --h1:#4d2a1a; --h2:#7c3818; --h3:#b94a17; --h4:#ec6a2c; --h5:#ffb27a;
+  --shadow:0 1px 0 rgba(255,255,255,.02),0 8px 24px -16px rgba(0,0,0,.8);
+}}
+:root[data-theme="dark"]{
+  --bg:#121110; --card:#1c1a18; --ink:#f3efe9; --muted:#9a938a; --line:#2c2926;
+  --accent:#ff6a2b; --accent-2:#ffab52; --accent-soft:#3a2216; --ghost:#4a4540;
+  --h0:#262321; --h1:#4d2a1a; --h2:#7c3818; --h3:#b94a17; --h4:#ec6a2c; --h5:#ffb27a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);min-height:100vh}
+.wrap{max-width:1120px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:end;justify-content:space-between;margin-bottom:18px}
+h1{font-size:15px;font-weight:600;letter-spacing:.02em;color:var(--muted);text-transform:uppercase}
+.updated{font-size:12.5px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.updated a{color:var(--accent);text-decoration:none;font-weight:600}
+.controls{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;max-width:100%}
+.chips::-webkit-scrollbar{display:none}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 13px;
+  font:inherit;font-size:13.5px;font-weight:500;cursor:pointer;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.sep{width:1px;background:var(--line);margin:4px 2px}
+
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);min-width:0}
+.card h2{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-bottom:12px;
+  display:flex;justify-content:space-between;gap:6px 12px;align-items:baseline;flex-wrap:wrap}
+.card h2 small{text-transform:none;letter-spacing:0;font-weight:500}
+.span12{grid-column:span 12}.span8{grid-column:span 8}.span6{grid-column:span 6}.span4{grid-column:span 4}
+@media (max-width:860px){.span8,.span6,.span4{grid-column:span 12}}
+
+/* Hero */
+.hero{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:center;overflow:hidden;position:relative}
+@media (max-width:700px){.hero{grid-template-columns:1fr}}
+.big{font-weight:850;font-stretch:118%;font-size:clamp(68px,17vw,148px);line-height:.88;letter-spacing:-.035em}
+.big .unit{font-size:.3em;font-weight:700;letter-spacing:0;color:var(--muted);margin-left:.15em}
+.sub{color:var(--muted);margin-top:8px;font-size:15px}
+.delta{display:inline-block;margin-top:12px;padding:4px 10px;border-radius:999px;font-weight:600;font-size:13.5px;background:var(--accent-soft);color:var(--accent)}
+.goal{display:flex;flex-direction:column;gap:10px}
+.goalbar{height:14px;border-radius:999px;background:var(--h0);position:relative;overflow:visible}
+.goalbar .fill{position:absolute;inset:0 auto 0 0;border-radius:999px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+.goalbar .tick{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink);opacity:.55;border-radius:2px}
+.goalrow{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+.goalrow b{color:var(--ink);font-weight:650}
+.goalnote{font-size:14px}
+.goalnote b{font-weight:650}
+
+/* Tiles */
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media (max-width:860px){.tiles{grid-template-columns:repeat(2,1fr);gap:10px}}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
+.tile .l{font-size:12.5px;color:var(--muted);font-weight:500}
+.tile .v{font-size:clamp(22px,5.4vw,30px);font-weight:800;font-stretch:110%;letter-spacing:-.02em;line-height:1.15;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .v small{font-size:.5em;font-weight:600;color:var(--muted);margin-left:2px;letter-spacing:0}
+.tile .s{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Charts */
+svg{display:block;width:100%;height:auto;overflow:visible}
+.axis text{fill:var(--muted);font-size:11px}
+.gridline{stroke:var(--line);stroke-width:1}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.heatwrap{overflow-x:auto;scrollbar-width:thin;padding-bottom:4px}
+.heatlegend{display:flex;gap:4px;align-items:center;font-size:11.5px;color:var(--muted);justify-content:flex-end;margin-top:8px}
+.heatlegend span{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+/* Anecdotes */
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:860px){.facts{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.facts{grid-template-columns:1fr}}
+.fact{border-radius:16px;padding:16px;background:var(--bg);border:1px solid var(--line);display:flex;gap:14px;align-items:flex-start}
+.fact .n{font-weight:850;font-stretch:115%;font-size:28px;line-height:1;color:var(--accent);letter-spacing:-.02em;min-width:64px}
+.fact .t{font-size:14px;line-height:1.35}
+.fact .t small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-transform:none;letter-spacing:0}
+
+/* Records */
+.records{display:grid;gap:2px}
+.rec{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.rec:last-child{border-bottom:0}
+.rec .k{color:var(--muted);font-size:13.5px}
+.rec .val{font-weight:700;text-align:right}
+.rec .val small{display:block;font-weight:400;color:var(--muted);font-size:12px;max-width:52vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Rides */
+.rides{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:860px){.rides{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.rides{grid-template-columns:1fr}}
+.ride{border:1px solid var(--line);border-radius:16px;padding:14px;background:var(--bg);display:grid;grid-template-columns:84px 1fr;gap:12px;align-items:center;text-decoration:none;color:inherit}
+.ride .map{width:84px;height:84px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
+.ride .map svg{width:76px;height:76px}
+.ride .nm{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ride .dt{font-size:12.5px;color:var(--muted)}
+.ride .st{display:flex;gap:10px;font-size:13px;margin-top:6px;flex-wrap:wrap}
+.ride .st b{font-weight:700}
+.indoor{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.05em}
+
+/* Habits */
+.hbar{display:grid;grid-template-columns:34px 1fr 64px;gap:10px;align-items:center;font-size:13px;margin:6px 0}
+.hbar .tr{height:10px;border-radius:999px;background:var(--h0);overflow:hidden}
+.hbar .tr div{height:100%;background:var(--accent);border-radius:999px}
+.hbar .num{text-align:right;color:var(--muted)}
+.split{display:flex;height:12px;border-radius:999px;overflow:hidden;margin:8px 0 6px;background:var(--h0)}
+.split div:first-child{background:var(--accent)}
+.split div:last-child{background:var(--ghost)}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:600}
+th:first-child,td:first-child{text-align:left}
+tr.cur td{font-weight:700}
+.yearbar{height:6px;border-radius:999px;background:var(--accent);opacity:.85}
+
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:8px;opacity:0;transition:opacity .12s;z-index:9;white-space:nowrap}
+footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="title">Mes kilomètres</h1>
+      <div class="updated" id="updated">Chargement…</div>
+    </div>
+    <div class="controls">
+      <div class="chips" id="years" role="group" aria-label="Année"></div>
+      <div class="chips" id="sports" role="group" aria-label="Type d'activité"></div>
+    </div>
+  </header>
+  <main id="app"></main>
+  <footer>Données Garmin Connect · Page générée automatiquement</footer>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+// ------------------------------------------------------------------ Config & state
+const RIDE_TYPES = new Set(["Ride","VirtualRide","GravelRide","MountainBikeRide","EBikeRide","EMountainBikeRide","Velomobile","Handcycle"]);
+const SPORTS = [
+  {id:"bike", label:"Vélo", f:a=>RIDE_TYPES.has(a.t)},
+  {id:"out", label:"Extérieur", f:a=>RIDE_TYPES.has(a.t) && !isIndoor(a)},
+  {id:"in", label:"Home trainer", f:a=>RIDE_TYPES.has(a.t) && isIndoor(a)},
+  {id:"all", label:"Tout", f:()=>true},
+];
+const MONTHS = ["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
+const MONTHS_FULL = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+const DAYS = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+const DAYS_FULL = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"];
+const nf = (n,d=0)=>new Intl.NumberFormat("fr-FR",{maximumFractionDigits:d,minimumFractionDigits:d}).format(n);
+const S = {all:[], traces:{}, meta:{}, cfg:{}, year:null, sport:"bike", factSeed:0};
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+function isIndoor(a){return a.t==="VirtualRide" || a.tr===1}
+function parseLocal(s){const [d,t="00:00:00"]=s.split("T");const [y,m,dd]=d.split("-").map(Number);const [h,mi,se]=t.split(":").map(Number);return new Date(y,m-1,dd,h||0,mi||0,se||0)}
+function dayOfYear(dt){return Math.floor((Date.UTC(dt.getFullYear(),dt.getMonth(),dt.getDate())-Date.UTC(dt.getFullYear(),0,1))/864e5)}
+function daysInYear(y){return (y%4===0&&y%100!==0)||y%400===0?366:365}
+function wd(dt){return (dt.getDay()+6)%7} // 0 = lundi
+function hfmt(sec){const h=Math.floor(sec/3600),m=Math.round(sec%3600/60);return h?`${h} h ${String(m).padStart(2,"0")}`:`${m} min`}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fmtDate(dt,withYear){return dt.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short",...(withYear?{year:"numeric"}:{})})}
+
+// ------------------------------------------------------------------ Data loading
+async function getJSON(url,fallback){
+  try{const r=await fetch(url+"?v="+Date.now(),{cache:"no-store"});if(!r.ok)throw 0;return await r.json()}catch(e){return fallback}
+}
+async function load(){
+  const [acts,traces,meta,cfg]=await Promise.all([
+    getJSON("data/activities.json",[]),getJSON("data/traces.json",{}),getJSON("data/meta.json",{}),getJSON("config.json",{})]);
+  const sig=(meta.updated_at||"")+acts.length;
+  if(sig===S.sig) return;               // rien de neuf
+  S.sig=sig;
+  S.all=acts.map(a=>({...a,dt:parseLocal(a.d),km:a.m/1000}));
+  S.traces=traces; S.meta=meta; S.cfg=cfg;
+  const years=[...new Set(S.all.map(a=>a.dt.getFullYear()))].sort((a,b)=>b-a);
+  const now=new Date().getFullYear();
+  if(!years.includes(now)) years.unshift(now);
+  S.years=years;
+  if(S.year==null){S.year=+(store.get("year"))||now; if(!years.includes(S.year)) S.year=now}
+  S.sport=store.get("sport")||S.sport;
+  render();
+}
+
+// ------------------------------------------------------------------ Helpers on sets
+function filt(year){const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];return S.all.filter(a=>sp.f(a)&&(year==null||a.dt.getFullYear()===year))}
+function sum(arr,f){let s=0;for(const a of arr)s+=f(a);return s}
+function maxBy(arr,f){let b=null,bv=-Infinity;for(const a of arr){const v=f(a);if(v>bv){bv=v;b=a}}return b}
+function cumByDay(acts,year){
+  const n=daysInYear(year),d=new Array(n).fill(0);
+  for(const a of acts) d[dayOfYear(a.dt)]+=a.km;
+  const c=[];let s=0;for(let i=0;i<n;i++){s+=d[i];c.push(s)}
+  return {daily:d,cum:c};
+}
+function weekKey(dt){const t=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()-wd(dt));return t.getTime()}
+
+// ------------------------------------------------------------------ Render
+function render(){
+  document.title=S.cfg.titre||"Mes kilomètres";
+  document.getElementById("title").textContent=S.cfg.titre||"Mes kilomètres";
+  renderUpdated(); renderChips();
+  const app=document.getElementById("app");
+  if(!S.all.length){
+    app.innerHTML=`<div class="card empty"><b>Pas encore de données</b>Lance le workflow « Mise à jour Garmin » dans l'onglet Actions de ton dépôt GitHub, puis reviens ici dans une minute.</div>`;
+    return;
+  }
+  const Y=S.year, now=new Date(), isCur=Y===now.getFullYear();
+  const acts=filt(Y), prev=filt(Y-1);
+  const todayIdx=isCur?dayOfYear(now):daysInYear(Y)-1;
+  const cur=cumByDay(acts,Y), pv=cumByDay(prev,Y-1);
+  const km=cur.cum[cur.cum.length-1];
+  const prevSameDate=pv.cum[Math.min(todayIdx,pv.cum.length-1)]||0;
+
+  app.innerHTML=`
+  <div class="grid">
+    <section class="card hero span12" id="hero"></section>
+    <section class="span12"><div class="tiles" id="tiles"></div></section>
+    <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
+    <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>
+    <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="shuffle">Autres anecdotes</button></h2><div class="facts" id="facts"></div></section>
+    <section class="card span6"><h2>Par mois <span class="legend"><span><i style="background:var(--accent)"></i>${Y}</span><span><i style="background:var(--ghost)"></i>${Y-1}</span></span></h2><div id="months"></div></section>
+    <section class="card span6"><h2>Habitudes</h2><div id="habits"></div></section>
+    <section class="card span12"><h2>Calendrier ${Y} <small id="heatInfo"></small></h2><div class="heatwrap" id="heatwrap"><div id="heat"></div></div>
+      <div class="heatlegend">moins <span style="background:var(--h0)"></span><span style="background:var(--h1)"></span><span style="background:var(--h2)"></span><span style="background:var(--h3)"></span><span style="background:var(--h4)"></span><span style="background:var(--h5)"></span> plus</div></section>
+    <section class="card span12"><h2>Dernières sorties</h2><div class="rides" id="rides"></div></section>
+    <section class="card span12"><h2>Toutes les années</h2><div id="years-table"></div></section>
+  </div>`;
+
+  renderHero(acts,km,prevSameDate,isCur,todayIdx,Y,prev);
+  renderTiles(acts,Y);
+  renderCum(cur.cum,pv.cum,todayIdx,isCur,Y);
+  renderRecords(acts);
+  renderFacts(acts,Y,isCur,todayIdx);
+  renderMonths(acts,prev,Y);
+  renderHabits(acts);
+  renderHeat(cur.daily,Y,isCur,todayIdx,acts);
+  renderRides();
+  renderYears();
+  document.getElementById("shuffle").onclick=()=>{S.factSeed++;renderFacts(acts,Y,isCur,todayIdx)};
+}
+
+function renderUpdated(){
+  const el=document.getElementById("updated");
+  const u=S.meta.updated_at?new Date(S.meta.updated_at):null;
+  let txt="Jamais synchronisé";
+  if(u){const m=Math.round((Date.now()-u)/6e4);
+    txt=m<1?"Mis à jour à l'instant":m<60?`Mis à jour il y a ${m} min`:m<1440?`Mis à jour il y a ${Math.round(m/60)} h`:`Mis à jour le ${u.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`}
+  let repo=S.cfg.depot;
+  if(!repo&&location.hostname.endsWith("github.io")){const user=location.hostname.split(".")[0];const name=location.pathname.split("/").filter(Boolean)[0]||`${user}.github.io`;repo=`${user}/${name}`}
+  el.innerHTML=esc(txt)+(repo?` · <a href="https://github.com/${esc(repo)}/actions/workflows/update.yml" target="_blank" rel="noopener">Forcer la mise à jour ↗</a>`:"");
+}
+
+function renderChips(){
+  const y=document.getElementById("years"), s=document.getElementById("sports");
+  y.innerHTML=S.years.map(v=>`<button class="chip" aria-pressed="${v===S.year}" data-y="${v}">${v}</button>`).join("");
+  const present=new Set(S.all.map(a=>a.t));
+  const hasOther=[...present].some(t=>!RIDE_TYPES.has(t));
+  const hasIn=S.all.some(a=>RIDE_TYPES.has(a.t)&&isIndoor(a));
+  s.innerHTML=SPORTS.filter(x=>(x.id!=="all"||hasOther)&&((x.id!=="in"&&x.id!=="out")||hasIn))
+    .map(v=>`<button class="chip" aria-pressed="${v.id===S.sport}" data-s="${v.id}">${v.label}</button>`).join("");
+  if(!s.querySelector('[aria-pressed="true"]')){S.sport="bike";s.firstElementChild?.setAttribute("aria-pressed","true")}
+  y.onclick=e=>{const b=e.target.closest("[data-y]");if(!b)return;S.year=+b.dataset.y;store.set("year",S.year);render()};
+  s.onclick=e=>{const b=e.target.closest("[data-s]");if(!b)return;S.sport=b.dataset.s;store.set("sport",S.sport);render()};
+  y.querySelector('[aria-pressed="true"]')?.scrollIntoView({block:"nearest",inline:"nearest"});
+}
+
+function countUp(el,to,dur=1100){
+  const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(reduce||to<1){el.textContent=nf(to);return}
+  const t0=performance.now();
+  const step=t=>{const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,4);el.textContent=nf(to*e);if(p<1)requestAnimationFrame(step)};
+  requestAnimationFrame(step);
+}
+
+function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
+  const goal=+S.cfg.objectif_km||0;
+  const n=daysInYear(Y), elapsed=todayIdx+1;
+  const proj=isCur?km/elapsed*n:km;
+  const diff=km-prevSame;
+  const prevTotal=sum(prev,a=>a.km);
+  let goalHtml="";
+  if(goal>0 && S.sport!=="all"){
+    const pct=Math.min(100,km/goal*100), expected=isCur?goal*elapsed/n:goal;
+    const ahead=km-expected;
+    const left=Math.max(0,goal-km), weeksLeft=Math.max(1,(n-elapsed)/7);
+    let note;
+    if(km>=goal) note=`<b>Objectif atteint</b> — ${nf(km-goal)} km de bonus.`;
+    else if(isCur) note=`${ahead>=0?`<b>${nf(ahead)} km d'avance</b> sur le rythme`:`<b>${nf(-ahead)} km de retard</b> sur le rythme`} · encore <b>${nf(left/weeksLeft)} km/sem.</b> pour y arriver.`;
+    else note=`Objectif manqué de <b>${nf(left)} km</b>.`;
+    goalHtml=`<div class="goal">
+      <div class="goalrow"><span>Objectif <b>${nf(goal)} km</b></span><span><b>${nf(pct)} %</b></span></div>
+      <div class="goalbar"><div class="fill" style="width:0"></div>${isCur?`<div class="tick" style="left:${(elapsed/n*100).toFixed(2)}%" title="Rythme attendu aujourd'hui"></div>`:""}</div>
+      <div class="goalnote">${note}</div>
+      ${isCur?`<div class="goalrow"><span>Projection au 31 déc.</span><b>${nf(proj)} km</b></div>`:""}
+    </div>`;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{const f=document.querySelector(".goalbar .fill");if(f)f.style.width=pct+"%"}));
+  } else if(isCur){
+    goalHtml=`<div class="goal"><div class="goalrow"><span>Projection au 31 décembre</span><b>${nf(proj)} km</b></div>
+      <div class="goalrow"><span>${Y-1} au total</span><b>${nf(prevTotal)} km</b></div></div>`;
+  }
+  const label=S.sport==="in"?"sur home trainer":S.sport==="out"?"en extérieur":S.sport==="all"?"toutes activités":"à vélo";
+  document.getElementById("hero").innerHTML=`
+    <div>
+      <div class="big"><span id="bigkm">0</span><span class="unit">km</span></div>
+      <div class="sub">${label} en ${Y}${isCur?` · au ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`:""}</div>
+      ${prev.length?`<span class="delta" style="${diff<0?"background:var(--h0);color:var(--muted)":""}">${diff>=0?"+":"−"}${nf(Math.abs(diff))} km vs ${Y-1} ${isCur?"à la même date":""}</span>`:""}
+    </div>${goalHtml}`;
+  countUp(document.getElementById("bigkm"),km);
+}
+
+function renderTiles(acts,Y){
+  const n=acts.length, mt=sum(acts,a=>a.mt), el=sum(acts,a=>a.el), km=sum(acts,a=>a.km);
+  const outdoor=acts.filter(a=>!isIndoor(a));
+  const v=sum(outdoor,a=>a.km)/Math.max(1,sum(outdoor,a=>a.mt))*3600;
+  const longest=maxBy(acts,a=>a.km);
+  const big=acts.filter(a=>a.km>=200).length, cent=acts.filter(a=>a.km>=100).length;
+  const cal=sum(acts,a=>a.cal||0), kcal=cal>0?cal:km*28;
+  const hrActs=acts.filter(a=>a.hr>0), hrAvg=sum(hrActs,a=>a.hr*a.mt)/Math.max(1,sum(hrActs,a=>a.mt));
+  const tl=sum(acts,a=>a.tl||0);
+  const tiles=[
+    ["Sorties",nf(n),"",`${nf(km/Math.max(1,n),1)} km en moyenne`],
+    ["Temps en selle",nf(Math.floor(mt/3600)),"h",`${nf(mt/3600/Math.max(1,n),1)} h par sortie`],
+    ["Dénivelé",nf(el),"m",`${nf(el/Math.max(1,km)*10,1)} m/10 km`],
+    ["Vitesse moyenne",outdoor.length?nf(v,1):"–","km/h","sorties extérieures"],
+    ["Plus longue sortie",longest?nf(longest.km,0):"–","km",longest?fmtDate(longest.dt):""],
+    [big?"Sorties ≥ 200 km":"Sorties ≥ 100 km",nf(big||cent),"",big?`${nf(cent)} de plus de 100 km`:""],
+    ["Calories",nf(kcal),"kcal",cal>0?"mesurées par Garmin":"estimation"],
+    tl>0?["Charge d'entraînement",nf(tl),"",`${nf(tl/Math.max(1,n))} par sortie`]:["FC moyenne",hrActs.length?nf(hrAvg):"–","bpm","sorties avec capteur"],
+  ];
+  document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="l">${t[0]}</div><div class="v">${t[1]}<small>${t[2]}</small></div><div class="s">${esc(t[3])||"&nbsp;"}</div></div>`).join("");
+}
+
+// ---- Tooltip
+const tip=document.getElementById("tip");
+function showTip(e,html){tip.innerHTML=html;tip.style.opacity=1;const x=Math.min(innerWidth-tip.offsetWidth-8,Math.max(8,e.clientX-tip.offsetWidth/2));tip.style.left=x+"px";tip.style.top=(e.clientY-tip.offsetHeight-12)+"px"}
+function hideTip(){tip.style.opacity=0}
+document.addEventListener("scroll",hideTip,{passive:true});
+
+function renderCum(cur,prev,todayIdx,isCur,Y){
+  const box=document.getElementById("cum");
+  const W=Math.max(300,box.clientWidth), H=Math.round(Math.min(400,Math.max(210,W*.56)));
+  const m={l:44,r:12,t:14,b:24}, iw=W-m.l-m.r, ih=H-m.t-m.b;
+  const goal=+S.cfg.objectif_km||0;
+  const showGoal=goal>0&&S.sport!=="all";
+  const curEnd=isCur?todayIdx:cur.length-1;
+  const maxY=Math.max(cur[curEnd]||0,prev[prev.length-1]||0,showGoal?goal:0,10)*1.06;
+  const x=i=>m.l+i/365*iw, y=v=>m.t+ih-v/maxY*ih;
+  const path=(arr,end)=>{let d="";const st=Math.max(1,Math.floor(arr.length/240));for(let i=0;i<=end;i+=st)d+=(i?"L":"M")+x(i).toFixed(1)+","+y(arr[i]).toFixed(1);d+="L"+x(end).toFixed(1)+","+y(arr[end]).toFixed(1);return d};
+  const ticks=niceTicks(maxY,4);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilomètres cumulés">
+  <defs><linearGradient id="ga" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+  <g class="axis">${ticks.map(t=>`<line class="gridline" x1="${m.l}" x2="${W-m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l-8}" y="${y(t)+4}" text-anchor="end">${nf(t)}</text>`).join("")}
+  ${MONTHS.map((mo,i)=>{const di=dayOfYear(new Date(Y,i,1));return W<520&&i%2?"":`<text x="${x(di)+2}" y="${H-6}">${mo}</text>`}).join("")}</g>`;
+  if(showGoal) s+=`<line x1="${x(0)}" y1="${y(0)}" x2="${x(365)}" y2="${y(goal)}" stroke="var(--muted)" stroke-dasharray="4 5" stroke-width="1.2"/>`;
+  if(prev.length) s+=`<path d="${path(prev,prev.length-1)}" fill="none" stroke="var(--ghost)" stroke-width="2.2" stroke-linejoin="round"/>`;
+  const cp=path(cur,curEnd);
+  s+=`<path d="${cp}L${x(curEnd)},${y(0)}L${x(0)},${y(0)}Z" fill="url(#ga)"/><path d="${cp}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+  s+=`<circle cx="${x(curEnd)}" cy="${y(cur[curEnd])}" r="5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
+  const lx=x(curEnd), anchor=lx>W-90?"end":"start";
+  s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="13" fill="var(--ink)">${nf(cur[curEnd])} km</text>`;
+  s+=`<line id="cumCursor" y1="${m.t}" y2="${m.t+ih}" stroke="var(--muted)" stroke-width="1" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="cumHit"/></svg>`;
+  box.innerHTML=s;
+  document.getElementById("cumLegend").innerHTML=`<span><i style="background:var(--accent)"></i>${Y}</span><span><i style="background:var(--ghost)"></i>${Y-1}</span>${showGoal?`<span><i style="background:repeating-linear-gradient(90deg,var(--muted) 0 3px,transparent 3px 6px)"></i>objectif</span>`:""}`;
+  const hit=document.getElementById("cumHit"), cursor=document.getElementById("cumCursor"), svg=box.querySelector("svg");
+  const move=e=>{const r=svg.getBoundingClientRect();const px=(e.clientX-r.left)*W/r.width;const i=Math.max(0,Math.min(364,Math.round((px-m.l)/iw*365)));
+    cursor.setAttribute("x1",x(i));cursor.setAttribute("x2",x(i));cursor.setAttribute("opacity",.6);
+    const d=new Date(Y,0,1+i);const c=i<=curEnd?cur[i]:null,p=prev[Math.min(i,prev.length-1)];
+    showTip(e,`<b>${d.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}</b><br>${c!=null?`${Y} : ${nf(c)} km<br>`:""}${prev.length?`${Y-1} : ${nf(p)} km`:""}`)};
+  hit.addEventListener("pointermove",move);hit.addEventListener("pointerdown",move);
+  hit.addEventListener("pointerleave",()=>{hideTip();cursor.setAttribute("opacity",0)});
+}
+function niceTicks(max,n){const raw=max/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p,st=(f<1.5?1:f<3?2:f<7?5:10)*p;const t=[];for(let v=0;v<=max;v+=st)t.push(v);return t}
+
+function renderMonths(acts,prev,Y){
+  const box=document.getElementById("months");
+  const a=new Array(12).fill(0),b=new Array(12).fill(0);
+  acts.forEach(x=>a[x.dt.getMonth()]+=x.km);prev.forEach(x=>b[x.dt.getMonth()]+=x.km);
+  const W=Math.max(300,box.clientWidth),H=Math.round(Math.min(260,Math.max(190,W*.48))),m={l:6,r:6,t:22,b:22},iw=W-m.l-m.r,ih=H-m.t-m.b;
+  const max=Math.max(...a,...b,1),gw=iw/12,bw=Math.min(34,gw*.62);
+  const best=a.indexOf(Math.max(...a));
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilomètres par mois"><g class="axis">`;
+  for(let i=0;i<12;i++){
+    const cx=m.l+gw*i+gw/2, hb=b[i]/max*ih, ha=a[i]/max*ih;
+    s+=`<rect x="${cx-bw/2-3}" y="${m.t+ih-hb}" width="${bw+6}" height="${hb}" rx="5" fill="var(--ghost)" opacity=".45"/>`;
+    s+=`<rect x="${cx-bw/2}" y="${m.t+ih-ha}" width="${bw}" height="${Math.max(ha,a[i]?2:0)}" rx="5" fill="${i===best?"var(--accent)":"var(--accent-2)"}" data-i="${i}" class="mb"/>`;
+    if(a[i]&&(bw>=22||i===best)) s+=`<text x="${cx}" y="${m.t+ih-ha-6}" text-anchor="middle" font-weight="${i===best?700:500}" fill="var(--${i===best?"ink":"muted"})">${a[i]>=1000?nf(a[i]/1000,1)+"k":nf(a[i])}</text>`;
+    s+=`<text x="${cx}" y="${H-5}" text-anchor="middle">${W<480?MONTHS[i][0].toUpperCase():MONTHS[i].replace(".","")}</text>`;
+  }
+  box.innerHTML=s+"</g></svg>";
+  box.querySelectorAll(".mb").forEach(r=>{const i=+r.dataset.i;const h=e=>showTip(e,`<b>${MONTHS_FULL[i]}</b><br>${Y} : ${nf(a[i])} km<br>${Y-1} : ${nf(b[i])} km`);r.addEventListener("pointermove",h);r.addEventListener("pointerdown",h);r.addEventListener("pointerleave",hideTip)});
+}
+
+function renderHabits(acts){
+  const box=document.getElementById("habits");
+  if(!acts.length){box.innerHTML=`<div class="empty">Aucune sortie</div>`;return}
+  const d=new Array(7).fill(0);acts.forEach(a=>d[wd(a.dt)]+=a.km);const mx=Math.max(...d,1);
+  const ind=acts.filter(isIndoor),indKm=sum(ind,a=>a.km),tot=sum(acts,a=>a.km);
+  const hrs=[0,0,0,0];acts.forEach(a=>{const h=a.dt.getHours();hrs[h<9?0:h<13?1:h<18?2:3]++});
+  const hl=["avant 9 h","9 h–13 h","13 h–18 h","après 18 h"];const hi=hrs.indexOf(Math.max(...hrs));
+  box.innerHTML=d.map((v,i)=>`<div class="hbar"><span>${DAYS[i]}</span><div class="tr"><div style="width:${v/mx*100}%;${v===mx?"":"opacity:.55"}"></div></div><span class="num">${nf(v)} km</span></div>`).join("")+
+   `<div style="margin-top:14px;font-size:13px;color:var(--muted)">Extérieur / home trainer</div>
+    <div class="split"><div style="width:${(1-indKm/Math.max(tot,1))*100}%"></div><div style="width:${indKm/Math.max(tot,1)*100}%"></div></div>
+    <div class="goalrow"><span><b>${nf(100-indKm/Math.max(tot,1)*100)} %</b> dehors</span><span><b>${nf(ind.length)}</b> séances indoor · ${hfmt(sum(ind,a=>a.mt))}</span></div>
+    <div class="goalrow" style="margin-top:10px"><span>Créneau favori</span><b>${hl[hi]} (${nf(hrs[hi]/acts.length*100)} %)</b></div>`;
+}
+
+function renderHeat(daily,Y,isCur,todayIdx,acts){
+  const box=document.getElementById("heat"),wrap=document.getElementById("heatwrap");
+  const jan1=new Date(Y,0,1),off=wd(jan1),n=daysInYear(Y),weeks=Math.ceil((n+off)/7);
+  const avail=wrap.clientWidth-30;const cs=Math.max(11,Math.min(18,Math.floor(avail/weeks)-2)),gap=cs>13?3:2,pitch=cs+gap;
+  const W=30+weeks*pitch,H=18+7*pitch;
+  const lv=v=>v<=0?0:v<40?1:v<80?2:v<130?3:v<200?4:5;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="width:${W}px" role="img" aria-label="Calendrier des sorties"><g class="axis">`;
+  [0,2,4].forEach(i=>s+=`<text x="0" y="${18+i*pitch+cs-2}">${DAYS[i]}</text>`);
+  for(let mo=0;mo<12;mo++){const di=dayOfYear(new Date(Y,mo,1));s+=`<text x="${30+Math.floor((di+off)/7)*pitch}" y="11">${MONTHS[mo]}</text>`}
+  s+="</g>";
+  for(let i=0;i<n;i++){const k=i+off,wx=Math.floor(k/7),dy=k%7;const fut=isCur&&i>todayIdx;
+    s+=`<rect x="${30+wx*pitch}" y="${18+dy*pitch}" width="${cs}" height="${cs}" rx="${cs>12?3:2}" fill="var(--h${lv(daily[i])})" ${fut?'opacity=".35"':""} data-i="${i}" ${isCur&&i===todayIdx?'stroke="var(--ink)" stroke-width="1.5"':""}/>`}
+  box.innerHTML=s+"</svg>";
+  const active=daily.filter(v=>v>0).length;
+  document.getElementById("heatInfo").textContent=`${active} jours roulés sur ${isCur?todayIdx+1:n}`;
+  const byDay={};acts.forEach(a=>{const i=dayOfYear(a.dt);(byDay[i]=byDay[i]||[]).push(a)});
+  box.querySelector("svg").addEventListener("pointermove",e=>{const r=e.target.closest("rect[data-i]");if(!r)return hideTip();const i=+r.dataset.i,d=new Date(Y,0,1+i);
+    const L=byDay[i]||[];showTip(e,`<b>${d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</b><br>${L.length?L.map(a=>`${esc(a.n).slice(0,34)} · ${nf(a.km,1)} km`).join("<br>"):"Repos"}`)});
+  box.querySelector("svg").addEventListener("pointerleave",hideTip);
+  if(isCur) wrap.scrollLeft=Math.max(0,30+Math.floor((todayIdx+off)/7)*pitch-wrap.clientWidth+60);
+}
+
+function renderRecords(acts){
+  const out=acts.filter(a=>!isIndoor(a));
+  const longest=maxBy(acts,a=>a.km),climb=maxBy(acts,a=>a.el),fast=maxBy(out.filter(a=>a.km>=40&&a.mt>0),a=>a.km/a.mt),
+        watts=maxBy(acts.filter(a=>a.w>0&&a.mt>=1800),a=>a.w),vmax=maxBy(out,a=>a.vmax),dur=maxBy(acts,a=>a.mt);
+  const wk={};acts.forEach(a=>{const k=weekKey(a.dt);wk[k]=(wk[k]||0)+a.km});
+  const bw=Object.entries(wk).sort((a,b)=>b[1]-a[1])[0];
+  const r=[];
+  const add=(k,v,a)=>r.push(`<div class="rec"><span class="k">${k}</span><span class="val">${v}${a?`<small>${esc(a.n)} · ${fmtDate(a.dt)}</small>`:""}</span></div>`);
+  if(longest) add("Plus longue",`${nf(longest.km,1)} km`,longest);
+  if(climb&&climb.el) add("Plus de dénivelé",`${nf(climb.el)} m`,climb);
+  if(dur) add("Plus longue durée",hfmt(dur.mt),dur);
+  if(fast) add("Plus rapide (≥ 40 km)",`${nf(fast.km/fast.mt*3600,1)} km/h`,fast);
+  if(watts) add("Puissance moyenne",`${nf(watts.w)} W`,watts);
+  if(vmax&&vmax.vmax) add("Vitesse max",`${nf(vmax.vmax,1)} km/h`,vmax);
+  if(bw) add("Plus grosse semaine",`${nf(bw[1])} km<small>sem. du ${new Date(+bw[0]).toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}</small>`);
+  document.getElementById("records").innerHTML=r.join("")||`<div class="empty">Aucune sortie</div>`;
+}
+
+// ------------------------------------------------------------------ Anecdotes
+function streaks(acts){
+  const days=new Set(acts.map(a=>dayOfYear(a.dt)+a.dt.getFullYear()*1000));
+  const sorted=[...new Set(acts.map(a=>new Date(a.dt.getFullYear(),a.dt.getMonth(),a.dt.getDate()).getTime()))].sort((a,b)=>a-b);
+  let bestD=0,c=0,prev=null;for(const t of sorted){c=prev!=null&&Math.round((t-prev)/864e5)===1?c+1:1;bestD=Math.max(bestD,c);prev=t}
+  const wks=[...new Set(acts.map(a=>weekKey(a.dt)))].sort((a,b)=>a-b);
+  let bestW=0;c=0;prev=null;for(const t of wks){c=prev!=null&&Math.round((t-prev)/(7*864e5))===1?c+1:1;bestW=Math.max(bestW,c);prev=t}
+  return {bestD,bestW,days:days.size};
+}
+const CITIES=[["Saint-Malo",70],["Nantes",110],["Brest",245],["Paris",350],["Bordeaux",470],["Strasbourg",830],["Lyon",720],["Marseille",1000],["Nice",1150],["Barcelone",1250],["Amsterdam",900],["Berlin",1400],["Madrid",1250],["Rome",1900],["Lisbonne",1800],["Vienne",1650],["Copenhague",1500],["Prague",1350],["Budapest",1900],["Athènes",3000],["Istanbul",3100],["Moscou",3300],["Marrakech",2700],["Le Cap Nord",3900],["Dakar",4900]];
+function facts(acts,Y,isCur,todayIdx){
+  const km=sum(acts,a=>a.km),el=sum(acts,a=>a.el),mt=sum(acts,a=>a.mt);
+  if(!acts.length) return [];
+  const F=[];const city=S.cfg.ville||"Rennes";
+  const add=(n,t,sub,w=1)=>F.push({n,t,sub,w});
+  if(el>0){const ev=el/8849;add(ev>=1?`×${nf(ev,1)}`:`${nf(ev*100)} %`,ev>=1?"l'Everest gravi depuis le niveau de la mer":"de l'Everest gravi",`${nf(el)} m de dénivelé positif`,3)}
+  if(el>1600) add(`×${nf(el/1610)}`,"le Mont Ventoux par Bédoin","1 610 m de D+ par ascension",2);
+  const c=[...CITIES].filter(x=>x[1]<=km).sort((a,b)=>b[1]-a[1])[0];
+  if(c) add(nf(km/c[1],1)+"×",`la route ${city} → ${c[0]}`,`≈ ${nf(c[1])} km par la route`,3);
+  add(`${nf(km/40075*100,1)} %`,"du tour de la Terre",`il en reste ${nf(Math.max(0,40075-km))} km`,2);
+  if(km>500) add(`${nf(km/3340*100)} %`,"d'un Tour de France","≈ 3 340 km en 21 étapes",2);
+  add(`${nf(mt/86400,1)} j`,"passés en selle, non-stop",`soit ${nf(mt/3600)} heures`,2);
+  const cal=sum(acts,a=>a.cal||0),kcal=cal>0?cal:km*28;
+  add(nf(kcal/240),"croissants brûlés",cal>0?"à 240 kcal le croissant":"estimation, à 240 kcal le croissant",3);
+  add(nf(kcal/530),"jambon-beurre de carburant","à 530 kcal le sandwich",1);
+  const d=new Array(7).fill(0);acts.forEach(a=>d[wd(a.dt)]+=a.km);const fav=d.indexOf(Math.max(...d));
+  add(DAYS[fav],`ton jour préféré : le ${DAYS_FULL[fav]}`,`${nf(d[fav]/km*100)} % de tes km`,3);
+  const early=acts.filter(a=>a.dt.getHours()<8).length;
+  if(early) add(nf(early),`sorties lancées avant 8 h`,`${nf(early/acts.length*100)} % de tes sorties`,2);
+  const st=streaks(acts);
+  if(st.bestW>1) add(nf(st.bestW),"semaines d'affilée avec au moins une sortie","ta meilleure série",3);
+  if(st.bestD>1) add(nf(st.bestD),"jours de suite sur le vélo","ta plus longue série",2);
+  const lastA=S.all.filter(a=>RIDE_TYPES.has(a.t)).slice(-1)[0];
+  if(isCur&&lastA){const ago=Math.floor((Date.now()-lastA.dt)/864e5);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as roulé aujourd'hui":"depuis ta dernière sortie",lastA.n,2)}
+  const elapsed=isCur?todayIdx+1:daysInYear(Y);add(`${nf(km/elapsed,1)}`,"km par jour en moyenne","week-ends et jours de pluie compris",2);
+  const big=acts.filter(a=>a.km>=200);if(big.length) add(nf(big.length),`sorties de 200 km et plus`,`${nf(sum(big,a=>a.km))} km au total`,3);
+  const beats=sum(acts.filter(a=>a.hr>0),a=>a.hr*a.mt/60);if(beats>0) add(beats>=1e6?`${nf(beats/1e6,1)} M`:nf(beats),"battements de cœur sur le vélo",`à ${nf(sum(acts.filter(a=>a.hr>0),a=>a.hr*a.mt)/Math.max(1,sum(acts.filter(a=>a.hr>0),a=>a.mt)))} bpm de moyenne`,2);
+  const hte=acts.filter(a=>a.te>=4).length;if(hte) add(nf(hte),"sorties à effet aérobie « très important » (4+)","selon le Training Effect Garmin",1);
+  const ind=acts.filter(isIndoor),imt=sum(ind,a=>a.mt);if(imt>3600) add(nf(imt/2700),"épisodes de série regardés sur le home trainer","si un épisode dure 45 min",2);
+  const wkend=acts.filter(a=>wd(a.dt)>=5),wk=sum(wkend,a=>a.km);add(`${nf(wk/km*100)} %`,"de tes km faits le week-end",`${nf(km-wk)} km en semaine`,1);
+  const vm=maxBy(acts.filter(a=>!isIndoor(a)),a=>a.vmax);if(vm&&vm.vmax>40) add(nf(vm.vmax),"km/h : ta pointe de vitesse",`${vm.n} · ${fmtDate(vm.dt)}`,2);
+  const months=new Array(12).fill(0);acts.forEach(a=>months[a.dt.getMonth()]+=a.km);const bm=months.indexOf(Math.max(...months));
+  add(MONTHS[bm].replace(".",""),`ton plus gros mois : ${MONTHS_FULL[bm]}`,`${nf(months[bm])} km`,2);
+  return F;
+}
+function renderFacts(acts,Y,isCur,todayIdx){
+  const F=facts(acts,Y,isCur,todayIdx);
+  // tirage pondéré déterministe, change à chaque clic sur « Autres anecdotes »
+  let seed=S.factSeed*9301+Y*49297+S.sport.length*233;const rnd=()=>(seed=(seed*9301+49297)%233280)/233280;
+  const pool=F.map(f=>({f,k:Math.pow(rnd(),1/f.w)})).sort((a,b)=>b.k-a.k).slice(0,6).map(x=>x.f);
+  document.getElementById("facts").innerHTML=pool.length?pool.map(f=>`<div class="fact"><div class="n">${esc(f.n)}</div><div class="t">${esc(f.t)}<small>${esc(f.sub||"")}</small></div></div>`).join(""):`<div class="empty">Pas encore d'anecdote cette année.</div>`;
+}
+
+// ------------------------------------------------------------------ Rides
+function traceSvg(pts){
+  if(!pts||pts.length<2) return `<svg viewBox="0 0 76 76"><circle cx="38" cy="38" r="14" fill="none" stroke="var(--ghost)" stroke-width="3"/><path d="M38 24v14l9 6" stroke="var(--ghost)" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
+  const lat0=pts[0][0]*Math.PI/180,kx=Math.cos(lat0);
+  const xs=pts.map(p=>p[1]*kx),ys=pts.map(p=>-p[0]);
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  const sc=64/Math.max(maxx-minx,maxy-miny,1e-6),ox=(76-(maxx-minx)*sc)/2,oy=(76-(maxy-miny)*sc)/2;
+  const d=pts.map((p,i)=>(i?"L":"M")+((xs[i]-minx)*sc+ox).toFixed(1)+","+((ys[i]-miny)*sc+oy).toFixed(1)).join("");
+  return `<svg viewBox="0 0 76 76"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function renderRides(){
+  const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];
+  const L=S.all.filter(sp.f).slice(innerWidth<520?-5:-9).reverse();
+  document.getElementById("rides").innerHTML=L.map(a=>`<a class="ride" href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">
+    <div class="map">${isIndoor(a)?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
+    <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${isIndoor(a)?' · <span class="indoor">HOME TRAINER</span>':""}</div>
+    <div class="st"><span><b>${nf(a.km,1)}</b> km</span>${a.el?`<span><b>${nf(a.el)}</b> m D+</span>`:""}<span><b>${hfmt(a.mt)}</b></span>${a.mt&&!isIndoor(a)?`<span><b>${nf(a.km/a.mt*3600,1)}</b> km/h</span>`:a.w?`<span><b>${a.w}</b> W</span>`:""}</div></div></a>`).join("")||`<div class="empty">Aucune sortie</div>`;
+}
+
+function renderYears(){
+  const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];
+  const by={};S.all.filter(sp.f).forEach(a=>{const y=a.dt.getFullYear();const o=by[y]=by[y]||{km:0,el:0,n:0,mt:0};o.km+=a.km;o.el+=a.el;o.n++;o.mt+=a.mt});
+  const ys=Object.keys(by).map(Number).sort((a,b)=>b-a);const mx=Math.max(...ys.map(y=>by[y].km),1);
+  document.getElementById("years-table").innerHTML=`<table><thead><tr><th>Année</th><th style="width:34%"></th><th>km</th><th>D+</th><th>Sorties</th><th>Heures</th></tr></thead><tbody>${ys.map(y=>`<tr class="${y===S.year?"cur":""}"><td>${y}</td><td><div class="yearbar" style="width:${by[y].km/mx*100}%;${y===S.year?"":"opacity:.35"}"></div></td><td>${nf(by[y].km)}</td><td>${nf(by[y].el)}</td><td>${nf(by[y].n)}</td><td>${nf(by[y].mt/3600)}</td></tr>`).join("")}</tbody></table>`;
+}
+
+// ------------------------------------------------------------------ Boot
+let rT,lastW=innerWidth;addEventListener("resize",()=>{if(innerWidth===lastW)return;lastW=innerWidth;clearTimeout(rT);rT=setTimeout(()=>{if(S.all.length)render()},150)});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")load()});
+setInterval(()=>{if(document.visibilityState==="visible")load()},5*60*1000);
+load();
+</script>
+</body>
+</html>
