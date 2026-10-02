@@ -64,7 +64,9 @@ jobs:
             echo "Rien de nouveau."
           else
             git commit -m "Mise à jour Garmin"
-            git push
+            # si le dépôt a bougé pendant le passage (modif manuelle), on se recale puis on réessaie
+            for i in 1 2 3; do git pull --rebase --quiet && git push && exit 0; sleep 5; done
+            exit 1
           fi
 
       - name: Préparer le site
