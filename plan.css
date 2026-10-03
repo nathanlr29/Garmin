@@ -66,7 +66,7 @@
 #plan .tdv span{font-size:14px;color:var(--muted);font-weight:600}
 #plan .tdbar{position:relative;height:14px;border-radius:999px;background:var(--h0);margin:10px 0 6px;overflow:hidden}
 #plan .tdbar div{position:absolute;top:0;bottom:0}
-#plan .tdbar .tg{background:#2f9e44;opacity:.35;border-radius:999px}
+#plan .tdbar .tg{z-index:1;background:rgba(47,158,68,.3);box-shadow:inset 0 0 0 2px #2f9e44;border-radius:999px}
 #plan .tdbar .dn{left:0;background:var(--ink);border-radius:999px 0 0 999px}
 #plan .tdbar .pl{background:repeating-linear-gradient(45deg,var(--accent) 0 5px,transparent 5px 9px);border:1px solid var(--accent)}
 #plan .tdleg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
