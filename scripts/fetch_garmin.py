@@ -147,10 +147,24 @@ def kind(type_key):
     return type_key or "other"
 
 
+PC_DUR = (5, 60, 300, 1200, 3600)  # meilleures puissances (s) pour la FTP détectée
+
+
+def power_curve(a):
+    pc = {}
+    for d in PC_DUR:
+        v = a.get(f"maxAvgPower_{d}")
+        if isinstance(v, (int, float)) and v > 0:
+            pc[str(d)] = round(v)
+    if "1200" not in pc and isinstance(a.get("max20MinPower"), (int, float)) and a["max20MinPower"] > 0:
+        pc["1200"] = round(a["max20MinPower"])
+    return pc
+
+
 def slim(a):
     tk = (a.get("activityType") or {}).get("typeKey") or ""
     num = lambda k: a.get(k) or 0
-    return {
+    out = {
         "id": a["activityId"],
         "n": a.get("activityName") or "",
         "t": kind(tk),
@@ -169,6 +183,10 @@ def slim(a):
         "te": round(num("aerobicTrainingEffect"), 1),
         "tr": 1 if tk in INDOOR_CYCLING else 0,
     }
+    pc = power_curve(a)
+    if pc:
+        out["pc"] = pc
+    return out
 
 
 def fetch_all(api, only_recent=False):
@@ -210,6 +228,9 @@ def main():
         raw = fetch_all(api, only_recent=not full)
         if full:
             known = {}
+        sample = next((a for a in raw if a.get("avgPower")), None)
+        if sample:
+            print("Champs puissance Garmin :", sorted(k for k in sample if "ower" in k)[:40])
         for a in raw:
             if a.get("activityId"):
                 known[a["activityId"]] = slim(a)
