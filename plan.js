@@ -327,6 +327,7 @@ function renderPlan(plan, prof) {
 
 // ------------------------------------------------------------------ Logique de page
 const PS = { mon: null, sets: null, plan: null };
+const sortSets = () => PS.sets.sort((a, b) => a.day - b.day || b.dur - a.dur);  // toujours dans l'ordre de la semaine
 function generate() {
   const prof = profile(), form = fitness(), ready = readiness(), ph = phase(PS.mon);
   const sorted = [...PS.sets].sort((a, b) => a.day - b.day || b.dur - a.dur);
@@ -359,9 +360,9 @@ function render() {
   // événements
   $("pFtp").onchange = e => { const v = Math.round(+e.target.value); if (v >= 80 && v <= 600) { store2.set("planFtp", v === (Recup.data?.profile?.ftp) ? null : v); if (PS.plan) generate(); render(); } };
   box.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { PS.mon = addDays(mondayOf(new Date()), +b.dataset.w); PS.plan = null; restorePlan(); render(); });
-  $("pRows").onchange = e => { const r = e.target.closest(".srow"), k = e.target.dataset.k; if (!r || !k) return; const v = e.target.value; PS.sets[+r.dataset.i][k] = k === "day" || k === "dur" ? +v : v; store2.set("planSets", PS.sets); };
+  $("pRows").onchange = e => { const r = e.target.closest(".srow"), k = e.target.dataset.k; if (!r || !k) return; const v = e.target.value; PS.sets[+r.dataset.i][k] = k === "day" || k === "dur" ? +v : v; if (k === "day") sortSets(); store2.set("planSets", PS.sets); if (k === "day") render(); };
   box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { PS.sets.splice(+b.dataset.del, 1); store2.set("planSets", PS.sets); render(); });
-  $("pAdd").onclick = () => { const used = PS.sets.map(s => s.day), d = [1, 3, 5, 6, 2, 4, 0].find(x => !used.includes(x)) ?? 0; PS.sets.push({ day: d, dur: 60, place: "mw", type: "auto" }); store2.set("planSets", PS.sets); render(); };
+  $("pAdd").onclick = () => { const used = PS.sets.map(s => s.day), d = [1, 3, 5, 6, 2, 4, 0].find(x => !used.includes(x)) ?? 0; PS.sets.push({ day: d, dur: 60, place: "mw", type: "auto" }); sortSets(); store2.set("planSets", PS.sets); render(); };
   $("pReset").onclick = () => { PS.sets = defaults(); store2.set("planSets", PS.sets); render(); };
   $("pGen").onclick = () => { if (!PS.sets.length) return; generate(); render(); document.querySelector(".sessions")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const s = PS.plan.list[+b.dataset.dl]; download(fileName(s), zwo(s, prof)); });
@@ -376,7 +377,7 @@ async function open() {
   const ok = await Recup.ensure("plan", () => open());
   if (!ok) return;
   if (!PS.mon) PS.mon = weekTarget();
-  if (!PS.sets) PS.sets = store2.get("planSets") || defaults();
+  if (!PS.sets) { PS.sets = store2.get("planSets") || defaults(); sortSets(); }
   if (!PS.plan) restorePlan();
   render();
 }
