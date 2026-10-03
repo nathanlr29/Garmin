@@ -323,6 +323,90 @@ def weather(lat, lon, start, end):
     return out
 
 
+
+# ------------------------------------------------------------------ Profil d'entraînement (FTP, VO2max, zones)
+def _walk(o):
+    if isinstance(o, dict):
+        yield o
+        for v in o.values():
+            yield from _walk(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _walk(v)
+
+
+def _num(v, lo, hi):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi else None
+
+
+def _date(d):
+    for k in ("calendarDate", "date", "from", "startDate", "updatedDate"):
+        v = d.get(k)
+        if isinstance(v, str) and len(v) >= 10 and v[4] == "-":
+            return v[:10]
+    return None
+
+
+def _raw(o, n=1500):
+    try:
+        return json.dumps(o, ensure_ascii=False)[:n]
+    except Exception:
+        return None
+
+
+def fetch_profile(api, start, today):
+    p, raw = {}, {}
+    # FTP actuelle
+    ftp = safe(api.get_cycling_ftp)
+    raw["ftp"] = _raw(ftp)
+    for d in _walk(ftp):
+        v = _num(d.get("functionalThresholdPower"), 60, 700) or _num(d.get("ftp"), 60, 700) or _num(d.get("value"), 60, 700)
+        if v:
+            p["ftp"], p["ftpDate"] = round(v), _date(d)
+            break
+    # Historique FTP (hebdo)
+    try:
+        hist = api.get_functional_threshold_power_range(start.isoformat(), today.isoformat(), sport="CYCLING", aggregation="weekly")
+    except Exception as e:
+        hist = None
+        print(f"    historique FTP indisponible : {type(e).__name__}")
+    raw["ftpHist"] = _raw(hist, 800)
+    pts = {}
+    for d in _walk(hist):
+        v = _num(d.get("value"), 60, 700) or _num(d.get("functionalThresholdPower"), 60, 700)
+        dt = _date(d)
+        if v and dt:
+            pts[dt] = round(v)
+    p["ftpHist"] = sorted(pts.items())
+    # VO2max vélo (sinon générique)
+    mm = safe(api.get_max_metrics_range, start.isoformat(), today.isoformat())
+    raw["vo2"] = _raw(mm, 1200)
+    vo = {}
+    for d in _walk(mm):
+        for key in ("cycling", "generic"):
+            sub = d.get(key)
+            if isinstance(sub, dict):
+                v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
+                dt = _date(sub) or _date(d)
+                if v and dt and (key == "cycling" or dt not in vo):
+                    vo[dt] = round(v, 1)
+    p["vo2"] = sorted(vo.items())
+    # Zones cardio (profil vélo, sinon par défaut)
+    zones = safe(api.get_heart_rate_zones) or []
+    raw["zones"] = _raw(zones, 1500)
+    cand = [z for z in _walk(zones) if any(k.startswith("zone") and k.endswith("Floor") for k in z)]
+    pick = next((z for z in cand if str(z.get("sport", "")).upper() == "CYCLING"), None) or next((z for z in cand if str(z.get("sport", "")).upper() in ("DEFAULT", "")), None) or (cand[0] if cand else None)
+    if pick:
+        floors = [_num(pick.get(f"zone{i}Floor"), 40, 230) for i in range(1, 6)]
+        p["hrZones"] = {
+            "floors": floors, "max": _num(pick.get("maxHeartRateUsed"), 120, 230),
+            "lthr": _num(pick.get("lactateThresholdHeartRateUsed"), 100, 220),
+            "rest": _num(pick.get("restingHeartRateUsed"), 30, 100),
+            "sport": pick.get("sport"), "method": pick.get("trainingMethod"),
+        }
+    p["raw"] = raw
+    return p
+
 # ------------------------------------------------------------------ Point d'entrée
 def run(api):
     code = os.environ.get("RECUP_CODE", "").strip()
@@ -383,6 +467,7 @@ def run(api):
         "bbDate": today.isoformat(),
         "wx_cache": {k: {"aqi": v["wx"].get("aqi"), "pollen": v["wx"].get("pollen")} for k, v in days.items() if v.get("wx")},
         "pending": len([d for d in all_dates if not days.get(d.isoformat(), {}).get("f")]),
+        "profile": fetch_profile(api, START, today),
     }
     strip = lambda x: {k: v for k, v in x.items() if k != "updated_at"}
     if ENC_FILE.exists() and strip(state) == new:
