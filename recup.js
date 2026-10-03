@@ -37,30 +37,32 @@ function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars /
 }
 
 // ------------------------------------------------------------------ Onglets
-function curTab() { const h = location.hash.slice(1); return ["velo", "recup", "plan"].includes(h) ? h : (store.get("tab") || "velo"); }
+function curTab() { const h = location.hash.slice(1); return ["velo", "recup", "plan", "sortie"].includes(h) ? h : (store.get("tab") || "velo"); }
 function setTab(t) { store.set("tab", t); history.replaceState(null, "", "#" + t); applyTab(); }
 function applyTab() {
   const t = curTab(), recup = t === "recup", velo = t === "velo";
   document.documentElement.classList.toggle("night", recup);
-  $("app").hidden = !velo; $("recup").hidden = !recup; $("plan").hidden = t !== "plan";
+  $("app").hidden = !velo; $("recup").hidden = !recup; $("plan").hidden = t !== "plan"; $("sortie").hidden = t !== "sortie";
   document.querySelector(".controls").hidden = !velo;
   $("updated").hidden = !velo;
-  $("title").textContent = recup ? "Ma récupération" : t === "plan" ? "Mon plan" : (S.cfg.titre || "Mes kilomètres");
+  $("title").textContent = recup ? "Ma récupération" : t === "plan" ? "Mon plan" : t === "sortie" ? "Planifier une sortie" : (S.cfg.titre || "Mes kilomètres");
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", recup ? "#0c0f1d" : "#f6f3ee");
-  if (recup) openRecup(); else if (t === "plan") window.Plan?.open(); else if (S.all.length) render();
+  if (recup) openRecup(); else if (t === "plan") window.Plan?.open(); else if (t === "sortie") window.Sortie?.open(); else if (S.all.length) render();
 }
 function mountTabs() {
   const header = document.querySelector("header");
   const nav = document.createElement("nav");
   nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist");
-  nav.innerHTML = `<button role="tab" data-tab="velo">Vélo</button><button role="tab" data-tab="recup">Récup</button><button role="tab" data-tab="plan">Plan</button>`;
+  nav.innerHTML = `<button role="tab" data-tab="velo">Vélo</button><button role="tab" data-tab="recup">Récup</button><button role="tab" data-tab="plan">Plan</button><button role="tab" data-tab="sortie">Sortie</button>`;
   header.insertBefore(nav, header.querySelector(".controls"));
   nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
   const main = document.createElement("main"); main.id = "recup"; main.hidden = true;
   $("app").after(main);
   const plan = document.createElement("main"); plan.id = "plan"; plan.hidden = true;
   main.after(plan);
+  const sortie = document.createElement("main"); sortie.id = "sortie"; sortie.hidden = true;
+  plan.after(sortie);
 }
 
 // ------------------------------------------------------------------ Données chiffrées

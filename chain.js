@@ -98,5 +98,9 @@ css.textContent = `#chain h2{display:flex;align-items:center;gap:8px}
 #chain .chnote{color:var(--muted);font-size:12px}
 #chain .chhist{margin-top:8px;font-size:12px;color:var(--muted)}`;
 document.head.appendChild(css);
-window.Chain = { render };
+function status() {  // pour l'onglet Sortie : km depuis le dernier graissage
+  const hist = ls.get(K_LUBE, []); if (!hist.length) return null;
+  return { km: outdoorRides(new Date(hist[0])).reduce((s, a) => s + a.km, 0), lim: ls.get(K_KM, 200) };
+}
+window.Chain = { render, status };
 })();

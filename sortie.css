@@ -1,0 +1,57 @@
+/* ------------------------------------------------------------------ Onglet Sortie */
+#sortie .span7{grid-column:span 7}#sortie .span5{grid-column:span 5}
+@media (max-width:860px){#sortie .span7,#sortie .span5{grid-column:span 12}}
+#sortie .sosub{min-width:0}
+#sortie .sotiles{grid-template-columns:repeat(6,1fr)}
+@media (max-width:1100px){#sortie .sotiles{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:620px){#sortie .sotiles{grid-template-columns:repeat(2,1fr)}}
+#sortie .sodrop{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;border:2px dashed var(--line);border-radius:16px;padding:28px 18px;cursor:pointer;background:var(--bg)}
+#sortie .sodrop.on,#sortie .sodrop:hover{border-color:var(--accent)}
+#sortie .sodrop input{display:none}
+#sortie .sodrop b{font-size:17px;color:var(--accent)}
+#sortie .sodrop span{font-size:13px;color:var(--muted);max-width:460px}
+#sortie .sorecent{margin-top:12px;font-size:13.5px;color:var(--muted)}
+#sortie select,#sortie input[type=date],#sortie input[type=number]{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:7px 9px;margin-left:4px;max-width:100%}
+#sortie input[type=number]{width:4.5em}
+#sortie .sorecent select{max-width:min(100%,420px)}
+#sortie .soerr{font-size:13px;color:var(--muted);margin-top:10px;min-height:1em}
+#sortie .sohead{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+#sortie .soname{font-size:20px;font-weight:800;font-stretch:106%}
+#sortie .sosmall{font-size:13px;color:var(--muted)}
+#sortie .soform{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-size:13.5px;color:var(--muted)}
+#sortie .soverdict p{font-size:14.5px;line-height:1.5;margin:0}
+#soMap svg{width:auto;height:auto;display:block}
+#sortie .sowind svg,#sortie .sotc svg{width:auto;height:auto;flex:0 0 auto}
+#soMap{height:440px;border-radius:12px;overflow:hidden;z-index:0}
+@media (max-width:620px){#soMap{height:340px}}
+#sortie .sowind{display:flex;flex-direction:column;align-items:center}
+#sortie .sowind b{font-size:11px;font-weight:800;color:#1c7ed6;background:#fff;border-radius:6px;padding:0 4px;margin-top:-2px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+#sortie .soclimb span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+#sortie .sobest{display:flex;align-items:flex-end;gap:4px;height:110px}
+#sortie .sobest button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;border:0;background:none;padding:0;cursor:pointer;color:var(--muted);font:inherit;font-size:11px;min-width:0}
+#sortie .sobest i{display:block;width:100%;max-width:22px;border-radius:5px;opacity:.8}
+#sortie .sobest button.sel{color:var(--ink);font-weight:800}
+#sortie .sobest button.sel i{opacity:1;outline:2px solid var(--ink);outline-offset:1px}
+#sortie .soprof{display:block;overflow:visible;touch-action:pan-y}
+#sortie .soprof .ax{font-size:10.5px;fill:var(--muted)}
+#sortie .soprof .grid{stroke:var(--line);stroke-width:1}
+#sortie .soprof .socl{font-size:10.5px;font-weight:800;fill:var(--ink)}
+#sortie .sotab{width:100%;border-collapse:collapse;font-size:13px}
+#sortie .sotab th{text-align:left;font-size:11.5px;color:var(--muted);font-weight:600;padding:4px 4px 6px;border-bottom:1px solid var(--line)}
+#sortie .sotab td{padding:7px 4px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
+#sortie .sotab td small{display:block;color:var(--muted);font-size:11px}
+#sortie .socat{display:inline-block;color:#fff;font-size:11px;font-weight:800;border-radius:6px;padding:2px 6px}
+@media (max-width:620px){#sortie .sotab th:nth-child(6),#sortie .sotab td:nth-child(6){display:none}#sortie .sotab{font-size:12px}}
+#sortie .sotips{margin:0;display:grid;gap:10px}
+#sortie .sotips dt{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+#sortie .sotips dd{margin:2px 0 0;font-size:13.5px;line-height:1.45}
+#sortie .sotl{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+#sortie .sotc{flex:0 0 auto;min-width:92px;border:1px solid var(--line);border-radius:12px;padding:9px 10px;background:var(--bg);display:grid;gap:2px;font-size:12px}
+#sortie .sotc .h{font-weight:800;font-size:13.5px}
+#sortie .sotc .k,#sortie .sotc .c{color:var(--muted)}
+#sortie .sotc .t{font-size:20px;font-weight:800}
+#sortie .sotc .w{display:flex;align-items:center;gap:3px;font-weight:700}
+#sortie .sotc .w small{font-weight:500;color:var(--muted)}
+#sortie .sotc .p{color:#1c7ed6;font-weight:600}
+#sortie .note{font-size:12px;color:var(--muted);margin-top:10px}
+#sortie .legend i{height:6px}
