@@ -73,7 +73,7 @@ jobs:
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
         run: |
           mkdir -p _site
-          cp -r index.html recup.js recup.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
+          cp -r index.html recup.js recup.css plan.js plan.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
 
       - uses: actions/configure-pages@v5
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
