@@ -310,7 +310,7 @@ async function renderMap(r, wx) {
   try { await ensureLeaflet(); } catch (e) { $("soMap").innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
   if (!SO.map) {
     SO.map = L.map("soMap", { zoomControl: true, attributionControl: true });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom: 18, attribution: "© OpenStreetMap, © CARTO" }).addTo(SO.map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(SO.map);
   }
   SO.layers.forEach(l => l.remove()); SO.layers = [];
   const P = SO.P, add = l => { l.addTo(SO.map); SO.layers.push(l); return l; };
