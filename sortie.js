@@ -456,6 +456,8 @@ function renderTimeline(r, wx) {
 async function open() {
   $("title").textContent = "Planifier une sortie";
   shell();
+  // profil Garmin (FTP, zones) nécessaire à la nutrition : chargé sans toucher à l'affichage
+  if (window.Recup && !Recup.data) { try { await Recup.ensure("soProfil", () => {}); } catch (e) {} }
   if (!SO.route) { const r = LS.get("sortieRoute", null); if (r && r.pts && r.pts.length > 1) { SO.route = r; SO.P = profile(r.pts); SO.climbs = climbs(SO.P); } }
   renderLoad();
   $("soBody").hidden = !SO.route;
