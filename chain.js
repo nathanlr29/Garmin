@@ -1,0 +1,103 @@
+"use strict";
+// Carte « Chaîne » (onglet Vélo) : km dehors depuis le dernier graissage (Squirt) et sorties sous la pluie.
+(() => {
+const K_LUBE = "chainLube", K_KM = "chainKm", K_SHORT = "chainShort";
+const ls = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const pad = n => String(n).padStart(2, "0");
+const isoLocal = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const fmtD = d => d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+const WET_MM = 0.5;    // pluie cumulée pendant la sortie (et l'heure d'avant) pour la considérer « sous l'eau »
+const rainCache = {};  // clé "lat,lon" -> Promise<{ "AAAA-MM-JJTHH:00": mm }>
+
+function outdoorRides(since) {
+  const short = ls.get(K_SHORT, false);
+  return (S.all || []).filter(a => RIDE_TYPES.has(a.t) && !isIndoor(a) && a.km > 0 && a.dt > since && (short || a.mt >= 1200))
+    .sort((a, b) => a.dt - b.dt);
+}
+function where(a) {  // milieu de la trace si on l'a, sinon la ville du tableau de bord
+  const t = S.traces && S.traces[a.id];
+  const p = t && t.length ? t[Math.floor(t.length / 2)] : [S.cfg.latitude ?? 48.1173, S.cfg.longitude ?? -1.6778];
+  return [Math.round(p[0] * 4) / 4, Math.round(p[1] * 4) / 4];
+}
+function rainAt(lat, lon) {
+  const k = lat + "," + lon;
+  if (!rainCache[k]) rainCache[k] = fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=precipitation&past_days=92&forecast_days=1&timezone=Europe%2FParis`)
+    .then(r => r.ok ? r.json() : null).then(j => { const m = {}; if (j && j.hourly) j.hourly.time.forEach((t, i) => m[t] = j.hourly.precipitation[i] || 0); return m; })
+    .catch(() => null);
+  return rainCache[k];
+}
+async function wetness(a) {  // mm de pluie entre 1 h avant le départ et l'arrivée
+  const m = await rainAt(...where(a)); if (!m) return null;
+  const end = new Date(a.dt.getTime() + (a.et || a.mt) * 1000);
+  let mm = 0, seen = 0;
+  for (let t = new Date(a.dt.getTime() - 3600e3); t <= end; t = new Date(t.getTime() + 3600e3)) {
+    const k = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:00`;
+    if (k in m) { mm += m[k]; seen++; }
+  }
+  return seen ? Math.round(mm * 10) / 10 : null;
+}
+
+let seq = 0;
+async function render() {
+  const box = document.getElementById("chain"); if (!box) return;
+  const my = ++seq;
+  const hist = ls.get(K_LUBE, []), last = hist.length ? new Date(hist[0]) : null, lim = ls.get(K_KM, 200);
+  const form = `<div class="chform"><label>Graissée le <input type="datetime-local" id="chDate" value="${isoLocal(last || new Date())}" max="${isoLocal(new Date())}"></label>
+      <button class="btn" id="chSave">Enregistrer</button><button class="btn primary" id="chNow">Je viens de la graisser</button></div>`;
+  if (!last) {
+    box.innerHTML = `<h2>Chaîne <small>Squirt</small></h2><p class="chmsg">Indique quand tu as graissé ta chaîne : je compte ensuite les km dehors et je te préviens après une sortie sous la pluie.</p>${form}`;
+    bind(box); return;
+  }
+  const rides = outdoorRides(last), km = rides.reduce((s, a) => s + a.km, 0);
+  const days = Math.floor((Date.now() - last) / 864e5);
+  const draw = (wet, rainKnown) => {
+    if (my !== seq) return;
+    const open = box.querySelector("details.chmore")?.open;
+    const pct = Math.min(100, km / lim * 100);
+    let st, col, msg;
+    if (wet.length) { st = "Graissage obligatoire"; col = "#e03131"; msg = `Sortie sous la pluie le ${fmtD(wet[0].a.dt)} (${String(wet[0].mm).replace(".", ",")} mm) : la Squirt est une cire, l'eau la lessive. Nettoie, sèche et regraisse avant la prochaine sortie.`; }
+    else if (km >= lim) { st = "À graisser"; col = "#e8501c"; msg = `${nf(km)} km dehors depuis le dernier graissage : c'est le moment.`; }
+    else if (km >= lim * .8) { st = "Bientôt"; col = "#f08c00"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
+    else { st = "OK"; col = "#2f9e44"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
+    box.classList.toggle("chdue", st !== "OK" && st !== "Bientôt");
+    box.innerHTML = `<h2>Chaîne <small>Squirt · graissée ${days === 0 ? "aujourd'hui" : days === 1 ? "hier" : `il y a ${days} jours`}</small><span class="chst" style="background:${col}">${st}</span></h2>
+      <div class="chrow"><div class="chkm"><b>${nf(km)}</b> / ${lim} km dehors</div><div class="chbar"><div style="width:${pct}%;background:${col}"></div></div></div>
+      <p class="chmsg">${msg}${rainKnown ? "" : " <small>(météo indisponible : je ne peux pas détecter la pluie pour l'instant)</small>"}</p>
+      <details class="chmore"><summary>Graissage et réglages</summary>${form}
+        <div class="chopts"><label>Rappel tous les <select id="chKm">${[150, 200, 250, 300, 400].map(v => `<option ${v === lim ? "selected" : ""}>${v}</option>`).join("")}</select> km</label>
+        <label><input type="checkbox" id="chShort" ${ls.get(K_SHORT, false) ? "checked" : ""}> compter les trajets de moins de 20 min</label></div>
+        ${rides.length ? `<div class="chlist">${rides.slice(-6).reverse().map(a => { const w = wet.find(x => x.a === a); return `<div>${fmtD(a.dt)} · ${nf(a.km)} km${w ? ` · <b style="color:#e03131">pluie ${String(w.mm).replace(".", ",")} mm</b>` : ""}</div>`; }).join("")}</div>` : ""}
+        ${hist.length > 1 ? `<div class="chhist">Graissages précédents : ${hist.slice(1, 5).map(h => fmtD(new Date(h))).join(", ")}</div>` : ""}
+      </details>`;
+    if (open) box.querySelector("details.chmore").open = true;
+    bind(box);
+  };
+  draw([], true);
+  const res = await Promise.all(rides.map(a => wetness(a).then(mm => ({ a, mm }))));
+  const wet = res.filter(r => r.mm != null && r.mm >= WET_MM);
+  draw(wet, rides.length === 0 || res.some(r => r.mm != null));
+}
+function bind(box) {
+  const save = d => { if (isNaN(d) || d > new Date()) return; const h = ls.get(K_LUBE, []).filter(x => Math.abs(new Date(x) - d) > 6e4); h.unshift(d.toISOString()); h.sort((a, b) => new Date(b) - new Date(a)); ls.set(K_LUBE, h.slice(0, 20)); render(); };
+  box.querySelector("#chNow").onclick = () => save(new Date());
+  box.querySelector("#chSave").onclick = () => { const v = box.querySelector("#chDate").value; if (v) save(parseLocal(v + ":00")); };
+  const k = box.querySelector("#chKm"); if (k) k.onchange = () => { ls.set(K_KM, +k.value); render(); };
+  const s = box.querySelector("#chShort"); if (s) s.onchange = () => { ls.set(K_SHORT, s.checked); render(); };
+}
+const css = document.createElement("style");
+css.textContent = `#chain h2{display:flex;align-items:center;gap:8px}
+#chain .chst{margin-left:auto;color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;letter-spacing:.02em}
+#chain.chdue{border-color:#e03131;box-shadow:0 0 0 1px #e03131 inset,var(--shadow)}
+#chain .chrow{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
+#chain .chkm{font-size:14px;color:var(--muted);white-space:nowrap}#chain .chkm b{font-size:24px;color:var(--ink);font-weight:800}
+#chain .chbar{height:10px;border-radius:999px;background:var(--h0);overflow:hidden}#chain .chbar div{height:100%;border-radius:999px}
+#chain .chmsg{font-size:13.5px;margin:10px 0 0;line-height:1.4}#chain .chmsg small{color:var(--muted)}
+#chain .chmore summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent);margin-top:10px}
+#chain .chform,#chain .chopts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:10px;font-size:13px}
+#chain input[type=datetime-local],#chain select{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-left:4px}
+#chain .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#chain .chlist{margin-top:10px;font-size:12.5px;color:var(--muted);display:grid;gap:3px}
+#chain .chhist{margin-top:8px;font-size:12px;color:var(--muted)}`;
+document.head.appendChild(css);
+window.Chain = { render };
+})();

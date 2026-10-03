@@ -266,6 +266,7 @@ function render(){
   <div class="grid">
     <section class="card hero span12" id="hero"></section>
     <section class="span12"><div class="tiles" id="tiles"></div></section>
+    <section class="card span12" id="chain"></section>
     <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
     <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="shuffle">Autres anecdotes</button></h2><div class="facts" id="facts"></div></section>
@@ -287,6 +288,7 @@ function render(){
   renderHeat(cur.daily,Y,isCur,todayIdx,acts);
   renderRides();
   renderYears();
+  window.Chain?.render();
   document.getElementById("shuffle").onclick=()=>{S.factSeed++;renderFacts(acts,Y,isCur,todayIdx)};
 }
 
@@ -595,5 +597,6 @@ load();
 </script>
 <script src="recup.js"></script>
 <script src="plan.js"></script>
+<script src="chain.js"></script>
 </body>
 </html>
