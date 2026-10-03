@@ -35,7 +35,7 @@ const RPE = ["2/10, très facile", "3-4/10, conversation facile", "5-6/10, soute
 
 // ------------------------------------------------------------------ Données
 const rides = () => (S.all || []).filter(a => RIDE_TYPES.has(a.t));
-const isTraining = a => a.mt >= 1200;  // les trajets du quotidien (moins de 20 min) ne comptent pas comme séances
+const isTraining = a => a.mt >= 1800;  // moins de 30 min = trajet avec le vélo du taff, pas une séance
 function profile() {
   const p = (window.Recup && Recup.data && Recup.data.profile) || {};
   const own = store2.get("planFtp");

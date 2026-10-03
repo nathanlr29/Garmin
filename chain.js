@@ -1,7 +1,8 @@
 "use strict";
 // Carte « Chaîne » (onglet Vélo) : km dehors depuis le dernier graissage (Squirt) et sorties sous la pluie.
 (() => {
-const K_LUBE = "chainLube", K_KM = "chainKm", K_SHORT = "chainShort";
+const K_LUBE = "chainLube", K_KM = "chainKm";
+const MIN_RIDE = 1800;  // moins de 30 min = trajet avec le vélo du taff, pas le vélo de route
 const ls = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
 const pad = n => String(n).padStart(2, "0");
 const isoLocal = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -10,8 +11,7 @@ const WET_MM = 0.5;    // pluie cumulée pendant la sortie (et l'heure d'avant) 
 const rainCache = {};  // clé "lat,lon" -> Promise<{ "AAAA-MM-JJTHH:00": mm }>
 
 function outdoorRides(since) {
-  const short = ls.get(K_SHORT, false);
-  return (S.all || []).filter(a => RIDE_TYPES.has(a.t) && !isIndoor(a) && a.km > 0 && a.dt > since && (short || a.mt >= 1200))
+  return (S.all || []).filter(a => RIDE_TYPES.has(a.t) && !isIndoor(a) && a.km > 0 && a.dt > since && a.mt >= MIN_RIDE)
     .sort((a, b) => a.dt - b.dt);
 }
 function where(a) {  // milieu de la trace si on l'a, sinon la ville du tableau de bord
@@ -64,8 +64,7 @@ async function render() {
       <div class="chrow"><div class="chkm"><b>${nf(km)}</b> / ${lim} km dehors</div><div class="chbar"><div style="width:${pct}%;background:${col}"></div></div></div>
       <p class="chmsg">${msg}${rainKnown ? "" : " <small>(météo indisponible : je ne peux pas détecter la pluie pour l'instant)</small>"}</p>
       <details class="chmore"><summary>Graissage et réglages</summary>${form}
-        <div class="chopts"><label>Rappel tous les <select id="chKm">${[150, 200, 250, 300, 400].map(v => `<option ${v === lim ? "selected" : ""}>${v}</option>`).join("")}</select> km</label>
-        <label><input type="checkbox" id="chShort" ${ls.get(K_SHORT, false) ? "checked" : ""}> compter les trajets de moins de 20 min</label></div>
+        <div class="chopts"><label>Rappel tous les <select id="chKm">${[150, 200, 250, 300, 400].map(v => `<option ${v === lim ? "selected" : ""}>${v}</option>`).join("")}</select> km</label><span class="chnote">trajets de moins de 30 min ignorés (vélo du taff)</span></div>
         ${rides.length ? `<div class="chlist">${rides.slice(-6).reverse().map(a => { const w = wet.find(x => x.a === a); return `<div>${fmtD(a.dt)} · ${nf(a.km)} km${w ? ` · <b style="color:#e03131">pluie ${String(w.mm).replace(".", ",")} mm</b>` : ""}</div>`; }).join("")}</div>` : ""}
         ${hist.length > 1 ? `<div class="chhist">Graissages précédents : ${hist.slice(1, 5).map(h => fmtD(new Date(h))).join(", ")}</div>` : ""}
       </details>`;
@@ -82,7 +81,6 @@ function bind(box) {
   box.querySelector("#chNow").onclick = () => save(new Date());
   box.querySelector("#chSave").onclick = () => { const v = box.querySelector("#chDate").value; if (v) save(parseLocal(v + ":00")); };
   const k = box.querySelector("#chKm"); if (k) k.onchange = () => { ls.set(K_KM, +k.value); render(); };
-  const s = box.querySelector("#chShort"); if (s) s.onchange = () => { ls.set(K_SHORT, s.checked); render(); };
 }
 const css = document.createElement("style");
 css.textContent = `#chain h2{display:flex;align-items:center;gap:8px}
@@ -97,6 +95,7 @@ css.textContent = `#chain h2{display:flex;align-items:center;gap:8px}
 #chain input[type=datetime-local],#chain select{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-left:4px}
 #chain .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 #chain .chlist{margin-top:10px;font-size:12.5px;color:var(--muted);display:grid;gap:3px}
+#chain .chnote{color:var(--muted);font-size:12px}
 #chain .chhist{margin-top:8px;font-size:12px;color:var(--muted)}`;
 document.head.appendChild(css);
 window.Chain = { render };
