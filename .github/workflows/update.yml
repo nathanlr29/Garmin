@@ -65,7 +65,8 @@ jobs:
           else
             git commit -m "Mise à jour Garmin"
             # si le dépôt a bougé pendant le passage (modif manuelle), on se recale puis on réessaie
-            for i in 1 2 3; do git pull --rebase --quiet && git push && exit 0; sleep 5; done
+            # en cas de conflit sur les données, on garde celles qu'on vient de récupérer (les plus fraîches)
+            for i in 1 2 3; do git pull --rebase -X theirs --quiet && git push && exit 0; git rebase --abort 2>/dev/null; sleep 5; done
             exit 1
           fi
 
