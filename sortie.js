@@ -44,13 +44,15 @@ async function fillElevation(pts) {  // GPX sans altitude (ou trace d'une sortie
   const have = pts.filter(p => p[2] != null).length;
   if (have > pts.length * .8) return pts;
   let cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
-  const total = cum[cum.length - 1], n = clamp(Math.round(total / 150), 2, 800);
+  const total = cum[cum.length - 1], n = clamp(Math.min(pts.length, Math.round(total / 100)), 2, 200);  // l'API compte chaque point : on reste sobre
   const idx = []; for (let k = 0, j = 0; k < n; k++) { const t = total * k / (n - 1); while (j < cum.length - 1 && cum[j] < t) j++; idx.push(j); }
   const el = [];
   for (let s = 0; s < idx.length; s += 100) {
     const part = idx.slice(s, s + 100);
-    const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${part.map(i => pts[i][0]).join(",")}&longitude=${part.map(i => pts[i][1]).join(",")}`);
-    if (!r.ok) throw new Error("Altitude indisponible pour cette trace.");
+    const url = `https://api.open-meteo.com/v1/elevation?latitude=${part.map(i => pts[i][0]).join(",")}&longitude=${part.map(i => pts[i][1]).join(",")}`;
+    let r = await fetch(url);
+    if (r.status === 429) { await new Promise(ok => setTimeout(ok, 2500)); r = await fetch(url); }
+    if (!r.ok) throw new Error(r.status === 429 ? "Le service d'altitude est saturé, réessaie dans une minute." : "Altitude indisponible pour cette trace.");
     el.push(...(await r.json()).elevation);
   }
   let k = 0;
@@ -96,17 +98,20 @@ function climbs(P) {
 }
 
 // ------------------------------------------------------------------ Météo (Open-Meteo, sans clé)
-function samples(P) {  // points météo tous les ~8 km
-  const total = P[P.length - 1].d, n = clamp(Math.round(total / 8000) + 1, 2, 30), out = [];
+function samples(P) {  // points météo tous les ~12 km
+  const total = P[P.length - 1].d, n = clamp(Math.round(total / 12000) + 1, 2, 16), out = [];
   for (let k = 0; k < n; k++) { const d = total * k / (n - 1); out.push(P[Math.min(P.length - 1, Math.round(d / STEP))]); }
   return out;
 }
-async function loadWx(P) {
-  const S_ = samples(P), key = S_.map(p => p.lat.toFixed(2) + "," + p.lon.toFixed(2)).join(";") + "|" + new Date().toISOString().slice(0, 13);
+async function loadWx(P, day) {  // uniquement le jour choisi (et le lendemain), pour ménager l'API
+  const d2 = new Date(day); d2.setDate(d2.getDate() + 1);
+  const S_ = samples(P), key = S_.map(p => p.lat.toFixed(2) + "," + p.lon.toFixed(2)).join(";") + "|" + ymd(day) + "|" + new Date().toISOString().slice(0, 13);
   if (SO.wxKey === key && SO.wx) return SO.wx;
   const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${S_.map(p => p.lat.toFixed(3)).join(",")}&longitude=${S_.map(p => p.lon.toFixed(3)).join(",")}&hourly=${H}&daily=sunrise,sunset&forecast_days=16&timezone=Europe%2FParis`;
-  const r = await fetch(url); if (!r.ok) throw new Error("Prévisions météo indisponibles pour l'instant.");
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${S_.map(p => p.lat.toFixed(3)).join(",")}&longitude=${S_.map(p => p.lon.toFixed(3)).join(",")}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis`;
+  const r = await fetch(url);
+  if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
+  if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
   let j = await r.json(); if (!Array.isArray(j)) j = [j];
   const t0 = parseLocal(j[0].hourly.time[0]).getTime();
   SO.wx = { S: S_, loc: j, t0, nH: j[0].hourly.time.length, step: P[P.length - 1].d / Math.max(1, S_.length - 1) };
@@ -243,8 +248,8 @@ async function compute() {
   if (!SO.P) return;
   const s = settings(), start = startOf(s);
   let wx = null, err = "";
-  try { wx = await loadWx(SO.P); } catch (e) { err = e.message; }
-  if (wx && (start.getTime() < wx.t0 || start.getTime() > wx.t0 + (wx.nH - 1) * 3600e3)) { err = `Pas encore de prévisions pour cette date (jusqu'au ${new Date(wx.t0 + (wx.nH - 1) * 3600e3).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}).`; wx = null; }
+  try { wx = await loadWx(SO.P, start); } catch (e) { err = e.message; }
+  if (wx && wx.loc[0].hourly.temperature_2m.every(v => v == null)) { err = "Pas encore de prévisions pour cette date (16 jours maximum)."; wx = null; }
   const res = simulate(SO.P, wx, start, s.speed, false);
   SO.res = res;
   const loop = dist([SO.P[0].lat, SO.P[0].lon], [SO.P[SO.P.length - 1].lat, SO.P[SO.P.length - 1].lon]) < 3000;
