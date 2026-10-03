@@ -169,6 +169,16 @@ const isLatest = d => d === RC.pick[RC.pick.length - 1];
 
 // ------------------------------------------------------------------ Bilan du matin
 function scoreColor(s) { return s >= 75 ? "var(--teal)" : s >= 50 ? "var(--accent-2)" : s >= 25 ? "var(--amber)" : "var(--rose)"; }
+// Le score est calculé au réveil : on signale les grosses séances faites depuis, qui compteront le lendemain
+function afterNote(n) {
+  if (!n.dt) return "";
+  const wake = n.wakeDt || new Date(n.dt.getFullYear(), n.dt.getMonth(), n.dt.getDate(), 7);
+  const acts = (S.all || []).filter(a => a.d.slice(0, 10) === keyOf(n.dt) && a.dt >= wake), tss = acts.reduce((s, a) => s + tssOf(a), 0);
+  if (tss < 60) return "";
+  const km = acts.reduce((s, a) => s + a.km, 0), nx = new Date(n.dt); nx.setDate(nx.getDate() + 1);
+  const lp = loadPart(nx), today = n.dt.toDateString() === new Date().toDateString();
+  return `<div class="mafter">Score calculé au réveil (${clock(wake)}). ${today ? "Depuis" : "Dans la journée"} : ${km >= 1 ? `${nf(km)} km` : `${acts.length} séance${acts.length > 1 ? "s" : ""}`} pour ≈ ${nf(tss)} TSS${lp ? `, soit ${nf(lp.ratio, 1)}× ta charge habituelle` : ""}. ${today ? "Ça pèsera sur ton score de demain matin" : "Ça a pesé sur le score du lendemain"}${lp ? ` (charge récente : ${lp.score}/100)` : ""}.</div>`;
+}
 function renderMorning() {
   const n = RC.pick[RC.sel] || {}, latest = isLatest(n);
   const R = recoScore(n), s = R.score;
@@ -193,6 +203,7 @@ function renderMorning() {
     <div><div class="mtitle">${s != null ? R.label : latest ? "Ta dernière nuit" : "La nuit"}</div>
       <div class="msub">${when ? (today ? `Ce matin, ${when}` : `Le matin du ${when}`) : ""}${n.tr != null ? ` · disponibilité Garmin ${n.tr}` : ""}</div>
       ${R.text ? `<div class="mtext">${R.text}</div>` : ""}
+      ${afterNote(n)}
       <div class="kpis">${kpis}</div></div>
     <div class="factors">${factors ? `<div class="msub" style="margin:0 0 6px">Ce qui compose le score</div>${factors}` : ""}</div>`;
   const arc = $("rRingArc");
@@ -208,9 +219,22 @@ function baseline(d, key, floor) {
   const m = prev.reduce((a, b) => a + b, 0) / prev.length, sd = Math.sqrt(prev.reduce((a, b) => a + (b - m) ** 2, 0) / prev.length);
   return { m, sd: Math.max(sd, floor) };
 }
-function dayLoad(dt) { // charge d'une journée : charge d'entraînement Garmin, sinon minutes d'effort
-  const key = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-  return (S.all || []).filter(a => a.d.slice(0, 10) === key).reduce((s, a) => s + (a.tl || a.mt / 60), 0);
+// Charge d'une activité en TSS (même calcul que l'onglet Plan) : puissance si on l'a, sinon cardio rapporté au seuil
+function tssOf(a) {
+  const p = (RC.data && RC.data.profile) || {}, ftp = +store.get("planFtp") || p.ftp || 250, lthr = (p.hrZones && p.hrZones.lthr) || 165;
+  const h = (a.mt || 0) / 3600; if (!h) return 0;
+  const pw = a.np || a.w, IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / ftp : a.hr > 0 ? a.hr / lthr : .65;
+  return h * Math.max(.4, Math.min(1.2, IF)) ** 2 * 100;
+}
+const keyOf = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+function dayLoad(dt) { const key = keyOf(dt); return (S.all || []).filter(a => a.d.slice(0, 10) === key).reduce((s, a) => s + tssOf(a), 0); }
+function loadPart(dt) {  // charge des 2 jours précédents rapportée aux 4 semaines d'avant
+  const day = k => { const t = new Date(dt); t.setDate(t.getDate() - k); return t; };
+  const acute = dayLoad(day(1)) + .5 * dayLoad(day(2));
+  let chronic = 0; for (let k = 2; k <= 29; k++) chronic += dayLoad(day(k)); chronic = chronic / 28 * 1.5;
+  if (!(chronic > 0)) return null;
+  const ratio = acute / chronic, km = (S.all || []).filter(a => a.d.slice(0, 10) === keyOf(day(1))).reduce((s, a) => s + a.km, 0);
+  return { ratio, km, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6))) };
 }
 function recoScore(d) {
   const parts = [];
@@ -228,11 +252,8 @@ function recoScore(d) {
   if (rh(d) && br) { const z = (rh(d) - br.m) / br.sd, dv = rh(d) - br.m;
     add("rhr", "Cœur au repos", 15, 55 - 22 * z, `${rh(d)} bpm, ${dv >= 0 ? "+" : "−"}${nf(Math.abs(dv), 1)} vs ta moyenne 30 j (${nf(br.m, 1)})`, "cœur au repos plus bas que d'habitude", "cœur au repos plus haut que d'habitude"); }
   if (S.all && S.all.length) {
-    const day = k => { const t = new Date(d.dt); t.setDate(t.getDate() - k); return t; };
-    const acute = dayLoad(day(1)) + .5 * dayLoad(day(2));
-    let chronic = 0; for (let k = 2; k <= 29; k++) chronic += dayLoad(day(k)); chronic = chronic / 28 * 1.5;
-    if (chronic > 0) { const ratio = acute / chronic, km = (S.all || []).filter(a => a.d.slice(0, 10) === `${day(1).getFullYear()}-${pad(day(1).getMonth() + 1)}-${pad(day(1).getDate())}`).reduce((s, a) => s + a.km, 0);
-      add("load", "Charge récente", 20, 100 - 35 * Math.max(0, ratio - .6), `${km ? `${nf(km)} km la veille · ` : "repos la veille · "}${nf(ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces deux derniers jours"); }
+    const lp = loadPart(d.dt);
+    if (lp) add("load", "Charge récente", 20, lp.score, `${lp.km ? `${nf(lp.km)} km la veille · ` : "repos la veille · "}${nf(lp.ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces deux derniers jours");
   }
   if (parts.length < 2) return { score: null, parts };
   const W = parts.reduce((a, p) => a + p.w, 0), score = Math.round(parts.reduce((a, p) => a + p.score * p.w, 0) / W);
@@ -510,26 +531,29 @@ function renderCmp() {
 
 // ------------------------------------------------------------------ Anecdotes
 function renderFacts() {
-  const N = RC.nights, F = [], add = (n, t, sub, w = 1) => F.push({ n, t, sub, w });
+  const N = RC.nights, F = [], add = (n, t, sub, w = 1, day) => F.push({ n, t, sub, w, day: day && day.d });
   if (!N.length) { $("rFacts").innerHTML = ""; return; }
   const tot = N.reduce((s, d) => s + d.sl, 0);
   add(`${nf(tot / 86400, 1)} j`, "dormis depuis janvier", `${nf(tot / 3600)} heures au total`, 3);
   add(hm(avgOf(N, "sl") / 60), "de sommeil par nuit en moyenne", `sur ${N.length} nuits`, 2);
   const best = maxBy(N.filter(d => d.score != null), d => d.score);
-  if (best) add(best.score, "ta meilleure note de sommeil", best.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 3);
-  const longest = maxBy(N, d => d.sl); add(hm(longest.sl / 60), "ta plus longue nuit", longest.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2);
+  if (best) add(best.score, "ta meilleure note de sommeil", best.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 3, best);
+  const longest = maxBy(N, d => d.sl); add(hm(longest.sl / 60), "ta plus longue nuit", longest.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2, longest);
   const bsW = N.filter(d => d.bedDt && [0, 1, 2, 3, 6].includes(d.bedDt.getDay())).map(d => minsFrom18(d.bedDt)), bsE = N.filter(d => d.bedDt && [5, 6].includes(new Date(d.bedDt.getTime() - 6 * 36e5).getDay())).map(d => minsFrom18(d.bedDt));
   if (bsW.length > 3 && bsE.length > 3) { const diff = bsE.reduce((a, b) => a + b, 0) / bsE.length - bsW.reduce((a, b) => a + b, 0) / bsW.length; add(`${diff >= 0 ? "+" : "−"}${nf(Math.abs(diff))} min`, diff >= 0 ? "plus tard au lit le week-end" : "plus tôt au lit le week-end", "vendredi et samedi soir vs semaine", 2); }
-  const hv = maxBy(N.filter(d => d.hrv), d => d.hrv); if (hv) add(`${hv.hrv} ms`, "ta VFC nocturne record", hv.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }), 2);
-  const lo = RC.days.filter(d => d.hrMin).reduce((a, d) => !a || d.hrMin < a.hrMin ? d : a, null); if (lo) add(`${lo.hrMin} bpm`, "ton cœur le plus lent de l'année", lo.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }), 3);
+  const hv = maxBy(N.filter(d => d.hrv), d => d.hrv); if (hv) add(`${hv.hrv} ms`, "ta VFC nocturne record", hv.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }), 2, hv);
+  const lo = RC.days.filter(d => d.hrMin).reduce((a, d) => !a || d.hrMin < a.hrMin ? d : a, null); if (lo) add(`${lo.hrMin} bpm`, "ton cœur le plus lent de l'année", lo.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }), 3, lo);
   const beats = N.reduce((s, d) => s + (d.srhr || d.rhr || 0) * d.sl / 60, 0); if (beats) add(`${nf(beats / 1e6, 1)} M`, "battements de cœur pendant ton sommeil", "à peu près, au rythme du repos", 1);
   let run = 0, br = 0; N.forEach(d => { run = d.sl >= 7 * 3600 ? run + 1 : 0; br = Math.max(br, run); }); if (br > 1) add(br, "nuits de 7 h ou plus d'affilée", "ta meilleure série", 2);
-  const early = minBy(N.filter(d => d.wakeDt), d => minsFrom18(d.wakeDt)); if (early) add(clock(early.wakeDt), "ton réveil le plus matinal", early.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2);
+  const early = minBy(N.filter(d => d.wakeDt), d => minsFrom18(d.wakeDt)); if (early) add(clock(early.wakeDt), "ton réveil le plus matinal", early.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), 2, early);
   const awake = N.reduce((s, d) => s + (d.awake || 0), 0); add(hm(awake / 60), "passées éveillé au lit", "réveils nocturnes cumulés", 1);
   const big = N.filter(d => nightFacts(d).km >= 200); if (big.length) add(hm(avgOf(big, "sl") / 60), "de sommeil après tes sorties de 200 km et plus", `${big.length} nuits${avgOf(big, "score") != null ? ` · score moyen ${nf(avgOf(big, "score"))}` : ""}`, 3);
   let seed = RC.factSeed * 9301 + 777; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const pool = F.map(f => ({ f, k: Math.pow(rnd(), 1 / f.w) })).sort((a, b) => b.k - a.k).slice(0, 6).map(x => x.f);
-  $("rFacts").innerHTML = pool.map(f => `<div class="fact"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")}</small></div></div>`).join("");
+  $("rFacts").innerHTML = pool.map(f => { const i = f.day ? RC.pick.findIndex(p => p.d === f.day) : -1;
+    return i >= 0 ? `<button class="fact factlink" data-i="${i}"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")} · voir la nuit →</small></div></button>`
+      : `<div class="fact"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")}</small></div></div>`; }).join("");
+  $("rFacts").querySelectorAll("[data-i]").forEach(b => b.onclick = () => { selectDay(+b.dataset.i); $("rMorning").scrollIntoView({ behavior: "smooth", block: "start" }); });
 }
 function minBy(arr, f) { let b = null, bv = Infinity; for (const a of arr) { const v = f(a); if (v < bv) { bv = v; b = a; } } return b; }
 
