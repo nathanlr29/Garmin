@@ -58,7 +58,14 @@ function estimateFtp() { // meilleure puissance normalisée sur 40 min et plus, 
   const c = rides().filter(a => a.dt >= cut && (a.np || a.w) && a.mt >= 2400).map(a => (a.np || a.w) * (a.mt >= 3600 ? .97 : .93));
   return c.length ? W5(Math.max(...c)) : null;
 }
-function dayLoads() { const m = {}; (S.all || []).forEach(a => { const k = a.d.slice(0, 10); m[k] = (m[k] || 0) + (a.tl || a.mt / 60); }); return m; }
+// Charge d'une activité en TSS : puissance si on l'a (home trainer), sinon fréquence cardiaque rapportée au seuil
+function tssOf(a) {
+  const p = (window.Recup && Recup.data && Recup.data.profile) || {}, ftp = store2.get("planFtp") || p.ftp || 250, lthr = (p.hrZones && p.hrZones.lthr) || 165;
+  const h = (a.mt || 0) / 3600; if (!h) return 0;
+  const pw = a.np || a.w, IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / ftp : a.hr > 0 ? a.hr / lthr : .65;
+  return h * clamp(IF, .4, 1.2) ** 2 * 100;
+}
+function dayLoads() { const m = {}; (S.all || []).forEach(a => { const k = a.d.slice(0, 10); m[k] = (m[k] || 0) + tssOf(a); }); return m; }
 function fitness() {
   const m = dayLoads(), today = new Date(); let ctl = 0, atl = 0;
   for (let d = addDays(today, -120); d < today; d = addDays(d, 1)) { const l = m[ymd(d)] || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; }
@@ -285,7 +292,7 @@ function renderHead(prof, form, ready, ph) {
   <section class="card span12">
     <div class="formrow">
       <div class="fi"><div class="l">Récupération</div><div class="v" style="color:${rc}">${r ?? "–"}<small>/100</small></div><div class="s">${ready.avg3 != null ? `moy. 3 j : ${Math.round(ready.avg3)}` : "onglet Récup"}</div></div>
-      <div class="fi"><div class="l">Forme (charge Garmin)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
+      <div class="fi"><div class="l">Forme (charge en TSS)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
       <div class="fi"><div class="l">7 derniers jours</div><div class="v">${Math.round(form.km7)}<small> km</small></div><div class="s">${form.n7} séance${form.n7 > 1 ? "s" : ""}${form.c7 ? ` + ${form.c7} trajet${form.c7 > 1 ? "s" : ""}` : ""} · ${form.h7.toFixed(1).replace(".", ",")} h</div></div>
       <div class="fi"><div class="l">Dernière séance dure</div><div class="v sm">${form.lastHard == null ? "–" : form.lastHard === 0 ? "aujourd'hui" : form.lastHard === 1 ? "hier" : `il y a ${form.lastHard} j`}</div><div class="s">intensité ou effet aérobie élevé</div></div>
       <div class="fi wide"><div class="l">Cycle d'entraînement</div><div class="v sm">${ph.final ? "Semaine finale" : `Bloc ${ph.block} · semaine ${ph.wk}/4`}${ph.deload && !ph.final ? " (allégée)" : ""}</div><div class="s">${ph.focus}</div></div>
@@ -403,7 +410,7 @@ function todayLoad(form, ready) {
 }
 function renderToday(form, ready) {
   const L = todayLoad(form, ready), today = ymd(new Date());
-  const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + (a.tl || 0), 0));
+  const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + tssOf(a), 0));
   const ps = PS.plan && PS.plan.list.find(s => ymd(s.date) === today), planned = ps ? ps.w.tss : 0;
   const max = Math.max(L.hi * 1.4, done + planned + 10, 60), X = v => Math.min(100, v / max * 100);
   let msg;
@@ -418,7 +425,7 @@ function renderToday(form, ready) {
     <div class="tdbar"><div class="tg" style="left:${X(L.lo)}%;width:${X(L.hi) - X(L.lo)}%"></div>${done ? `<div class="dn" style="width:${X(done)}%"></div>` : ""}${planned ? `<div class="pl" style="left:${X(done)}%;width:${X(done + planned) - X(done)}%"></div>` : ""}</div>
     <div class="tdleg"><span><i class="g"></i>cible</span>${done ? `<span><i class="d"></i>déjà fait : ${done}</span>` : ""}${planned ? `<span><i class="p"></i>prévu : ≈ ${planned}</span>` : ""}</div>
     <p class="tdmsg">${msg}</p>
-    <p class="note">Charge sur l'échelle Garmin (proche du TSS : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100). La cible suit ta récup du matin et ta charge des 6 dernières semaines.</p></section>`;
+    <p class="note">Charge en TSS, calculée avec ta puissance (home trainer) ou ta fréquence cardiaque (dehors) : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100. La cible suit ta récup du matin et ta charge des 6 dernières semaines.</p></section>`;
 }
 
 // ------------------------------------------------------------------ Classement selon la FTP (W/kg)
