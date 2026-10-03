@@ -1,8 +1,9 @@
-"""Données sommeil / récupération (Garmin) + facteurs externes (Open-Meteo), chiffrées.
+"""Données sommeil / récupération (Garmin) + facteurs externes (Open-Meteo).
 
 Appelé par fetch_garmin.py avec la session Garmin déjà ouverte.
-Résultat : data/recovery.enc, lisible seulement avec le code RECUP_CODE
-(saisi une fois dans la page). Le fichier en clair n'est jamais écrit dans le dépôt.
+Résultat : data/recovery.json, en accès libre (plus de code depuis octobre 2026).
+L'ancien fichier chiffré data/recovery.enc est relu une dernière fois avec RECUP_CODE
+pour ne rien perdre, puis supprimé.
 
 Rattrapage progressif : à chaque passage, les 3 derniers jours sont rafraîchis
 et jusqu'à BACKFILL_PER_RUN jours plus anciens sont ajoutés, pour ménager Garmin.
@@ -18,7 +19,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-ENC_FILE = ROOT / "data" / "recovery.enc"
+ENC_FILE = ROOT / "data" / "recovery.enc"   # ancien format chiffré
+JSON_FILE = ROOT / "data" / "recovery.json"
 CONFIG_FILE = ROOT / "config.json"
 
 START = date(2026, 1, 1)
@@ -410,9 +412,6 @@ def fetch_profile(api, start, today):
 # ------------------------------------------------------------------ Point d'entrée
 def run(api):
     code = os.environ.get("RECUP_CODE", "").strip()
-    if not code:
-        print("Récup : secret RECUP_CODE absent, onglet Récup non mis à jour.")
-        return False
     cfg = {}
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -421,11 +420,17 @@ def run(api):
     lat, lon = float(cfg.get("latitude", 48.1173)), float(cfg.get("longitude", -1.6778))
 
     state = {"days": {}}
-    if ENC_FILE.exists():
+    if JSON_FILE.exists():
+        try:
+            state = json.loads(JSON_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            print("Récup : fichier illisible, on repart de zéro.")
+    elif ENC_FILE.exists() and code:
         try:
             state = decrypt(json.loads(ENC_FILE.read_text()), code)
+            print("Récup : migration de l'ancien fichier chiffré vers recovery.json.")
         except Exception:
-            print("Récup : ancien fichier illisible (code changé ?), on repart de zéro.")
+            print("Récup : ancien fichier chiffré illisible, on repart de zéro.")
     days = state.get("days", {})
 
     today = datetime.now(TZ).date()
@@ -470,10 +475,12 @@ def run(api):
         "profile": fetch_profile(api, START, today),
     }
     strip = lambda x: {k: v for k, v in x.items() if k != "updated_at"}
-    if ENC_FILE.exists() and strip(state) == new:
+    if JSON_FILE.exists() and strip(state) == new:
         print("Récup : rien de nouveau.")
         return True
     new["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    ENC_FILE.write_text(json.dumps(encrypt(new, code)))
+    JSON_FILE.write_text(json.dumps(new, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    if ENC_FILE.exists():
+        ENC_FILE.unlink()
     print(f"Récup : {len(recent) + len(missing)} jours mis à jour, {len(days)} jours au total.")
     return True
