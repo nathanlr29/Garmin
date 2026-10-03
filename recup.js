@@ -37,28 +37,30 @@ function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars /
 }
 
 // ------------------------------------------------------------------ Onglets
-function curTab() { return location.hash === "#recup" ? "recup" : location.hash === "#velo" ? "velo" : (store.get("tab") || "velo"); }
+function curTab() { const h = location.hash.slice(1); return ["velo", "recup", "plan"].includes(h) ? h : (store.get("tab") || "velo"); }
 function setTab(t) { store.set("tab", t); history.replaceState(null, "", "#" + t); applyTab(); }
 function applyTab() {
-  const recup = curTab() === "recup";
+  const t = curTab(), recup = t === "recup", velo = t === "velo";
   document.documentElement.classList.toggle("night", recup);
-  $("app").hidden = recup; $("recup").hidden = !recup;
-  document.querySelector(".controls").hidden = recup;
-  $("updated").hidden = recup;
-  $("title").textContent = recup ? "Ma récupération" : (S.cfg.titre || "Mes kilomètres");
-  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === (recup ? "recup" : "velo"))));
+  $("app").hidden = !velo; $("recup").hidden = !recup; $("plan").hidden = t !== "plan";
+  document.querySelector(".controls").hidden = !velo;
+  $("updated").hidden = !velo;
+  $("title").textContent = recup ? "Ma récupération" : t === "plan" ? "Mon plan" : (S.cfg.titre || "Mes kilomètres");
+  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", recup ? "#0c0f1d" : "#f6f3ee");
-  if (recup) openRecup(); else if (S.all.length) render();
+  if (recup) openRecup(); else if (t === "plan") window.Plan?.open(); else if (S.all.length) render();
 }
 function mountTabs() {
   const header = document.querySelector("header");
   const nav = document.createElement("nav");
   nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist");
-  nav.innerHTML = `<button role="tab" data-tab="velo">Vélo</button><button role="tab" data-tab="recup">Récup</button>`;
+  nav.innerHTML = `<button role="tab" data-tab="velo">Vélo</button><button role="tab" data-tab="recup">Récup</button><button role="tab" data-tab="plan">Plan</button>`;
   header.insertBefore(nav, header.querySelector(".controls"));
   nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
   const main = document.createElement("main"); main.id = "recup"; main.hidden = true;
   $("app").after(main);
+  const plan = document.createElement("main"); plan.id = "plan"; plan.hidden = true;
+  main.after(plan);
 }
 
 // ------------------------------------------------------------------ Données chiffrées
@@ -88,16 +90,16 @@ async function openRecup(refresh) {
   }
   renderRecup();
 }
-function showLock(msg) {
+function showLock(msg, target = "recup", after = renderRecup) {
   const m = moon(new Date());
-  $("recup").innerHTML = `<div class="card lock"><div class="moon">${moonSvg(m, 64)}</div><h2>Récupération</h2>
+  $(target).innerHTML = `<div class="card lock"><div class="moon">${moonSvg(m, 64)}</div><h2>Récupération</h2>
     <p>Tes données de sommeil sont chiffrées. Saisis ton code une fois : cet appareil s'en souviendra.</p>
     <form id="lockForm" autocomplete="off"><input id="lockCode" type="password" inputmode="text" placeholder="Code d'accès" aria-label="Code d'accès" autofocus><button type="submit">Ouvrir</button></form>
     <div class="err" id="lockErr">${esc(msg || "")}</div></div>`;
   $("lockForm").onsubmit = async e => {
     e.preventDefault(); const code = $("lockCode").value.trim(); if (!code) return;
     $("lockErr").textContent = "Déchiffrement…";
-    try { RC.data = await decryptEnv(RC.env, code); store.set(CODE_KEY, code); prep(); renderRecup(); }
+    try { RC.data = await decryptEnv(RC.env, code); store.set(CODE_KEY, code); prep(); after(); }
     catch (err) { $("lockErr").textContent = "Code incorrect."; }
   };
 }
@@ -527,6 +529,19 @@ function renderFacts() {
   $("rFacts").innerHTML = pool.map(f => `<div class="fact"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")}</small></div></div>`).join("");
 }
 function minBy(arr, f) { let b = null, bv = Infinity; for (const a of arr) { const v = f(a); if (v < bv) { bv = v; b = a; } } return b; }
+
+// ------------------------------------------------------------------ Accès pour l'onglet Plan
+async function ensure(target, after) {
+  if (!RC.env) RC.env = await fetchEnv();
+  if (!RC.env) { $(target).innerHTML = `<div class="card empty"><b>Pas encore de données</b>Le plan a besoin des données de l'onglet Récup (secret <code>RECUP_CODE</code>).</div>`; return false; }
+  if (!RC.data) {
+    const code = store.get(CODE_KEY);
+    if (code) { try { RC.data = await decryptEnv(RC.env, code); prep(); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} } }
+    if (!RC.data) { showLock("", target, after); return false; }
+  }
+  return true;
+}
+window.Recup = { ensure, recoScore, scoreColor, get data() { return RC.data; }, get days() { return RC.days; }, curTab, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 mountTabs();

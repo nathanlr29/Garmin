@@ -1,0 +1,62 @@
+/* ------------------------------------------------------------------ Onglet Plan */
+#plan .goalcard .gc{display:grid;grid-template-columns:1fr 1fr;gap:18px 28px}
+@media (max-width:760px){#plan .goalcard .gc{grid-template-columns:1fr}}
+#plan .gl{font-size:12.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+#plan .gv{display:flex;align-items:baseline;gap:8px;margin:4px 0 8px;font-size:34px;font-weight:850;font-stretch:112%;letter-spacing:-.02em}
+#plan .gv input{width:2.7em;font:inherit;color:var(--ink);background:transparent;border:0;border-bottom:2px dashed var(--line);padding:0;-moz-appearance:textfield}
+#plan .gv input::-webkit-outer-spin-button,#plan .gv input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+#plan .gv input:focus{outline:none;border-bottom-color:var(--accent)}
+#plan .gv span{font-size:16px;font-weight:600;color:var(--muted);letter-spacing:0}
+#plan .gv .arrow{margin-left:auto;font-size:15px}
+#plan .pbar{height:10px;border-radius:999px;background:var(--h0);overflow:hidden}
+#plan .pbar div{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+#plan .gs{font-size:12.5px;color:var(--muted);margin-top:6px}
+#plan .gs b{color:var(--ink)}
+
+#plan .formrow{display:grid;grid-template-columns:repeat(4,1fr) 1.6fr;gap:14px}
+@media (max-width:900px){#plan .formrow{grid-template-columns:repeat(2,1fr)}#plan .fi.wide{grid-column:1/-1}}
+#plan .fi .l{font-size:12px;color:var(--muted)}
+#plan .fi .v{font-size:26px;font-weight:800;font-stretch:108%;line-height:1.2}
+#plan .fi .v.sm{font-size:18px}
+#plan .fi .v small{font-size:.5em;color:var(--muted);font-weight:600}
+#plan .fi .s{font-size:12px;color:var(--muted)}
+
+#plan .wsel{display:flex;gap:6px;text-transform:none;letter-spacing:0}
+#plan .srows{display:grid;gap:8px}
+#plan .srow{display:grid;grid-template-columns:1.3fr 1fr 1.1fr 1.3fr 36px;gap:8px}
+@media (max-width:620px){#plan .srow{grid-template-columns:1fr 1fr 36px;padding-bottom:8px;border-bottom:1px solid var(--line)}#plan .srow select[data-k="place"]{grid-column:1}#plan .srow select[data-k="type"]{grid-column:2}#plan .srow .del{grid-row:1;grid-column:3}}
+#plan select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0;width:100%}
+#plan .del{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:10px;cursor:pointer;font-size:14px}
+#plan .factions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btn2{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:9px 16px;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.btn2.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn2.ghost{background:transparent}
+.btn2:disabled{opacity:.4;cursor:default}
+
+#plan .pnote{font-size:14px;margin:-4px 0 14px;color:var(--ink)}
+#plan .sessions{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+@media (max-width:860px){#plan .sessions{grid-template-columns:1fr}}
+#plan .sess{border:1px solid var(--line);border-left:5px solid var(--tc);border-radius:16px;padding:14px 16px;background:var(--bg);min-width:0}
+#plan .sh{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+#plan .sd{font-size:12.5px;color:var(--muted);font-weight:600}
+#plan .st{font-size:18px;font-weight:800;font-stretch:106%;margin-top:2px}
+#plan .badge{flex:0 0 auto;font-size:11.5px;font-weight:700;color:#fff;background:var(--tc);border-radius:999px;padding:4px 10px;white-space:nowrap}
+#plan .sm2{font-size:12.5px;color:var(--muted);margin:4px 0 10px}
+#plan .wprof{width:100%;height:56px;display:block;border-radius:8px;background:var(--card);color:var(--ink)}
+#plan .sg{font-size:13.5px;margin:10px 0 6px;line-height:1.4}
+#plan details summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent);margin:6px 0}
+#plan .steps{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+#plan .steps td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+#plan .steps td:first-child{white-space:nowrap;font-weight:700;width:1%}
+#plan .steps td small{display:block;color:var(--muted);font-size:11.5px;font-weight:400}
+#plan .steps td i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+#plan .steps .tg{text-align:right;font-weight:600}
+#plan .dl{margin-top:10px;width:100%}
+#plan .outnote{font-size:12.5px;color:var(--muted);margin-top:10px}
+#plan .howto{margin-top:14px;font-size:13.5px}
+#plan .howto ol{margin:8px 0 0 20px;display:grid;gap:4px}
+#plan .howto a{color:var(--accent)}
+#plan .alert{border-color:#f08c00;font-size:14px}
+#plan .alert .btn2{margin-left:8px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:13.5px;z-index:20}
+#plan .steps .tg{white-space:nowrap}
