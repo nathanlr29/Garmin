@@ -55,3 +55,11 @@
 #sortie .sotc .p{color:#1c7ed6;font-weight:600}
 #sortie .note{font-size:12px;color:var(--muted);margin-top:10px}
 #sortie .legend i{height:6px}
+#sortie .nuttiles{margin-bottom:14px}
+#sortie .nutgrid{display:grid;grid-template-columns:1fr 1.3fr;gap:18px 28px}
+@media (max-width:760px){#sortie .nutgrid{grid-template-columns:1fr}}
+#sortie .nutgrid h3{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
+#sortie .nutgrid p{font-size:13.5px;line-height:1.45;margin:0 0 14px}
+#sortie .nuttab td{white-space:normal;text-align:left}#sortie .nuttab td:nth-child(-n+2){white-space:nowrap;color:var(--muted);width:1%;padding-right:12px}
+#sortie .nuttab td small{display:inline;color:var(--muted)}
+#sortie .nuttab tr.w td{color:#1c7ed6}

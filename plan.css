@@ -60,3 +60,25 @@
 #plan .alert .btn2{margin-left:8px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:13.5px;z-index:20}
 #plan .steps .tg{white-space:nowrap}
+
+#plan .today .tdv,#plan .rank .tdv{display:flex;align-items:baseline;gap:8px}
+#plan .tdv b{font-size:34px;font-weight:850;font-stretch:112%;letter-spacing:-.02em}
+#plan .tdv span{font-size:14px;color:var(--muted);font-weight:600}
+#plan .tdbar{position:relative;height:14px;border-radius:999px;background:var(--h0);margin:10px 0 6px;overflow:hidden}
+#plan .tdbar div{position:absolute;top:0;bottom:0}
+#plan .tdbar .tg{background:#2f9e44;opacity:.35;border-radius:999px}
+#plan .tdbar .dn{left:0;background:var(--ink);border-radius:999px 0 0 999px}
+#plan .tdbar .pl{background:repeating-linear-gradient(45deg,var(--accent) 0 5px,transparent 5px 9px);border:1px solid var(--accent)}
+#plan .tdleg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+#plan .tdleg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+#plan .tdleg .g{background:#2f9e44;opacity:.5}#plan .tdleg .d{background:var(--ink)}#plan .tdleg .p{background:var(--accent)}
+#plan .tdmsg{font-size:14px;line-height:1.45;margin:10px 0 0}
+#plan .rkrow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#plan .rktop{text-align:right;font-size:13px;color:var(--muted)}
+#plan .rktop b{display:block;font-size:30px;font-weight:850;color:var(--accent);font-stretch:110%}
+#plan .rkbar{position:relative;height:10px;border-radius:999px;background:var(--h0);margin:12px 0 4px}
+#plan .rkbar div{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+#plan .rkbar i{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
+#plan .rkform{display:flex;gap:10px 16px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--muted)}
+#plan .rkform input{width:5em;font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 8px;margin-left:4px}
+#plan .rkform select{width:auto;margin-left:4px}

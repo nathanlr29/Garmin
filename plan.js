@@ -39,9 +39,19 @@ const isTraining = a => a.mt >= 1200;  // les trajets du quotidien (moins de 20 
 function profile() {
   const p = (window.Recup && Recup.data && Recup.data.profile) || {};
   const own = store2.get("planFtp");
-  const est = estimateFtp();
-  const ftp = own || p.ftp || est || 250;
-  return { ...p, ftp, ftpSrc: own ? "saisie" : p.ftp ? `Garmin${p.ftpDate ? " · " + new Date(p.ftpDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) : ""}` : est ? "estimée sur tes séances" : "par défaut", est };
+  const est = estimateFtp(), det = detectFtp(), auto = Math.max(p.ftp || 0, det ? det.ftp : 0);
+  const ftp = own || auto || est || 250;
+  const dd = d => new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  const ftpSrc = own ? "saisie" : det && det.ftp > (p.ftp || 0) ? `détectée : ${det.l} à ${det.w} W le ${dd(det.a.dt)}` : p.ftp ? `Garmin${p.ftpDate ? " · " + dd(p.ftpDate) : ""}` : est ? "estimée sur tes séances" : "par défaut";
+  return { ...p, ftp, ftpSrc, est, det, auto };
+}
+// FTP détectée : meilleures puissances Garmin des 60 derniers jours (20 min × 95 %, 1 h, 5 min × 78 %)
+function detectFtp() {
+  const cut = addDays(new Date(), -60); let best = null;
+  rides().filter(a => a.dt >= cut && a.pc).forEach(a => {
+    [["1200", .95, "20 min"], ["3600", 1, "1 h"], ["300", .78, "5 min"]].forEach(([d, f, l]) => { const w = a.pc[d]; if (w && (!best || w * f > best.ftp)) best = { ftp: Math.round(w * f), w, l, a }; });
+  });
+  return best;
 }
 function estimateFtp() { // meilleure puissance normalisée sur 40 min et plus, ces 90 derniers jours
   const cut = addDays(new Date(), -90);
@@ -266,7 +276,7 @@ function renderHead(prof, form, ready, ph) {
     <div class="gc">
       <div class="g"><div class="gl">FTP</div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts"><span>W</span><span class="arrow">→ ${GOAL.ftp} W</span></div>
         <div class="pbar"><div style="width:${pct(prof.ftp, Math.min(ftp0, prof.ftp) - 20, GOAL.ftp)}%"></div></div>
-        <div class="gs">${need > 0 ? `encore <b>+${need} W</b> en ${weeksLeft} semaines, soit +${perW.toFixed(1).replace(".", ",")} W/sem · ${verdict}` : "objectif atteint 🎯".replace(" 🎯", "")} · source : ${prof.ftpSrc}</div></div>
+        <div class="gs">${need > 0 ? `encore <b>+${need} W</b> en ${weeksLeft} semaines, soit +${perW.toFixed(1).replace(".", ",")} W/sem · ${verdict}` : "objectif atteint 🎯".replace(" 🎯", "")} · source : ${prof.ftpSrc}${prof.det && prof.det.ftp > prof.ftp ? ` · <b>détectée : ${prof.det.ftp} W</b> (${prof.det.l} à ${prof.det.w} W)` : ""}</div></div>
       <div class="g"><div class="gl">VO2max (Garmin)</div><div class="gv"><b>${vo2 != null ? String(vo2).replace(".", ",") : "–"}</b><span class="arrow">→ 65-66</span></div>
         <div class="pbar"><div style="width:${vo2 != null ? pct(vo2, Math.min(vo2first || vo2, vo2) - 3, GOAL.vo2) : 0}%"></div></div>
         <div class="gs">${vo2 != null ? `${vo2first != null && vo2first !== vo2 ? `${vo2 > vo2first ? "+" : ""}${(vo2 - vo2first).toFixed(1).replace(".", ",")} depuis janvier · ` : ""}encore ${Math.max(0, GOAL.vo2 - vo2).toFixed(1).replace(".", ",")} à prendre` : "pas encore de valeur Garmin"}</div></div>
@@ -356,9 +366,12 @@ function render() {
   if (PS.plan) { const today = PS.plan.list.find(s => ymd(s.date) === ymd(new Date()));
     if (today && TYPES[today.t].hard && ready.today != null && ready.today < 45) { const easy = PS.plan.list.find(s => s.date > today.date && !TYPES[s.t].hard);
       alert = `<section class="card span12 alert">Ta récupération est à <b>${ready.today}/100</b> ce matin alors que tu as « ${today.w.title} » au programme.${easy ? ` <button class="btn2" id="pSwap">L'échanger avec ${DAYN[easy.day].toLowerCase()}</button>` : " Une sortie facile serait plus raisonnable."}</section>`; } }
-  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, ph)}${alert}${renderForm(PS.sets, PS.mon)}${renderPlan(PS.plan, prof)}</div>`;
+  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, ph)}${renderToday(form, ready)}${renderRank(prof)}${alert}${renderForm(PS.sets, PS.mon)}${renderPlan(PS.plan, prof)}</div>`;
+  const kgIn = $("pKg"), ageIn = $("pAge");
+  if (kgIn) kgIn.onchange = () => { const v = +kgIn.value; store2.set("bwWeight", v >= 35 && v <= 150 ? v : null); render(); };
+  if (ageIn) ageIn.onchange = () => { store2.set("bwAge", ageIn.value); render(); };
   // événements
-  $("pFtp").onchange = e => { const v = Math.round(+e.target.value); if (v >= 80 && v <= 600) { store2.set("planFtp", v === (Recup.data?.profile?.ftp) ? null : v); if (PS.plan) generate(); render(); } };
+  $("pFtp").onchange = e => { const v = Math.round(+e.target.value); if (v >= 80 && v <= 600) { store2.set("planFtp", v === profile().auto ? null : v); if (PS.plan) generate(); render(); } };
   box.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { PS.mon = addDays(mondayOf(new Date()), +b.dataset.w); PS.plan = null; restorePlan(); render(); });
   $("pRows").onchange = e => { const r = e.target.closest(".srow"), k = e.target.dataset.k; if (!r || !k) return; const v = e.target.value; PS.sets[+r.dataset.i][k] = k === "day" || k === "dur" ? +v : v; if (k === "day") sortSets(); store2.set("planSets", PS.sets); if (k === "day") render(); };
   box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { PS.sets.splice(+b.dataset.del, 1); store2.set("planSets", PS.sets); render(); });
@@ -381,7 +394,54 @@ async function open() {
   if (!PS.plan) restorePlan();
   render();
 }
-window.Plan = { open, _build: build, _choose: chooseTypes, _zwo: zwo };
+// ------------------------------------------------------------------ Charge conseillée du jour
+function todayLoad(form, ready) {
+  const r = ready.today, base = Math.max(30, form.ctl);
+  const F = r == null ? [.6, 1.1] : r >= 80 ? [1, 1.6] : r >= 65 ? [.8, 1.3] : r >= 50 ? [.5, 1] : r >= 35 ? [.2, .6] : [0, .3];
+  const k = form.tsb < -20 ? .8 : form.tsb > 10 ? 1.1 : 1;
+  return { lo: Math.round(base * F[0] * k / 5) * 5, hi: Math.max(15, Math.round(base * F[1] * k / 5) * 5), r };
+}
+function renderToday(form, ready) {
+  const L = todayLoad(form, ready), today = ymd(new Date());
+  const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + (a.tl || 0), 0));
+  const ps = PS.plan && PS.plan.list.find(s => ymd(s.date) === today), planned = ps ? ps.w.tss : 0;
+  const max = Math.max(L.hi * 1.4, done + planned + 10, 60), X = v => Math.min(100, v / max * 100);
+  let msg;
+  if (L.r != null && L.r < 35) msg = "Récupération très basse : repos, ou 30 à 45 min très faciles.";
+  else if (ps && done + planned > L.hi * 1.1) msg = `Ta séance prévue (« ${ps.w.title} », ≈ ${planned}) dépasse la cible : raccourcis-la ou décale-la à demain.`;
+  else if (ps && done + planned < L.lo) msg = `Ta séance prévue est en dessous : tu peux l'allonger d'environ ${Math.round((L.lo - done - planned) / 50 * 60 / 5) * 5} min en endurance.`;
+  else if (ps) msg = `Ta séance prévue (« ${ps.w.title} », ≈ ${planned}) est dans la cible.`;
+  else if (done >= L.lo) msg = done > L.hi ? "Tu as déjà dépassé la cible du jour : récupère." : "Cible du jour atteinte avec ce que tu as déjà fait.";
+  else { const mid = (L.lo + L.hi) / 2 - done; msg = `Pas de séance prévue : environ ${Math.round(mid / 50 * 60 / 5) * 5} min d'endurance, ou une séance de qualité si tu te sens bien.`; }
+  return `<section class="card span6 today"><h2>Charge conseillée aujourd'hui <small>${L.r != null ? `récup ${L.r}/100` : "sans donnée de récup"} · forme ${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</small></h2>
+    <div class="tdv"><b>${L.lo}–${L.hi}</b><span>de charge</span></div>
+    <div class="tdbar"><div class="tg" style="left:${X(L.lo)}%;width:${X(L.hi) - X(L.lo)}%"></div>${done ? `<div class="dn" style="width:${X(done)}%"></div>` : ""}${planned ? `<div class="pl" style="left:${X(done)}%;width:${X(done + planned) - X(done)}%"></div>` : ""}</div>
+    <div class="tdleg"><span><i class="g"></i>cible</span>${done ? `<span><i class="d"></i>déjà fait : ${done}</span>` : ""}${planned ? `<span><i class="p"></i>prévu : ≈ ${planned}</span>` : ""}</div>
+    <p class="tdmsg">${msg}</p>
+    <p class="note">Charge sur l'échelle Garmin (proche du TSS : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100). La cible suit ta récup du matin et ta charge des 6 dernières semaines.</p></section>`;
+}
+
+// ------------------------------------------------------------------ Classement selon la FTP (W/kg)
+const ZWIFT = [[0, 0], [1.5, 2], [2, 6], [2.5, 13], [3.2, 42], [4, 85], [4.6, 95], [5.2, 99], [6.5, 100]];  // % cumulé des coureurs
+const AFY = { "<30": [4.95, 5.77], "30-39": [4.3, 5.59], "40-49": [4, 4.88], "50-59": [3.63, 4.38], "60+": [3.23, 4.18] };  // médiane, top 10 % (hommes)
+const cdfPts = x => { if (x <= 0) return 0; for (let i = 1; i < ZWIFT.length; i++) if (x <= ZWIFT[i][0]) { const [a, b] = ZWIFT[i - 1], [c, d] = ZWIFT[i]; return b + (d - b) * (x - a) / (c - a); } return 100; };
+const erf = x => { const t = 1 / (1 + .3275911 * Math.abs(x)), y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - .284496736) * t + .254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; };
+const topOf = c => Math.max(1, Math.round(100 - c));
+function renderRank(prof) {
+  const kg = +store2.get("bwWeight") || 0, age = store2.get("bwAge") || "30-39";
+  const form = `<div class="rkform"><label>Poids <input id="pKg" type="number" min="35" max="150" step="0.1" value="${kg || ""}" placeholder="kg"> kg</label>
+    <label>Âge <select id="pAge">${Object.keys(AFY).map(k => `<option ${k === age ? "selected" : ""}>${k}</option>`).join("")}</select></label></div>`;
+  if (!kg) return `<section class="card span6 rank"><h2>Ton niveau</h2><p class="tdmsg">Indique ton poids pour calculer tes watts par kilo et te situer parmi les cyclistes. Il reste uniquement sur cet appareil.</p>${form}</section>`;
+  const wkg = prof.ftp / kg, top = topOf(cdfPts(wkg)), goal = GOAL.ftp / kg, topG = topOf(cdfPts(goal));
+  const [med, p90] = AFY[age] || AFY["30-39"], sd = (p90 - med) / 1.2816, topA = topOf(100 * .5 * (1 + erf((wkg - med) / sd / Math.SQRT2)));
+  return `<section class="card span6 rank"><h2>Ton niveau <small>FTP ${prof.ftp} W · ${String(kg).replace(".", ",")} kg</small></h2>
+    <div class="rkrow"><div class="tdv"><b>${wkg.toFixed(2).replace(".", ",")}</b><span>W/kg</span></div><div class="rktop">Top <b>${top} %</b><span>des cyclistes qui s'entraînent</span></div></div>
+    <div class="rkbar"><div style="width:${100 - top}%"></div><i style="left:${100 - topG}%" title="objectif 300 W"></i></div>
+    <p class="tdmsg">À ${GOAL.ftp} W tu serais à ${goal.toFixed(2).replace(".", ",")} W/kg : top ${topG} %. Parmi des sportifs testés en laboratoire (hommes ${age} ans), tu es dans le top ${topA} %.</p>
+    ${form}
+    <p class="note">Repères indicatifs : 1 616 coureurs d'une course Zwift (L'Étape du Tour 2020, 20 min × 95 %) et 1 517 hommes testés par A Faster You (2026). Les deux populations sont plus entraînées que la moyenne des cyclistes.</p></section>`;
+}
+window.Plan = { open, _build: build, _choose: chooseTypes, _zwo: zwo, ftp: () => profile().ftp };
 document.addEventListener("velo:loaded", () => { if (Recup.curTab() === "plan") open(); });
 let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Recup.curTab() === "plan" && PS.sets) render(); }, 200); });
 if (Recup.curTab() === "plan") open();

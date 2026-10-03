@@ -134,19 +134,33 @@ function sun(wx, date) {
 }
 
 // ------------------------------------------------------------------ Simulation de la sortie
+// ------------------------------------------------------------------ Modèle physique (puissance ↔ vitesse)
+const PHY = { cda: .34, crr: .006, bike: 9.5, eta: .97, g: 9.81 };  // position mains sur les cocottes, routes bretonnes
+const riderKg = () => +LS.get("bwWeight", 0) || 0;
+const rhoAt = T => 1.225 * 288.15 / (273.15 + (T ?? 15));
+function powerAt(v, M, gr, vw, rho) {  // v en m/s, gr = pente (fraction), vw = vent de face en m/s
+  const th = Math.atan(gr), va = v + vw;
+  return (M * PHY.g * (PHY.crr * Math.cos(th) + Math.sin(th)) * v + .5 * rho * PHY.cda * va * Math.abs(va) * v) / PHY.eta;
+}
+function speedFor(P, M, gr, vw, rho) { let lo = .5, hi = 25; for (let i = 0; i < 28; i++) { const m = (lo + hi) / 2; if (powerAt(m, M, gr, vw, rho) > P) hi = m; else lo = m; } return (lo + hi) / 2; }
+
 function simulate(P, wx, start, v0, reverse) {
   const n = P.length, T = new Float64Array(n), Hd = new Float32Array(n), W = new Array(n);
   const idx = k => reverse ? n - 1 - k : k;
   let t = start.getTime(); T[idx(0)] = t;
   let face = 0, dos = 0, trav = 0, calme = 0, headSum = 0, dtSum = 0, rain = 0, ppMax = 0, gust = 0, uv = 0, tmin = 99, tmax = -99, amin = 99, codeMax = -1, U = 0, V = 0, dark = 0;
+  let kj = 0, p4 = 0, tAll = 0;
   const total = P[n - 1].d, sn = wx ? sun(wx, start) : null;
+  // puissance « de croisière » qui donne la vitesse prévue sur le plat sans vent ; on pousse un peu plus en montée, on récupère en descente
+  const M = (riderKg() || 75) + PHY.bike, P0 = powerAt(v0 / 3.6, M, 0, 0, rhoAt(15));
   for (let k = 1; k < n; k++) {
     const p = P[idx(k)], q = P[idx(k - 1)], step = Math.abs(p.d - q.d), g = reverse ? -p.g : p.g, b = reverse ? (p.b + 180) % 360 : p.b;
     const w = wx ? wxAt(wx, p.d, t) : null; W[idx(k)] = w;
-    let v = g > 0 ? v0 / (1 + .12 * g) : v0 * Math.min(1.35, 1 - .06 * g);
-    let head = 0;
-    if (w) { head = w.ws * Math.cos(rad(w.wd - b)); v = Math.max(8, v - .3 * head * (g > 4 ? .4 : 1)); }
-    const dt = step / (v / 3.6); t += dt * 1000; T[idx(k)] = t; Hd[idx(k)] = head;
+    const head = w ? w.ws * Math.cos(rad(w.wd - b)) : 0, gr = clamp(g, -25, 25) / 100;
+    const Pt = gr > 0 ? P0 * (1 + Math.min(.25, 3 * gr)) : P0 * Math.max(0, 1 + 15 * gr);
+    const v = clamp(speedFor(Pt, M, gr, head / 3.6 * .75, rhoAt(w ? w.temp : 15)), 1.9, 15.3);  // 7 à 55 km/h
+    const dt = step / v; t += dt * 1000; T[idx(k)] = t; Hd[idx(k)] = head;
+    kj += Pt * dt / 1000; p4 += Pt ** 4 * dt; tAll += dt;
     if (w) {
       const km = step / 1000, c = w.ws < 8 ? "calme" : head > w.ws * .5 ? "face" : head < -w.ws * .5 ? "dos" : "travers";
       if (c === "face") face += km; else if (c === "dos") dos += km; else if (c === "travers") trav += km; else calme += km;
@@ -158,7 +172,8 @@ function simulate(P, wx, start, v0, reverse) {
   }
   const secs = (t - start.getTime()) / 1000, ok = wx && dtSum > 0;
   return { T, Hd, W, secs, end: new Date(t), ok, face, dos, trav, calme, total: total / 1000, head: ok ? headSum / dtSum : 0, rain, ppMax, gust, uv, tmin, tmax, amin, codeMax,
-    ws: ok ? Math.hypot(U, V) / dtSum : 0, wd: ok ? (deg(Math.atan2(U, V)) + 360) % 360 : 0, dark, sun: sn };
+    ws: ok ? Math.hypot(U, V) / dtSum : 0, wd: ok ? (deg(Math.atan2(U, V)) + 360) % 360 : 0, dark, sun: sn,
+    kj, avgP: kj * 1000 / Math.max(1, tAll), np: Math.pow(p4 / Math.max(1, tAll), .25), P0, M };
 }
 function penalty(r) {
   return Math.max(0, r.head) * 1.2 + Math.min(0, r.head) * .4 + r.rain * 6 + r.ppMax * .08 + r.dark / 60 * .25 + Math.max(0, 8 - r.amin) * 1.5 + Math.max(0, r.tmax - 28) * 1.5;
@@ -199,6 +214,7 @@ function shell() {
         <section class="card span12"><h2>Profil <small id="soProfInfo"></small></h2><div id="soProf"></div></section>
         <section class="card span7"><h2>Montées <small id="soClimbInfo"></small></h2><div id="soClimbs"></div></section>
         <section class="card span5"><h2>Pratique</h2><div id="soTips"></div></section>
+        <section class="card span12"><h2>Nutrition <small id="soNutInfo"></small></h2><div id="soNut"></div></section>
         <section class="card span12"><h2>Météo au fil de la sortie</h2><div id="soTimeline"></div></section>
       </div>
     </div>
@@ -214,6 +230,7 @@ function renderLoad() {
         <label><select id="soHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.hour ? "selected" : ""}>${h} h</option>`).join("")}</select></label>
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
+        <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
         <button class="btn" id="soChange">Changer de trace</button>
       </div></div>
     <input type="file" id="soFile" hidden>` : `
@@ -230,6 +247,7 @@ function renderLoad() {
   if ($("soRecent")) $("soRecent").onchange = e => { const a = S.all.find(x => String(x.id) === e.target.value); if (a) setRoute({ name: a.n, pts: S.traces[a.id].map(p => [p[0], p[1], null]) }); };
   const save = () => { LS.set("sortieSet", { date: $("soDate").value, hour: +$("soHour").value, min: +$("soMin").value, speed: +$("soSpeed").value || defSpeed() }); compute(); };
   ["soDate", "soHour", "soMin", "soSpeed"].forEach(id => { if ($(id)) $(id).onchange = save; });
+  if ($("soKg")) $("soKg").onchange = () => { const v = +$("soKg").value; LS.set("bwWeight", v >= 35 && v <= 150 ? v : null); compute(); };
 }
 function showErr(m) { const e = $("soErr"); if (e) e.textContent = m; else alert(m); }
 function gain(P) { let g = 0; for (let i = 1; i < P.length; i++) g += Math.max(0, P[i].e - P[i - 1].e); return g; }
@@ -258,7 +276,7 @@ async function compute() {
   const best = [];
   if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(SO.P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
   renderTiles(res, err); renderVerdict(res, rev, best, err, s); renderBest(best, s);
-  await renderMap(res, wx); renderProfile(res); renderClimbs(res); renderTips(res, wx); renderTimeline(res, wx);
+  await renderMap(res, wx); renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
 }
 
 function renderTiles(r, err) {
@@ -374,13 +392,55 @@ function renderTips(r, wx) {
     const a = r.amin, wet = r.rain >= .5 || r.ppMax >= 50;
     const kit = a < 3 ? "Hiver : collant long, veste thermique, gants longs, couvre-chaussures, cache-cou." : a < 8 ? "Frais : collant ou jambières, maillot manches longues + coupe-vent, gants longs." : a < 13 ? "Mi-saison : manchettes et jambières (ou genouillères), gilet coupe-vent." : a < 18 ? "Cuissard court, manchettes au départ, gilet dans la poche." : "Tenue d'été." + (r.tmax >= 26 ? " Couleurs claires, ça va chauffer." : "");
     T.push(["Tenue", kit + (wet ? " Veste de pluie et garde-boue." : "")]);
-    const h = r.secs / 3600, perH = r.tmax >= 26 ? .9 : r.tmax >= 19 ? .7 : .5, L_ = h * perH;
-    T.push(["Boire et manger", `Environ ${fmt(L_, 1)} L d'eau (${Math.ceil(L_ / .6)} bidon${Math.ceil(L_ / .6) > 1 ? "s" : ""} de 600 ml${Math.ceil(L_ / .6) > 2 ? ", prévois un point d'eau" : ""})${h >= 1.5 ? ` et ${Math.round(h * 60 / 10) * 10} g de glucides (60 g/h)` : ""}.`]);
     if (r.sun) { const late = r.end > r.sun.set, dusk = r.end > new Date(r.sun.set.getTime() - 1800e3); T.push(["Soleil", `Lever ${hm(r.sun.rise)}, coucher ${hm(r.sun.set)}.${late ? " Tu rentres de nuit : éclairage avant et arrière obligatoires." : dusk ? " Arrivée proche du coucher : prends tes lumières." : ""}${r.uv >= 5 ? ` UV jusqu'à ${fmt(r.uv)} : crème solaire.` : ""}`]); }
     if (r.gust >= 50) T.push(["Rafales", `Jusqu'à ${fmt(r.gust)} km/h : prudence dans les descentes et sur les zones dégagées.`]);
   }
   try { const st = window.Chain?.status?.(); if (st && st.km != null) { const after = st.km + r.total; T.push(["Chaîne", r.rain >= .5 ? "Sortie humide : nettoie et regraisse la chaîne en rentrant (Squirt)." : after >= st.lim ? `Avec cette sortie tu seras à ${fmt(after)} km depuis le graissage (rappel à ${st.lim}) : graisse-la la veille.` : `${fmt(after)} km sur la chaîne après cette sortie, ça passe.`]); } } catch (e) {}
   $("soTips").innerHTML = T.length ? `<dl class="sotips">${T.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : `<p class="note">Les conseils apparaissent avec les prévisions.</p>`;
+}
+// ------------------------------------------------------------------ Nutrition
+function renderNutrition(r) {
+  const box = $("soNut"); if (!box) return;
+  const ftp = (window.Plan && Plan.ftp && Plan.ftp()) || 0, kg = riderKg(), h = r.secs / 3600, P = SO.P;
+  const IF = ftp ? r.np / ftp : null, x = IF ?? .7;
+  const kcal = r.kj / (4.184 * .24);                          // rendement humain ≈ 24 %
+  const choFrac = clamp(.35 + (x - .5) * 1.5, .3, .95);       // part des glucides dans l'énergie selon l'intensité
+  const burn = kcal * choFrac / 4 / h;                        // g de glucides brûlés par heure
+  const lvl = clamp((x - .6) / .2, 0, 1);
+  let rate = h < 1.25 ? 0 : h < 2 ? 30 : h < 3 ? 45 + 15 * lvl : 60 + 30 * lvl;
+  rate = Math.round(Math.max(Math.min(rate, burn), h >= 3 ? 45 : 0) / 5) * 5;  // jamais plus que ce qu'on brûle, mais au moins 45 g/h au-delà de 3 h
+  const tAvg = r.ok ? (r.tmin + r.tmax) / 2 : 15;
+  const drink = Math.round(clamp(.4 + .03 * (tAvg - 10) + .5 * (x - .6), .35, 1.3) * .8 * 20) / 20;  // L/h (≈ 80 % de la sueur)
+  const na = Math.round(drink * (tAvg > 25 ? 700 : 500) / 50) * 50;                                 // mg de sodium par heure
+  const water = drink * h, carbs = rate * h, iso = rate >= 60;
+  // horaire : on mange toutes les 30 min à partir de 30-40 min, et on repère quand les 2 bidons sont vides
+  const kmAt = tt => { let k = 0; while (k < P.length - 1 && r.T[k] < tt) k++; return P[k].d / 1000; };
+  const t0 = r.T[0], rows = [];
+  if (rate > 0) for (let m = 35; m <= h * 60 - 20; m += 30) {
+    const late = m > h * 40, g = Math.round((iso ? rate - 36 : rate) / 2);
+    const food = g <= 0 ? "boisson iso uniquement" : g <= 22 ? (late ? "1 gel" : "1 banane ou 1 pâte de fruits") : g <= 32 ? (late ? "1 gel + quelques gorgées iso" : "1 barre") : late ? "1 gel + 1 pâte de fruits" : "1 barre + 1 gel";
+    rows.push({ t: new Date(t0 + m * 6e4), km: kmAt(t0 + m * 6e4), what: `${food} <small>≈ ${Math.max(0, g)} g</small>` });
+  }
+  const cap = 1.2;  // 2 bidons de 600 ml
+  for (let k = 1; k * cap < water; k++) { const tt = t0 + k * cap / drink * 3600e3; rows.push({ t: new Date(tt), km: kmAt(tt), what: `<b>Remplir les bidons</b> <small>(${fmt(k * cap, 1)} L bus)</small>`, water: 1 }); }
+  rows.sort((a, b) => a.t - b.t);
+  $("soNutInfo").textContent = `${fmt(kcal)} kcal${ftp ? ` · intensité ${Math.round(x * 100)} % FTP` : ""}`;
+  const tile = (l, v, s_) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s_}</div></div>`;
+  box.innerHTML = `<div class="tiles sotiles nuttiles">
+      ${tile("Dépense", `${fmt(kcal)}<small> kcal</small>`, `${fmt(r.kj)} kJ · ${fmt(r.avgP)} W moyens`)}
+      ${tile("Intensité", ftp ? `${Math.round(x * 100)}<small> % FTP</small>` : "–", ftp ? `≈ ${fmt(r.np)} W normalisés (FTP ${ftp} W)` : "FTP inconnue")}
+      ${tile("Glucides", rate ? `${rate}<small> g/h</small>` : "0", rate ? `${fmt(carbs)} g au total` : "sortie courte : l'eau suffit")}
+      ${tile("Boire", `${fmt(drink * 1000)}<small> ml/h</small>`, `${fmt(water, 1)} L · ${Math.ceil(water / .6)} bidon${Math.ceil(water / .6) > 1 ? "s" : ""}`)}
+      ${tile("Sel", `${na}<small> mg/h</small>`, tAvg > 25 ? "chaleur : pastilles d'électrolytes" : "boisson iso ou pastille")}
+      ${tile("Brûlés", `${fmt(burn)}<small> g/h</small>`, `glucides utilisés (${Math.round(choFrac * 100)} % de l'énergie)`)}
+    </div>
+    <div class="nutgrid">
+      <div><h3>Avant</h3><p>${h >= 2 ? (kg ? `Repas 2 à 3 h avant avec environ <b>${Math.round(kg * (h >= 3 ? 2 : 1.2) / 10) * 10} g de glucides</b> (pâtes, riz, pain, flocons d'avoine), peu de fibres et de graisses.` : "Repas riche en glucides 2 à 3 h avant (indique ton poids pour la quantité).") : "Un repas normal ou une collation 1 à 2 h avant suffit."}${h >= 4 ? " La veille, un dîner riche en glucides." : ""}</p>
+        <h3>Après</h3><p>${h >= 2 ? `Dans l'heure : ${kg ? `environ <b>${Math.round(kg / 5) * 5} g de glucides</b>` : "des glucides"} et 20 à 25 g de protéines, plus ${fmt(Math.max(.5, water * .5), 1)} L à boire dans les heures qui suivent.` : "Un repas normal."}</p></div>
+      <div><h3>Pendant</h3>${rows.length ? `<table class="sotab nuttab"><tbody>${rows.map(rw => `<tr${rw.water ? ' class="w"' : ""}><td>${hm(rw.t)}</td><td>km ${fmt(rw.km)}</td><td>${rw.what}</td></tr>`).join("")}</tbody></table>` : "<p>Pas besoin de manger : boire régulièrement suffit.</p>"}
+        ${iso ? `<p class="note">Avec ${rate} g/h : un bidon de boisson iso (≈ 36 g) par heure, le reste en solide puis en gels.</p>` : ""}</div>
+    </div>
+    <p class="note">Calcul à partir d'un modèle physique (poids ${kg ? fmt(kg, 1) + " kg" : "75 kg par défaut"} + vélo, pente, vent prévu, vitesse visée). Au-delà de 60 g/h, entraîne ton estomac à l'entraînement avant le jour J.</p>`;
 }
 function renderTimeline(r, wx) {
   if (!r.ok) { $("soTimeline").innerHTML = `<p class="note">Pas de prévisions pour ce départ.</p>`; return; }
