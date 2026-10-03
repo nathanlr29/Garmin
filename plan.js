@@ -200,7 +200,7 @@ function zwo(s, prof) {
     if (st.lo !== st.hi) { const tag = i === 0 ? "Warmup" : i === s.w.steps.length - 1 ? "Cooldown" : "Ramp"; return `    <${tag} Duration="${st.d}" PowerLow="${x(st.lo)}" PowerHigh="${x(st.hi)}"/>`; }
     return `    <SteadyState Duration="${st.d}" Power="${x(st.lo)}"/>`;
   }).join("\n");
-  return `<workout_file>\n  <author>Mes km</author>\n  <name>${esc2(s.w.title)}</name>\n  <description>${esc2(s.w.goal + ` (FTP de référence : ${prof.ftp} W)`)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${lines}\n  </workout>\n</workout_file>\n`;
+  return `<workout_file>\n  <author>Breizh Watts</author>\n  <name>${esc2(s.w.title)}</name>\n  <description>${esc2(s.w.goal + ` (FTP de référence : ${prof.ftp} W)`)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${lines}\n  </workout>\n</workout_file>\n`;
 }
 function fileName(s) { return `${ymd(s.date)}_${s.w.title.replace(/[^A-Za-z0-9À-ÿ×' ]/g, "").replace(/[×' ]+/g, "-")}.zwo`; }
 function download(name, text) {
