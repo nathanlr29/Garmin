@@ -35,6 +35,7 @@ const RPE = ["2/10, très facile", "3-4/10, conversation facile", "5-6/10, soute
 
 // ------------------------------------------------------------------ Données
 const rides = () => (S.all || []).filter(a => RIDE_TYPES.has(a.t));
+const isTraining = a => a.mt >= 1200;  // les trajets du quotidien (moins de 20 min) ne comptent pas comme séances
 function profile() {
   const p = (window.Recup && Recup.data && Recup.data.profile) || {};
   const own = store2.get("planFtp");
@@ -53,8 +54,8 @@ function fitness() {
   for (let d = addDays(today, -120); d < today; d = addDays(d, 1)) { const l = m[ymd(d)] || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; }
   const p = profile();
   const hard = rides().filter(a => a.te >= 3.8 || ((a.np || a.w) && (a.np || a.w) / p.ftp >= .85 && a.mt >= 1500)).pop();
-  const wk = rides().filter(a => a.dt >= addDays(today, -7));
-  return { ctl, atl, tsb: ctl - atl, lastHard: hard ? Math.floor((today - hard.dt) / 864e5) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: wk.length };
+  const wk = rides().filter(a => a.dt >= addDays(today, -7)), tr = wk.filter(isTraining);
+  return { ctl, atl, tsb: ctl - atl, lastHard: hard ? Math.floor((today - hard.dt) / 864e5) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: tr.length, c7: wk.length - tr.length };
 }
 function readiness() {
   const days = (window.Recup && Recup.days) || [], last = days.filter(d => d.sl || d.tr != null).slice(-3);
@@ -62,7 +63,7 @@ function readiness() {
   return { today: sc.length ? sc[sc.length - 1] : null, avg3: sc.length ? sc.reduce((a, b) => a + b, 0) / sc.length : null };
 }
 function habits() {
-  const cut = addDays(new Date(), -56), R = rides().filter(a => a.dt >= cut);
+  const cut = addDays(new Date(), -56), R = rides().filter(a => a.dt >= cut && isTraining(a));
   const by = Array.from({ length: 7 }, () => ({ n: 0, inn: 0, mins: [] }));
   R.forEach(a => { const w = (a.dt.getDay() + 6) % 7; by[w].n++; if (isIndoor(a)) by[w].inn++; by[w].mins.push(a.mt / 60); });
   const med = arr => { const s = [...arr].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 60; };
@@ -265,7 +266,7 @@ function renderHead(prof, form, ready, ph) {
     <div class="gc">
       <div class="g"><div class="gl">FTP</div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts"><span>W</span><span class="arrow">→ ${GOAL.ftp} W</span></div>
         <div class="pbar"><div style="width:${pct(prof.ftp, Math.min(ftp0, prof.ftp) - 20, GOAL.ftp)}%"></div></div>
-        <div class="gs">${need > 0 ? `encore <b>+${need} W</b> en ${weeksLeft} semaines, soit +${perW.toFixed(1).replace(".", ",")} W/sem · ${verdict}` : "objectif atteint 🎯".replace(" 🎯", "")} · source : ${prof.ftpSrc}${prof.est && prof.est !== prof.ftp ? ` · estimée sur tes séances : ${prof.est} W` : ""}</div></div>
+        <div class="gs">${need > 0 ? `encore <b>+${need} W</b> en ${weeksLeft} semaines, soit +${perW.toFixed(1).replace(".", ",")} W/sem · ${verdict}` : "objectif atteint 🎯".replace(" 🎯", "")} · source : ${prof.ftpSrc}</div></div>
       <div class="g"><div class="gl">VO2max (Garmin)</div><div class="gv"><b>${vo2 != null ? String(vo2).replace(".", ",") : "–"}</b><span class="arrow">→ 65-66</span></div>
         <div class="pbar"><div style="width:${vo2 != null ? pct(vo2, Math.min(vo2first || vo2, vo2) - 3, GOAL.vo2) : 0}%"></div></div>
         <div class="gs">${vo2 != null ? `${vo2first != null && vo2first !== vo2 ? `${vo2 > vo2first ? "+" : ""}${(vo2 - vo2first).toFixed(1).replace(".", ",")} depuis janvier · ` : ""}encore ${Math.max(0, GOAL.vo2 - vo2).toFixed(1).replace(".", ",")} à prendre` : "pas encore de valeur Garmin"}</div></div>
@@ -275,7 +276,7 @@ function renderHead(prof, form, ready, ph) {
     <div class="formrow">
       <div class="fi"><div class="l">Récupération</div><div class="v" style="color:${rc}">${r ?? "–"}<small>/100</small></div><div class="s">${ready.avg3 != null ? `moy. 3 j : ${Math.round(ready.avg3)}` : "onglet Récup"}</div></div>
       <div class="fi"><div class="l">Forme (charge Garmin)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
-      <div class="fi"><div class="l">7 derniers jours</div><div class="v">${Math.round(form.km7)}<small> km</small></div><div class="s">${form.n7} sorties · ${form.h7.toFixed(1).replace(".", ",")} h</div></div>
+      <div class="fi"><div class="l">7 derniers jours</div><div class="v">${Math.round(form.km7)}<small> km</small></div><div class="s">${form.n7} séance${form.n7 > 1 ? "s" : ""}${form.c7 ? ` + ${form.c7} trajet${form.c7 > 1 ? "s" : ""}` : ""} · ${form.h7.toFixed(1).replace(".", ",")} h</div></div>
       <div class="fi"><div class="l">Dernière séance dure</div><div class="v sm">${form.lastHard == null ? "–" : form.lastHard === 0 ? "aujourd'hui" : form.lastHard === 1 ? "hier" : `il y a ${form.lastHard} j`}</div><div class="s">intensité ou effet aérobie élevé</div></div>
       <div class="fi wide"><div class="l">Cycle d'entraînement</div><div class="v sm">${ph.final ? "Semaine finale" : `Bloc ${ph.block} · semaine ${ph.wk}/4`}${ph.deload && !ph.final ? " (allégée)" : ""}</div><div class="s">${ph.focus}</div></div>
     </div>
