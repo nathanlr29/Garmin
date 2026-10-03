@@ -65,13 +65,15 @@ function mountTabs() {
 
 // ------------------------------------------------------------------ Données chiffrées
 async function decryptEnv(env, code) {
+  if (env.plain) return env.plain;
   const b = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(code), "PBKDF2", false, ["deriveKey"]);
   const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b(env.salt), iterations: env.iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(env.iv) }, key, b(env.data));
   return JSON.parse(new TextDecoder().decode(pt));
 }
-async function fetchEnv() {
+async function fetchEnv() {  // accès libre : recovery.json ; ancien format chiffré en secours
+  try { const r = await fetch("data/recovery.json?v=" + Date.now(), { cache: "no-store" }); if (r.ok) { const plain = await r.json(); return { plain, data: plain.updated_at || "" }; } } catch (e) {}
   try { const r = await fetch("data/recovery.enc?v=" + Date.now(), { cache: "no-store" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; }
 }
 async function openRecup(refresh) {
@@ -84,7 +86,7 @@ async function openRecup(refresh) {
   }
   if (!RC.data) {
     const code = store.get(CODE_KEY);
-    if (!code) return showLock();
+    if (!code && !RC.env.plain) return showLock();
     try { RC.data = await decryptEnv(RC.env, code); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} return showLock("Le code a changé, saisis-le à nouveau."); }
     prep();
   }
@@ -125,7 +127,7 @@ function renderRecup() {
   box.innerHTML = `
   <div class="headrow" style="margin-bottom:14px">
     <div class="chips" id="rPeriod">${per.map(([v, l]) => `<button class="chip" data-p="${v}" aria-pressed="${String(RC.period) === String(v)}">${l}</button>`).join("")}</div>
-    <div class="pending">${D.pending ? `<i></i>Historique en cours de récupération : encore ${D.pending} jours ·` : ""}${u ? ` Données du ${u.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${clock(u)}` : ""} · <button class="linkbtn" id="rLock">Verrouiller</button></div>
+    <div class="pending">${D.pending ? `<i></i>Historique en cours de récupération : encore ${D.pending} jours ·` : ""}${u ? ` Données du ${u.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${clock(u)}` : ""}</div>
   </div>
   <div class="grid">
     <section class="card span12"><div class="mnav"><span class="navn"><button id="rMPrev" aria-label="Jour précédent">‹</button><input type="date" id="rDate" aria-label="Choisir un jour"><button id="rMNext" aria-label="Jour suivant">›</button></span><button class="linkbtn" id="rToday">Dernier jour</button></div><div class="morning" id="rMorning"></div></section>
@@ -141,7 +143,6 @@ function renderRecup() {
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
   </div>`;
   $("rPeriod").onclick = e => { const b = e.target.closest("[data-p]"); if (!b) return; RC.period = b.dataset.p === "year" ? "year" : +b.dataset.p; renderRecup(); };
-  $("rLock").onclick = () => { try { localStorage.removeItem(CODE_KEY); } catch (e) {} RC.data = null; showLock(); };
   const step = k => selectDay(RC.sel + k);
   $("rPrev").onclick = $("rMPrev").onclick = () => step(-1);
   $("rNext").onclick = $("rMNext").onclick = () => step(1);
@@ -536,7 +537,7 @@ async function ensure(target, after) {
   if (!RC.env) { $(target).innerHTML = `<div class="card empty"><b>Pas encore de données</b>Le plan a besoin des données de l'onglet Récup (secret <code>RECUP_CODE</code>).</div>`; return false; }
   if (!RC.data) {
     const code = store.get(CODE_KEY);
-    if (code) { try { RC.data = await decryptEnv(RC.env, code); prep(); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} } }
+    if (code || RC.env.plain) { try { RC.data = await decryptEnv(RC.env, code); prep(); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} } }
     if (!RC.data) { showLock("", target, after); return false; }
   }
   return true;
