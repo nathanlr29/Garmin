@@ -36,13 +36,15 @@ jobs:
           python-version: "3.12"
 
       - name: Installer la bibliothèque Garmin
-        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography
+        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography fit-tool requests
 
       - name: Récupérer les activités Garmin
         env:
           GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
           GARMIN_KEY: ${{ secrets.GARMIN_KEY }}
           RECUP_CODE: ${{ secrets.RECUP_CODE }}             # code de l'onglet Récup
+          MYWHOOSH_EMAIL: ${{ secrets.MYWHOOSH_EMAIL }}     # facultatif : envoi des séances MyWhoosh vers Garmin
+          MYWHOOSH_PASSWORD: ${{ secrets.MYWHOOSH_PASSWORD }}
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}         # facultatif (plan B)
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}   # facultatif (plan B)
           FULL_SYNC: ${{ inputs.full && '1' || '0' }}
