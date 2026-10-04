@@ -225,6 +225,14 @@ def main():
 
     api = connect()
     try:
+        # MyWhoosh → Garmin (fichier présenté comme venant de ton Edge 540) : avant la récupération des activités
+        try:
+            import mywhoosh
+            mywhoosh.run(api)
+        except GarminConnectTooManyRequestsError:
+            raise
+        except Exception as e:
+            print(f"MyWhoosh : erreur {type(e).__name__} : {e}")
         raw = fetch_all(api, only_recent=not full)
         if full:
             known = {}
