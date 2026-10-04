@@ -114,93 +114,173 @@ def edge540(api):
 
 
 # ------------------------------------------------------------------ Réécriture du fichier FIT
+FIT_EPOCH = 631065600  # 31/12/1989 en secondes Unix
+GAP = 5                # trou de plus de 5 s entre deux points = pause
+
+
+def _np(powers):
+    """Puissance normalisée (moyenne glissante 30 s, puissance 4)."""
+    if len(powers) < 30:
+        return None
+    s, roll = sum(powers[:30]), []
+    for i in range(30, len(powers) + 1):
+        roll.append((s / 30) ** 4)
+        if i < len(powers):
+            s += powers[i] - powers[i - 30]
+    return round((sum(roll) / len(roll)) ** 0.25)
+
+
+def _summary(pts, t0, t1):
+    """Résumé d'une portion de séance (points entre t0 inclus et t1 exclu, en ms)."""
+    p = [r for r in pts if t0 <= r["t"] < t1]
+    timer = moving = 0.0
+    work = 0.0
+    for a, b in zip(p, p[1:] + [None]):
+        dt = 1.0 if b is None else (b["t"] - a["t"]) / 1000
+        if dt > GAP:
+            dt = 1.0
+        timer += dt
+        if (a["v"] or 0) > 0.5:
+            moving += dt
+        work += (a["w"] or 0) * dt
+    before = [r["d"] for r in pts if r["t"] < t0 and r["d"] is not None]
+    dist = max(0.0, (p[-1]["d"] or 0) - (before[-1] if before else 0)) if p else 0.0
+    ws = [r["w"] for r in p if r["w"] is not None]
+    hs = [r["h"] for r in p if r["h"]]
+    cs = [r["c"] for r in p if r["c"]]
+    vs = [r["v"] for r in p if r["v"] is not None]
+    alt = [r["a"] for r in p if r["a"] is not None]
+    up = sum(max(0, b - a) for a, b in zip(alt, alt[1:]))
+    down = sum(max(0, a - b) for a, b in zip(alt, alt[1:]))
+    return dict(n=len(p), timer=timer, moving=moving, elapsed=(t1 - t0) / 1000, dist=dist, work=work,
+                avg_w=round(sum(ws) / len(ws)) if ws else None, max_w=max(ws) if ws else None, np=_np(ws),
+                avg_h=round(sum(hs) / len(hs)) if hs else None, max_h=max(hs) if hs else None,
+                avg_c=round(sum(cs) / len(cs)) if cs else None, max_c=max(cs) if cs else None,
+                avg_v=dist / timer if timer else None, max_v=max(vs) if vs else None,
+                up=round(up), down=round(down))
+
+
 def disguise(src, dst, serial, fw):
-    """Réécrit l'appareil en Garmin Edge 540. Retourne (début UTC, nb de points, somme des watts)."""
+    """Reconstruit la séance comme l'écrirait un Garmin Edge 540.
+
+    Les points (puissance, cardio, cadence, vitesse, distance, position virtuelle) sont recopiés tels quels.
+    Les résumés écrits par MyWhoosh sont souvent faux (un seul tour de 10 min, horodatages au départ,
+    heure locale décalée de 20 ans) : tours, séance, évènements et activité sont donc recalculés à partir
+    des points, sinon Garmin affiche un temps de déplacement et une vitesse moyenne absurdes.
+    Retourne (début UTC en ms, nb de points, somme des watts).
+    """
+    from zoneinfo import ZoneInfo
     from fit_tool.definition_message import DefinitionMessage
     from fit_tool.fit_file import FitFile
     from fit_tool.fit_file_builder import FitFileBuilder
     from fit_tool.profile.messages.activity_message import ActivityMessage
     from fit_tool.profile.messages.device_info_message import DeviceInfoMessage
+    from fit_tool.profile.messages.event_message import EventMessage
     from fit_tool.profile.messages.file_creator_message import FileCreatorMessage
     from fit_tool.profile.messages.file_id_message import FileIdMessage
+    from fit_tool.profile.messages.hrv_message import HrvMessage
+    from fit_tool.profile.messages.lap_message import LapMessage
     from fit_tool.profile.messages.record_message import RecordMessage
     from fit_tool.profile.messages.session_message import SessionMessage
 
-    def put(m, field, value):  # un champ absent du fichier d'origine ne peut pas toujours être ajouté
-        try:
-            setattr(m, field, value)
-        except Exception:
-            pass
+    def put(m, **kw):  # n'écrit que les valeurs connues
+        for k, v in kw.items():
+            if v is not None:
+                setattr(m, k, v)
+        return m
 
     fit = FitFile.from_file(str(src))
-    # contournement d'un bug de fit_tool : les champs inconnus (propres à l'appli) corrompent la réécriture
+    recs, hrv, laps0, sess0, fid0 = [], [], [], None, None
     for rec in fit.records:
         m = rec.message
+        if isinstance(m, RecordMessage) and m.timestamp:
+            recs.append(m)
+        elif isinstance(m, HrvMessage):
+            hrv.append(m)
+        elif isinstance(m, LapMessage) and m.start_time:
+            laps0.append(m)
+        elif isinstance(m, SessionMessage) and sess0 is None:
+            sess0 = m
+        elif isinstance(m, FileIdMessage) and fid0 is None:
+            fid0 = m
+    if not recs:
+        raise RuntimeError("séance sans données")
+    recs.sort(key=lambda m: m.timestamp)
+    # contournement d'un bug de fit_tool : les champs inconnus (propres à l'appli) corrompent la réécriture
+    for m in recs + hrv:
         dm = getattr(m, "definition_message", None)
-        if dm is None or not hasattr(m, "fields"):
-            continue
-        have = {f.field_id for f in m.fields if f.is_valid()}
-        if {fd.field_id for fd in dm.field_definitions} - have:
+        if dm is not None and {fd.field_id for fd in dm.field_definitions} - {f.field_id for f in m.fields if f.is_valid()}:
             m.definition_message = None
 
+    pts = [dict(t=m.timestamp, w=m.power, h=m.heart_rate, c=m.cadence, d=m.distance,
+                v=m.enhanced_speed if m.enhanced_speed is not None else m.speed,
+                a=m.enhanced_altitude if m.enhanced_altitude is not None else m.altitude) for m in recs]
+    start, end = pts[0]["t"], pts[-1]["t"] + 1000
+    sport, sub = (sess0.sport if sess0 and sess0.sport is not None else 2), (sess0.sub_sport if sess0 and sess0.sub_sport is not None else 58)
+
+    # tours : on garde les débuts de tour de MyWhoosh, le dernier va jusqu'à la fin
+    cuts = sorted({start} | {l.start_time for l in laps0 if start < l.start_time < end - 30_000})
+    bounds = list(zip(cuts, cuts[1:] + [end]))
+    S = _summary(pts, start, end)
+    cal = sess0.total_calories if sess0 and sess0.total_calories else round(S["work"] / 1000 * 1.0)
+
     b = FitFileBuilder(auto_define=True, min_string_size=50)
-    deferred, skipped0, start = [], False, None
-    for rec in fit.records:
-        m = rec.message
-        if isinstance(m, ActivityMessage):
-            deferred.append(m)
-            continue
-        if m.global_id == FileIdMessage.ID:
-            if isinstance(m, DefinitionMessage):
-                continue
-            if isinstance(m, FileIdMessage):
-                n = FileIdMessage()
-                n.time_created = m.time_created or int(datetime.now().timestamp() * 1000)
-                if m.type:
-                    n.type = m.type
-                n.serial_number, n.manufacturer, n.product = serial, GARMIN, EDGE_540
-                start = start or n.time_created
-                b.add(DefinitionMessage.from_data_message(n)); b.add(n)
-                c = FileCreatorMessage(); c.software_version = fw
-                b.add(DefinitionMessage.from_data_message(c)); b.add(c)
-                continue
-        if m.global_id == FileCreatorMessage.ID:
-            continue
-        if m.global_id == DeviceInfoMessage.ID and isinstance(m, DeviceInfoMessage):
-            if m.device_type == 0:          # même traitement que Fit-File-Faker
-                skipped0 = True
-                continue
-            if skipped0 and m.device_index is not None:
-                m.device_index = m.device_index - 1
-            if m.manufacturer in SOURCES:
-                put(m, "manufacturer", GARMIN)
-                if m.product is not None:
-                    put(m, "product", EDGE_540)
-                if getattr(m, "garmin_product", None) is not None:
-                    put(m, "garmin_product", EDGE_540)
-                put(m, "product_name", "")
-                if m.device_index in (0, None):
-                    put(m, "serial_number", serial)
-                    put(m, "software_version", fw / 100)
-        if isinstance(m, SessionMessage) and m.start_time:
-            start = m.start_time
+
+    def add(m):
+        b.add(DefinitionMessage.from_data_message(m))
         b.add(m)
-    for m in deferred:
+
+    add(put(FileIdMessage(), type=4, manufacturer=GARMIN, product=EDGE_540, serial_number=serial,
+            time_created=(fid0.time_created if fid0 and fid0.time_created else start)))
+    add(put(FileCreatorMessage(), software_version=fw))
+    add(put(EventMessage(), timestamp=start, event=0, event_type=0, event_group=0))           # chrono : départ
+    add(put(DeviceInfoMessage(), timestamp=start, device_index=0, manufacturer=GARMIN, product=EDGE_540,
+            serial_number=serial, software_version=fw / 100, source_type=5))                  # l'Edge lui-même
+    prev = None
+    for m in recs:
+        if prev is not None and (m.timestamp - prev) / 1000 > GAP:                             # pause
+            add(put(EventMessage(), timestamp=prev + 1000, event=0, event_type=4, event_group=0))
+            add(put(EventMessage(), timestamp=m.timestamp, event=0, event_type=0, event_group=0))
         b.add(m)
+        prev = m.timestamp
+    for m in hrv:
+        b.add(m)
+    add(put(EventMessage(), timestamp=end, event=0, event_type=4, event_group=0))             # chrono : arrêt
+
+    def fill(m, s, t0, t1):
+        return put(m, timestamp=t1, start_time=t0, total_elapsed_time=s["elapsed"], total_timer_time=s["timer"],
+                   total_moving_time=s["moving"], total_distance=s["dist"], total_work=round(s["work"]),
+                   avg_speed=s["avg_v"], enhanced_avg_speed=s["avg_v"], max_speed=s["max_v"], enhanced_max_speed=s["max_v"],
+                   avg_power=s["avg_w"], max_power=s["max_w"], normalized_power=s["np"],
+                   avg_heart_rate=s["avg_h"], max_heart_rate=s["max_h"], avg_cadence=s["avg_c"], max_cadence=s["max_c"],
+                   total_ascent=s["up"], total_descent=s["down"], sport=sport, sub_sport=sub, event=9, event_type=1)
+
+    for i, (t0, t1) in enumerate(bounds):
+        s = _summary(pts, t0, t1)
+        lap = fill(LapMessage(), s, t0, t1)
+        put(lap, message_index=i, lap_trigger=(7 if i == len(bounds) - 1 else 0),
+            total_calories=round(cal * s["work"] / S["work"]) if S["work"] else None)
+        add(lap)
+    ses = fill(SessionMessage(), S, start, end)
+    put(ses, message_index=0, first_lap_index=0, num_laps=len(bounds), trigger=0, total_calories=cal,
+        total_ascent=(sess0.total_ascent if sess0 and sess0.total_ascent else S["up"]))
+    add(ses)
+    off = int(datetime.fromtimestamp(end / 1000, ZoneInfo("Europe/Paris")).utcoffset().total_seconds())
+    add(put(ActivityMessage(), timestamp=end, total_timer_time=S["timer"], num_sessions=1, type=0, event=26,
+            event_type=1, local_timestamp=int(end / 1000) + off - FIT_EPOCH))
     b.build().to_file(str(dst))
 
-    # contrôle : le fichier réécrit doit garder exactement les mêmes données
-    def stats(path):
-        f = FitFile.from_file(str(path))
-        recs = [r.message for r in f.records if isinstance(r.message, RecordMessage)]
-        fid = next((r.message for r in f.records if isinstance(r.message, FileIdMessage)), None)
-        return len(recs), sum(m.power or 0 for m in recs), sum(m.heart_rate or 0 for m in recs), fid
-    a, out = stats(src), stats(dst)
-    if a[:3] != out[:3] or not out[3] or out[3].manufacturer != GARMIN or out[3].product != EDGE_540:
+    # contrôle : mêmes points, mêmes watts, même cardio, en-tête Garmin Edge 540, séance cohérente
+    f = FitFile.from_file(str(dst))
+    out = [r.message for r in f.records if isinstance(r.message, RecordMessage)]
+    fid = next((r.message for r in f.records if isinstance(r.message, FileIdMessage)), None)
+    so = next((r.message for r in f.records if isinstance(r.message, SessionMessage)), None)
+    if (len(out) != len(recs) or sum(m.power or 0 for m in out) != sum(m.power or 0 for m in recs)
+            or sum(m.heart_rate or 0 for m in out) != sum(m.heart_rate or 0 for m in recs)
+            or not fid or fid.manufacturer != GARMIN or fid.product != EDGE_540
+            or not so or abs((so.total_timer_time or 0) - S["timer"]) > 2 or so.timestamp != end):
         raise RuntimeError("contrôle du fichier réécrit échoué, séance non envoyée")
-    if not a[0]:
-        raise RuntimeError("séance sans données")
-    return start, a[0], a[1]
+    return start, len(recs), sum(m.power or 0 for m in recs)
 
 
 # ------------------------------------------------------------------ Garmin : doublons
