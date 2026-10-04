@@ -77,7 +77,7 @@ Ouvre l'adresse dans **Safari**, puis **Partager › Sur l'écran d'accueil**. T
 ```json
 {
   "titre": "Mes kilomètres",
-  "objectif_km": 8000,
+  "objectif_km": 10000,
   "ville": "Rennes",
   "rayon_confidentialite_m": 400
 }
