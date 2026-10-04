@@ -186,7 +186,141 @@ def slim(a):
     pc = power_curve(a)
     if pc:
         out["pc"] = pc
+    # temps passé dans chaque zone Garmin (s) : secours du bilan quand le détail de la séance manque
+    for key, field, n in (("pz", "powerTimeInZone_", 7), ("hz", "hrTimeInZone_", 5)):
+        z = [a.get(f"{field}{i}") for i in range(1, n + 1)]
+        if any(isinstance(v, (int, float)) and v > 0 for v in z):
+            out[key] = [round(v) if isinstance(v, (int, float)) else 0 for v in z]
     return out
+
+
+# ---------------------------------------------------------------- Détail des séances (bilan)
+STREAMS = DATA / "streams"
+STREAM_INDEX = STREAMS / "index.json"
+STREAM_DAYS = 42      # on analyse les sorties des 6 dernières semaines
+STREAM_KEEP = 120     # et on garde 4 mois d'historique
+STREAM_PER_RUN = 6    # téléchargements maximum par passage, pour ménager Garmin
+STREAM_BINS = 1200    # au plus 1 200 points par séance
+
+
+def fit_records(blob):
+    """Points « record » d'un FIT (ou du zip « original » de Garmin)."""
+    import io
+    import zipfile
+    import fitdecode
+
+    data = blob
+    if blob[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            name = next((n for n in z.namelist() if n.lower().endswith(".fit")), None)
+            if not name:
+                return []
+            data = z.read(name)
+    out = []
+    with fitdecode.FitReader(io.BytesIO(data), check_crc=fitdecode.CrcCheck.DISABLED) as fr:
+        for f in fr:
+            if isinstance(f, fitdecode.FitDataMessage) and f.name == "record":
+                out.append({fl.name: fl.value for fl in f.fields if fl.value is not None})
+    return out
+
+
+def build_stream(act_id, recs, radius):
+    """Séance ramenée à des pas réguliers : puissance, cardio, cadence, vitesse, altitude, position."""
+    recs = [r for r in recs if isinstance(r.get("timestamp"), datetime)]
+    if len(recs) < 60:
+        return None
+    t0 = recs[0]["timestamp"]
+    span = (recs[-1]["timestamp"] - t0).total_seconds()
+    if span < 300:
+        return None
+    dt = max(5, int(math.ceil(span / STREAM_BINS / 5)) * 5)
+    n = int(span // dt) + 1
+    keys = ("p", "h", "c", "v", "a", "la", "lo")
+    acc = {k: [[0.0, 0] for _ in range(n)] for k in keys}
+    has = set()
+    deg = 180 / 2 ** 31
+
+    def put(k, i, v):
+        if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
+            acc[k][i][0] += v
+            acc[k][i][1] += 1
+            has.add(k)
+
+    for r in recs:
+        i = min(n - 1, int((r["timestamp"] - t0).total_seconds() // dt))
+        put("p", i, r.get("power"))
+        put("h", i, r.get("heart_rate") if (r.get("heart_rate") or 0) > 0 else None)
+        put("c", i, r.get("cadence"))
+        sp = r.get("enhanced_speed", r.get("speed"))
+        put("v", i, sp * 3.6 if isinstance(sp, (int, float)) else None)
+        put("a", i, r.get("enhanced_altitude", r.get("altitude")))
+        la, lo = r.get("position_lat"), r.get("position_long")
+        if isinstance(la, int) and isinstance(lo, int) and (la or lo):
+            put("la", i, la * deg)
+            put("lo", i, lo * deg)
+
+    def mean(k, i, nd=0):
+        s, c = acc[k][i]
+        return round(s / c, nd) if c else None
+
+    out = {"id": act_id, "t0": t0.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "dt": dt, "n": n}
+    if "p" in has:
+        out["p"] = [None if v is None else int(v) for v in (mean("p", i) for i in range(n))]
+    if "h" in has:
+        out["h"] = [None if v is None else int(v) for v in (mean("h", i) for i in range(n))]
+    if "c" in has:
+        out["c"] = [None if v is None else int(v) for v in (mean("c", i) for i in range(n))]
+    if "v" in has:
+        out["v"] = [None if v is None else int(round(v * 10)) for v in (mean("v", i, 2) for i in range(n))]
+    if "a" in has:
+        out["a"] = [None if v is None else int(v) for v in (mean("a", i) for i in range(n))]
+    if "la" in has:
+        g = [(mean("la", i, 6), mean("lo", i, 6)) for i in range(n)]
+        pts = [p for p in g if p[0] is not None]
+        if len(pts) >= 10:
+            s, e = pts[0], pts[-1]
+            # comme pour les traces : rien autour du départ et de l'arrivée (ton domicile n'apparaît pas)
+            out["g"] = [0 if p[0] is None or dist_m(p, s) <= radius or dist_m(p, e) <= radius
+                        else [round(p[0], 4), round(p[1], 4)] for p in g]
+    if not any(k in out for k in ("p", "h", "v")):
+        return None
+    return out
+
+
+def update_streams(api, acts, radius):
+    """Télécharge le détail des nouvelles sorties vélo, purge les vieux fichiers."""
+    STREAMS.mkdir(exist_ok=True)
+    index = load(STREAM_INDEX, {})
+    now = datetime.now()
+    age = lambda d: (now - datetime.strptime(d[:10], "%Y-%m-%d")).days
+    for k, v in list(index.items()):  # purge
+        if age(v.get("d", "1970-01-01")) > STREAM_KEEP:
+            (STREAMS / f"{k}.json").unlink(missing_ok=True)
+            index.pop(k)
+    todo = [a for a in reversed(acts)
+            if a["t"] in ("Ride", "VirtualRide") and a["mt"] >= 600 and age(a["d"]) <= STREAM_DAYS
+            and str(a["id"]) not in index][:STREAM_PER_RUN]
+    done = 0
+    for a in todo:
+        try:
+            blob = api.download_activity(a["id"], dl_fmt=api.ActivityDownloadFormat.ORIGINAL)
+            st = build_stream(a["id"], fit_records(blob), radius)
+        except GarminConnectTooManyRequestsError:
+            print("Bilan : Garmin limite les requêtes (429), on reprendra au prochain passage.")
+            break
+        except Exception as e:  # séance sans fichier (saisie manuelle…) : on ne redemandera pas
+            print(f"Bilan : détail de {a['id']} indisponible ({type(e).__name__})")
+            st = None
+        if st and a["t"] == "VirtualRide":
+            st.pop("g", None)  # position virtuelle de l'appli : sans intérêt
+        if st:
+            (STREAMS / f"{a['id']}.json").write_text(json.dumps(st, separators=(",", ":")), encoding="utf-8")
+            done += 1
+        index[str(a["id"])] = {"d": a["d"][:10], "ok": 1 if st else 0}
+        time.sleep(0.5)
+    STREAM_INDEX.write_text(json.dumps(index, separators=(",", ":"), sort_keys=True), encoding="utf-8")
+    if todo:
+        print(f"Bilan : {done} séance(s) détaillée(s) sur {len(todo)} demandée(s).")
 
 
 def fetch_all(api, only_recent=False):
@@ -254,6 +388,11 @@ def main():
                 # None = pas de GPS : mémorisé pour ne pas redemander à chaque passage
                 new_traces[i] = fetch_trace(api, i, radius)
                 time.sleep(0.3)
+        # Bilan de séance : détail seconde par seconde des sorties récentes (une erreur ici ne bloque rien)
+        try:
+            update_streams(api, acts, radius)
+        except Exception as e:
+            print(f"Bilan : erreur {type(e).__name__} : {e}")
         # Onglet Récup (sommeil, VFC, FC…) : une erreur ici ne bloque pas les sorties vélo
         try:
             import recovery
