@@ -63,3 +63,24 @@
 #sortie .nuttab td{white-space:normal;text-align:left}#sortie .nuttab td:nth-child(-n+2){white-space:nowrap;color:var(--muted);width:1%;padding-right:12px}
 #sortie .nuttab td small{display:inline;color:var(--muted)}
 #sortie .nuttab tr.w td{color:#1c7ed6}
+/* Générateur de boucle */
+#sortie .sogen{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+#sortie .sogen[hidden]{display:none}
+#sortie .sogen h3{font-size:15px;font-weight:800;margin-bottom:4px}
+#sortie .sogen .sosmall{margin:2px 0 10px;line-height:1.45}
+#sortie .gform{margin:4px 0}
+#sortie .gform .btn2{margin-left:auto}
+@media (max-width:620px){#sortie .gform .btn2{margin-left:0;width:100%}}
+#sortie input[type=text]{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:7px 9px;min-width:0;flex:1 1 180px}
+#sortie .gstart{margin-top:8px;font-size:13px}
+#sortie .gstart summary{cursor:pointer;color:var(--accent);font-weight:600}
+#sortie .gstart .soform{margin-top:8px}
+#sortie .gres{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+@media (max-width:900px){#sortie .gres{grid-template-columns:1fr}}
+#sortie .gcard{border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--bg);display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;align-items:center}
+#sortie .gcard .map{width:84px;height:84px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
+#sortie .gcard .map svg{width:76px;height:76px}
+#sortie .gtx{display:grid;gap:3px;font-size:12.5px;color:var(--muted);min-width:0}
+#sortie .gtx b{font-size:14.5px;color:var(--ink)}
+#sortie .gtx small{color:#c77700}
+#sortie .gtx .btn{justify-self:start;margin-top:4px}

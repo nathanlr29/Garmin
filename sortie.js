@@ -14,6 +14,8 @@ const ticks = (lo, hi, n) => { const raw = (hi - lo) / n, p = Math.pow(10, Math.
 const STEP = 25;  // un point de profil tous les 25 m
 const DIRS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"];
 const dirName = d => DIRS[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+const DIRF = ["le nord", "le nord-nord-est", "le nord-est", "l'est-nord-est", "l'est", "l'est-sud-est", "le sud-est", "le sud-sud-est", "le sud", "le sud-sud-ouest", "le sud-ouest", "l'ouest-sud-ouest", "l'ouest", "l'ouest-nord-ouest", "le nord-ouest", "le nord-nord-ouest"];
+const vers = d => DIRF[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
 const vdu = d => { const n = dirName(d); return /^[AEIOU]/.test(n) ? `d'${n}` : `du ${n}`; };  // « vent d'ouest », « vent du nord »
 const WMO = c => c == null ? "" : c === 0 ? "Ciel clair" : c === 1 ? "Peu nuageux" : c === 2 ? "Éclaircies" : c === 3 ? "Couvert" : c <= 48 ? "Brouillard" : c <= 57 ? "Bruine" : c <= 67 ? "Pluie" : c <= 77 ? "Neige" : c <= 82 ? "Averses" : c <= 86 ? "Averses de neige" : "Orage";
 const COL = { face: "#e03131", travers: "#f2a93b", dos: "#2f9e44", calme: "#868e96" };
@@ -231,16 +233,21 @@ function renderLoad() {
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
-        <button class="btn" id="soChange">Changer de trace</button>
+        <button class="btn" id="soChange">Changer de trace</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
       </div></div>
+    <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
     <input type="file" id="soFile" hidden>` : `
     <h2>Planifier une sortie</h2>
     <label class="sodrop" id="soDrop"><input type="file" id="soFile"><b>Importer une trace GPX</b><span>Dans Garmin Connect : Entraînement et planification → Parcours → ouvre le parcours → ⋯ → Exporter au format GPX.</span></label>
     ${recent.length ? `<div class="sorecent"><label>ou refaire une sortie récente <select id="soRecent"><option value="">choisir…</option>${recent.map(a => `<option value="${a.id}">${a.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} · ${esc(a.n)} · ${fmt(a.km)} km</option>`).join("")}</select></label></div>` : ""}
-    <p class="soerr" id="soErr"></p>`;
+    <p class="soerr" id="soErr"></p>
+    <div class="sogen" id="soGen"></div>`;
   const file = $("soFile");
   file.onchange = async () => { const f = file.files[0]; if (!f) return; try { setRoute(parseGPX(await f.text(), f.name)); } catch (e) { showErr(e.message); } };
   if ($("soChange")) $("soChange").onclick = () => file.click();
+  if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; renderLoad(); };
+  if ($("soGpx")) $("soGpx").onclick = exportGPX;
+  if ($("soGen") && !$("soGen").hidden) renderGen();
   const drop = $("soDrop");
   if (drop) { drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); }; drop.ondragleave = () => drop.classList.remove("on");
     drop.ondrop = async e => { e.preventDefault(); drop.classList.remove("on"); const f = e.dataTransfer.files[0]; if (f) try { setRoute(parseGPX(await f.text(), f.name)); } catch (er) { showErr(er.message); } }; }
@@ -451,6 +458,403 @@ function renderTimeline(r, wx) {
       <div class="w"><svg viewBox="-10 -10 20 20" width="20" height="20" style="transform:rotate(${(w.wd + 180) % 360}deg)"><path d="M0,-8 L5,5 L0,2 L-5,5 Z" fill="${c}"/></svg>${fmt(w.ws)}<small> km/h</small></div>
       <div class="p" style="opacity:${w.pp >= 20 ? 1 : .45}">${fmt(w.pp)} %${w.mm >= .1 ? ` · ${fmt(w.mm, 1)} mm` : ""}</div></div>`; }).join("")}</div>`;
 }
+
+// ------------------------------------------------------------------ Générateur de boucle face au vent
+// Itinéraires : BRouter (open source, sans clé) avec un profil « routes ouvertes » : pas de pistes cyclables,
+// voies vertes, chemins, ni grands axes si on peut l'éviter. Le point de départ reste sur cet appareil.
+const BR = "https://brouter.de/brouter", BRF_V = 1;
+const BRF = `---context:global
+assign validForBikes = true
+assign allow_steps = false
+assign allow_ferries = false
+assign allow_motorways = false
+assign use_proposed_cycleroutes = false
+assign consider_traffic = 0.3
+assign consider_noise = false
+assign consider_river = false
+assign consider_forest = false
+assign consider_town = false
+assign consider_elevation = true
+assign downhillcost = 60
+assign downhillcutoff = 1.5
+assign uphillcost = 0
+assign uphillcutoff = 1.5
+assign downhillcost = if consider_elevation then downhillcost else 0
+assign uphillcost = if consider_elevation then uphillcost else 0
+assign totalMass = 90
+assign maxSpeed = 45
+assign S_C_x = 0.225
+assign C_r = 0.01
+assign bikerPower = 100
+assign turnInstructionMode = 0
+assign turnInstructionCatchingRange = 40
+assign turnInstructionRoundabouts = true
+assign considerTurnRestrictions = true
+assign correctMisplacedViaPoints = false
+assign correctMisplacedViaPointsDistance = 400
+assign processUnusedTags = false
+---context:way
+assign any_cycleroute
+ switch not use_proposed_cycleroutes
+ or route_bicycle_icn=yes or route_bicycle_ncn=yes or route_bicycle_rcn=yes route_bicycle_lcn=yes
+ or route_bicycle_icn=yes|proposed or route_bicycle_ncn=yes|proposed or route_bicycle_rcn=yes|proposed route_bicycle_lcn=yes|proposed
+assign nodeaccessgranted or any_cycleroute lcn=yes
+assign ispaved or surface=paved or surface=asphalt or surface=concrete or surface=paving_stones or surface=sett or smoothness=excellent smoothness=good
+assign isunpaved not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel or surface=cobblestone smoothness=intermediate
+assign turncost = if junction=roundabout then 0
+ else 90
+assign initialclassifier =
+ if route=ferry then 1
+ else 0
+assign initialcost switch route=ferry 10000 0
+assign defaultaccess
+ switch access=
+ (
+ if motorroad=yes then false
+ else if highway=motorway|motorway_link then false
+ else true
+ )
+ switch or access=private access=no
+ false
+ true
+assign bikeaccess =
+ switch bicycle=
+ switch bicycle_road=yes
+ true
+ switch vehicle=
+ ( if highway=footway then false else defaultaccess )
+ not vehicle=private|no
+ not or bicycle=private or bicycle=no or bicycle=dismount bicycle=use_sidepath
+assign footaccess =
+ or bicycle=dismount
+ switch foot=
+ defaultaccess
+ not or foot=private or foot=no foot=use_sidepath
+assign accesspenalty
+ switch bikeaccess
+ 0
+ switch footaccess
+ 5
+ switch any_cycleroute
+ 15
+ switch bicycle=use_sidepath
+ 25
+ 10000
+assign badoneway =
+ if reversedirection=yes then
+ if oneway:bicycle=yes then true
+ else if oneway= then junction=roundabout
+ else oneway=yes|true|1
+ else oneway=-1
+assign hascycleway = not
+ and ( or cycleway= cycleway=no|none ) and ( or cycleway:left= cycleway:left=no ) and ( or cycleway:right= cycleway:right=no ) ( or cycleway:both= cycleway:both=no )
+assign onewaypenalty =
+ if ( badoneway ) then
+ (
+ if (
+ and hascycleway
+ or and cycleway:left=lane|track|shared_lane|share_busway
+ cycleway:left:oneway=no|-1
+ or and cycleway:right=lane|track|shared_lane|share_busway
+ cycleway:right:oneway=no|-1
+ or and cycleway:both=lane|track|shared_lane|share_busway
+ or cycleway:left:oneway=no|-1
+ cycleway:right:oneway=no|-1
+ or cycleway=opposite|opposite_lane|opposite_track
+ or cycleway:left=opposite|opposite_lane|opposite_track
+ cycleway:right=opposite|opposite_lane|opposite_track
+ ) then 0
+ else if ( oneway:bicycle=no ) then 0
+ else if ( not footaccess ) then 100
+ else if ( junction=roundabout|circular ) then 60
+ else if ( highway=primary|primary_link ) then 50
+ else if ( highway=secondary|secondary_link ) then 30
+ else if ( highway=tertiary|tertiary_link ) then 20
+ else 6.0
+ )
+ else 0.0
+assign trafficpenalty =
+ if not consider_traffic then 0
+ else
+ min switch hascycleway 0.3 100
+ if estimated_traffic_class=|1|2 then 0
+ else if estimated_traffic_class=3 then multiply 0.3 consider_traffic
+ else if estimated_traffic_class=4 then multiply 0.6 consider_traffic
+ else if estimated_traffic_class=5 then multiply 0.9 consider_traffic
+ else if estimated_traffic_class=6|7 then multiply 1.5 consider_traffic
+ else 0
+assign isresidentialorliving = or highway=residential|living_street living_street=yes
+assign noise_penalty
+ switch consider_noise
+ switch estimated_noise_class= 0
+ switch estimated_noise_class=1 0.3
+ switch estimated_noise_class=2 0.5
+ switch estimated_noise_class=3 0.7
+ switch estimated_noise_class=4 1
+ switch estimated_noise_class=5 1.2
+ switch estimated_noise_class=6 1.5 0 0
+assign no_river_penalty
+ switch consider_river
+ switch estimated_river_class= 3
+ switch estimated_river_class=1 2
+ switch estimated_river_class=2 1.5
+ switch estimated_river_class=3 1
+ switch estimated_river_class=4 0.5
+ switch estimated_river_class=5 0.2
+ switch estimated_river_class=6 0 99 0
+assign no_forest_penalty
+ switch consider_forest
+ switch estimated_forest_class= 1
+ switch estimated_forest_class=1 0.5
+ switch estimated_forest_class=2 0.4
+ switch estimated_forest_class=3 0.25
+ switch estimated_forest_class=4 0.15
+ switch estimated_forest_class=5 0.1
+ switch estimated_forest_class=6 0 99 0
+assign town_penalty
+ switch consider_town
+ switch estimated_town_class= 0
+ switch estimated_town_class=1 0.2
+ switch estimated_town_class=2 0.4
+ switch estimated_town_class=3 0.6
+ switch estimated_town_class=4 0.7
+ switch estimated_town_class=5 0.8
+ switch estimated_town_class=6 1 99 0
+assign costfactor
+ switch and highway= not route=ferry 10000
+ switch or highway=proposed highway=abandoned 10000
+ min 9999
+ add max onewaypenalty accesspenalty
+ add trafficpenalty
+ add town_penalty
+ add no_forest_penalty
+ add no_river_penalty
+ add noise_penalty
+ switch or highway=motorway highway=motorway_link switch allow_motorways 1.5 10000
+ switch or highway=trunk highway=trunk_link switch allow_motorways 1.5 10
+ switch or highway=primary highway=primary_link 2.0
+ switch or highway=secondary highway=secondary_link 1.2
+ switch or highway=tertiary highway=tertiary_link 1.0
+ switch highway=unclassified switch isunpaved 40 1.0
+ switch highway=pedestrian 10
+ switch highway=steps switch allow_steps 120 10000
+ switch route=ferry switch allow_ferries 5.67 10000
+ switch highway=bridleway 40
+ switch highway=cycleway 6
+ switch isresidentialorliving switch isunpaved 40 1.3
+ switch highway=service switch isunpaved 40 1.6
+ switch or highway=track or highway=road or highway=path highway=footway
+ switch tracktype=grade1 switch isunpaved 40 6
+ switch tracktype=grade2 40
+ switch tracktype=grade3 60
+ switch tracktype=grade4 80
+ switch tracktype=grade5 100
+ switch or bicycle=designated bicycle_road=yes switch isunpaved 40 8
+ switch ispaved 6 switch isunpaved 50 25
+ 10.0
+assign priorityclassifier =
+ if ( highway=motorway ) then 30
+ else if ( highway=motorway_link ) then 29
+ else if ( highway=trunk ) then 28
+ else if ( highway=trunk_link ) then 27
+ else if ( highway=primary ) then 26
+ else if ( highway=primary_link ) then 25
+ else if ( highway=secondary ) then 24
+ else if ( highway=secondary_link ) then 23
+ else if ( highway=tertiary ) then 22
+ else if ( highway=tertiary_link ) then 21
+ else if ( highway=unclassified ) then 20
+ else if ( isresidentialorliving ) then 6
+ else if ( highway=service ) then 6
+ else if ( highway=cycleway ) then 6
+ else if ( or bicycle=designated bicycle_road=yes ) then 6
+ else if ( highway=track ) then if tracktype=grade1 then 6 else 4
+ else if ( highway=bridleway|road|path|footway ) then 4
+ else if ( highway=steps ) then 2
+ else if ( highway=pedestrian ) then 2
+ else 0
+assign isbadoneway = not equal onewaypenalty 0
+assign isgoodoneway = if reversedirection=yes then oneway=-1
+ else if oneway= then junction=roundabout else oneway=yes|true|1
+assign isroundabout = junction=roundabout
+assign islinktype = highway=motorway_link|trunk_link|primary_link|secondary_link|tertiary_link
+assign isgoodforcars = if greater priorityclassifier 6 then true
+ else if ( or isresidentialorliving highway=service ) then true
+ else if ( and highway=track tracktype=grade1 ) then true
+ else false
+assign classifiermask add isbadoneway
+ add multiply isgoodoneway 2
+ add multiply isroundabout 4
+ add multiply islinktype 8
+ multiply isgoodforcars 16
+assign dummyUsage = smoothness=
+---context:node
+assign defaultaccess
+ switch access=
+ 1
+ switch or access=private access=no
+ 0
+ 1
+assign bikeaccess
+ or nodeaccessgranted=yes
+ switch bicycle=
+ switch vehicle=
+ defaultaccess
+ switch or vehicle=private vehicle=no
+ 0
+ 1
+ switch or bicycle=private or bicycle=no bicycle=dismount
+ 0
+ 1
+assign footaccess
+ or bicycle=dismount
+ switch foot=
+ defaultaccess
+ switch or foot=private foot=no
+ 0
+ 1
+assign initialcost
+ switch or highway=traffic_signals and highway=crossing crossing=traffic_signals 20
+ switch bikeaccess
+ 0
+ switch footaccess
+ 300
+ 1000000
+`;
+const GEN = { busy: false, res: null, msg: "" };
+function dest(p, b, km) { const R = 6371, d = km / R, la = rad(p[0]), lo = rad(p[1]), br = rad(b);
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(br)), lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+  return [deg(la2), ((deg(lo2) + 540) % 360) - 180]; }
+function startPt() { const h = LS.get("soStart", null); return h && isFinite(h.lat) ? { lat: h.lat, lon: h.lon, label: h.label || "ton point de départ", own: true } : { lat: S.cfg.latitude ?? 48.1173, lon: S.cfg.longitude ?? -1.6778, label: `centre de ${S.cfg.ville || "Rennes"}`, own: false }; }
+async function brProfile(force) {
+  const c = LS.get("soBrf", null); if (!force && c && c.v === BRF_V && Date.now() - c.at < 2 * 864e5) return c.id;
+  const r = await fetch(BR + "/profile", { method: "POST", body: BRF }); const j = r.ok ? await r.json() : {};
+  if (!j.profileid || j.error) throw new Error("Le service d'itinéraires BRouter ne répond pas, réessaie dans un moment.");
+  LS.set("soBrf", { id: j.profileid, at: Date.now(), v: BRF_V }); return j.profileid;
+}
+async function brRoute(wps, prof) {
+  const ll = wps.map(p => `${p[1].toFixed(5)},${p[0].toFixed(5)}`).join("|");
+  const r = await fetch(`${BR}?lonlats=${ll}&profile=${prof}&alternativeidx=0&format=geojson`);
+  if (!r.ok) { const t = await r.text().catch(() => ""); const e = new Error(t.slice(0, 120) || "itinéraire impossible"); e.prof = /profile|lookup|ParseException|not found/i.test(t); throw e; }
+  const f = (await r.json()).features[0], pr = f.properties, M = pr.messages || [], head = M[0] || [], iT = head.indexOf("WayTags"), iD = head.indexOf("Distance");
+  const share = { bad: 0, main: 0, dirt: 0, tot: 0 };
+  M.slice(1).forEach(m => { const d = +m[iD] || 0, wt = m[iT] || ""; share.tot += d;
+    if (/highway=(cycleway|path|footway|track|bridleway|pedestrian)/.test(wt)) share.bad += d;
+    if (/highway=(primary|trunk)/.test(wt)) share.main += d;
+    if (/surface=(gravel|compacted|ground|dirt|fine_gravel|unpaved|grass|sand)/.test(wt)) share.dirt += d; });
+  return { pts: f.geometry.coordinates.map(c => [Math.round(c[1] * 1e5) / 1e5, Math.round(c[0] * 1e5) / 1e5, c[2] != null ? Math.round(c[2] * 10) / 10 : null]), km: +pr["track-length"] / 1000, asc: +pr["filtered ascend"] || 0,
+    bad: share.tot ? share.bad / share.tot : 0, main: share.tot ? share.main / share.tot : 0, dirt: share.tot ? share.dirt / share.tot : 0 };
+}
+async function windHere(st, day) {  // prévisions à un seul point (départ) pour noter les boucles
+  const d2 = new Date(day); d2.setDate(d2.getDate() + 1);
+  const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${st.lat.toFixed(3)}&longitude=${st.lon.toFixed(3)}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis`);
+  if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
+  if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
+  const j = await r.json();
+  return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: parseLocal(j.hourly.time[0]).getTime(), nH: j.hourly.time.length, step: 1e12 };
+}
+function overlap(pts) {  // part du parcours qui repasse sur ses pas (aller-retour), hors abords du départ
+  const cell = p => `${Math.round(p[0] * 600)}:${Math.round(p[1] * 400)}`, seen = new Map(); let cum = 0, rep = 0, tot = 0;
+  for (let i = 1; i < pts.length; i++) { const d = dist(pts[i - 1], pts[i]); cum += d; const k = cell(pts[i]);
+    if (dist(pts[i], pts[0]) > 2000) { tot += d; const f = seen.get(k); if (f != null && cum - f > 1500) rep += d; }
+    if (!seen.has(k)) seen.set(k, cum); }
+  return tot ? rep / tot : 0;
+}
+function scoreLoop(c, o, wx) {
+  const P = profile(c.pts), r = simulate(P, wx, o.start, o.speed, false), n = P.length; c.asc = gain(P);
+  const part = (a, b) => { let s_ = 0, k = 0; for (let i = Math.floor(n * a); i < Math.floor(n * b); i++) { s_ += r.Hd[i] || 0; k++; } return s_ / Math.max(1, k); };
+  const first = part(0, .4), last = part(.6, 1), mpk = c.asc / Math.max(1, c.km);
+  const windPen = r.ok ? Math.max(0, last) * 2 + Math.max(0, last - first) * .8 + Math.max(0, r.head) * .5 : 0;
+  const relPen = o.rel === "flat" ? Math.max(0, mpk - 6) * 3 : o.rel === "hilly" ? Math.max(0, 9 - mpk) * 3 : 0;
+  const ov = overlap(c.pts);
+  c.P = P; c.sim = r; c.first = first; c.last = last; c.ov = ov; c.mpk = mpk;
+  c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 60 + c.bad * 60 + c.main * 25 + c.dirt * 40;
+  return c;
+}
+async function makeLoops(o) {
+  const st = startPt(), S0 = [st.lat, st.lon]; let prof = await brProfile(), profErr = false;
+  GEN.msg = "Prévisions de vent…"; renderGen();
+  const wx = await windHere(st, o.start);
+  const w0 = wxAt(wx, 0, o.start.getTime()), w1 = wxAt(wx, 0, o.start.getTime() + o.km / o.speed * 3600e3 / 2) || w0;
+  if (!w0) throw new Error("Pas de prévisions pour ce départ.");
+  const U = w0.ws * Math.sin(rad(w0.wd)) + w1.ws * Math.sin(rad(w1.wd)), V = w0.ws * Math.cos(rad(w0.wd)) + w1.ws * Math.cos(rad(w1.wd));
+  const ws = Math.hypot(U, V) / 2, wd = (deg(Math.atan2(U, V)) + 360) % 360, calm = ws < 8;
+  // formes : triangle (2 points) et losange (3 points), orientées face au vent (le vent vient de wd)
+  const shapes = [{ k: "tri", pts: [[-35, 1], [35, 1]] }, { k: "los", pts: [[-55, .62], [0, 1], [55, .62]] }];
+  const rots = calm ? [0, 90, 180, 270] : [-25, 0, 25], C = [];
+  shapes.forEach(sh => { const unit = (() => { let pv = S0, L = 0; sh.pts.forEach(([b, f]) => { const q = dest(S0, b, f); L += dist(pv, q) / 1000; pv = q; }); return L + dist(pv, S0) / 1000; })();
+    rots.forEach(rt => [1, -1].forEach(dir => { if (calm && dir < 0 && sh.k === "los") return;
+      const ord = dir > 0 ? sh.pts : sh.pts.slice().reverse();
+      C.push({ sh: sh.k, rt, dir, unit, ord, rk: o.km / 1.3 / unit }); })); });
+  const wpsOf = c => [S0, ...c.ord.map(([b, f]) => dest(S0, wd + c.rt + b, c.rk * f)), S0];
+  const pool = async (items, fn, k = 3) => { const out = []; let i = 0; await Promise.all(Array.from({ length: k }, async () => { while (i < items.length) { const j = i++; out[j] = await fn(items[j]); } })); return out; };
+  let ok = 0;
+  const route = async c => { try { Object.assign(c, await brRoute(wpsOf(c), prof)); ok++; GEN.msg = `Itinéraires : ${ok} calculés…`; renderGen(); return scoreLoop(c, o, wx); }
+    catch (e) { if (e.prof) profErr = true; return null; } };
+  let res = (await pool(C, route)).filter(Boolean);
+  if (!res.length && profErr) { prof = await brProfile(true); profErr = false; res = (await pool(C, route)).filter(Boolean); }  // profil expiré sur le serveur : on le renvoie une fois
+  if (!res.length) throw new Error("Aucun itinéraire trouvé : réessaie, ou choisis un autre point de départ.");
+  // on recale la distance des meilleures boucles
+  res.sort((a, b) => a.pen - b.pen);
+  const top = res.slice(0, 4).filter(c => Math.abs(c.km - o.km) / o.km > .06).map(c => ({ sh: c.sh, rt: c.rt, dir: c.dir, unit: c.unit, ord: c.ord, rk: c.rk * clamp(o.km / c.km, .6, 1.6), refit: true }));
+  res = res.concat((await pool(top, route)).filter(Boolean)).sort((a, b) => a.pen - b.pen);
+  // 3 boucles vraiment différentes
+  // 3 boucles vraiment différentes : on écarte celles qui empruntent en grande partie les mêmes routes
+  const cells = c => new Set(c.pts.map(p => `${Math.round(p[0] * 300)}:${Math.round(p[1] * 200)}`));
+  const seen = new Set(), pick = [];
+  res.forEach(c => { const k = `${c.sh}${c.rt}${c.dir}`; if (seen.has(k) || pick.length >= 3) return; c.cells = cells(c);
+    if (pick.some(p => { let inter = 0; c.cells.forEach(x => { if (p.cells.has(x)) inter++; }); return inter / (c.cells.size + p.cells.size - inter) > .55; })) return;
+    seen.add(k); pick.push(c); });
+  return { list: pick, ws, wd, calm };
+}
+function loopTrace(c) { const st = Math.max(1, Math.floor(c.pts.length / 160)); return traceSvg(c.pts.filter((_, i) => i % st === 0).map(p => [p[0], p[1]])); }
+function renderGen() {
+  const box = $("soGen"); if (!box) return;
+  const st = startPt(), s = settings(), R = GEN.res;
+  box.innerHTML = `<h3>Créer une boucle face au vent</h3>
+    <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>
+    <div class="soform gform">
+      <label>Distance <input type="number" id="gKm" min="20" max="300" step="5" value="${LS.get("soGenKm", 80)}"> km</label>
+      <label>Relief <select id="gRel">${[["flat", "plutôt plat"], ["any", "peu importe"], ["hilly", "vallonné"]].map(([v, l]) => `<option value="${v}" ${LS.get("soGenRel", "any") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Le <input type="date" id="gDate" value="${s.date}" min="${ymd(new Date())}"></label>
+      <label>à <select id="gHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.hour ? "selected" : ""}>${h} h</option>`).join("")}</select></label>
+      <button class="btn2 primary" id="gGo" ${GEN.busy ? "disabled" : ""}>${GEN.busy ? "Calcul…" : "Créer la boucle"}</button>
+    </div>
+    <details class="gstart"><summary>Changer le point de départ</summary>
+      <div class="soform"><button class="btn" id="gHere">Ma position actuelle</button><input type="text" id="gAddr" placeholder="ou une adresse, une ville…" aria-label="Adresse de départ"><button class="btn" id="gFind">Chercher</button>${st.own ? `<button class="btn" id="gReset">Revenir au centre de ${esc(S.cfg.ville || "Rennes")}</button>` : ""}</div>
+      <p class="note">Ce point reste sur cet appareil : il n'est jamais envoyé sur GitHub ni affiché sur le site.</p></details>
+    <p class="soerr" id="gMsg">${esc(GEN.msg || "")}</p>
+    ${R && R.list.length ? `<p class="sosmall">${R.calm ? `Vent faible (${fmt(R.ws)} km/h) : boucles dans plusieurs directions.` : `Vent ${vdu(R.wd)} à ${fmt(R.ws)} km/h : on part vers ${vers(R.wd)}, face au vent, pour l'avoir dans le dos au retour.`}</p>
+      <div class="gres">${R.list.map((c, i) => `<div class="gcard"><div class="map">${loopTrace(c)}</div><div class="gtx"><b>Boucle ${i + 1} · ${fmt(c.km)} km</b>
+        <span>${fmt(c.asc)} m D+ · ${dur(c.sim.secs)} à ${fmt(s.speed, 1)} km/h</span>
+        <span>vent de face : ${fmt(Math.max(0, c.first))} km/h à l'aller, ${c.last > 1 ? `${fmt(c.last)} km/h de face` : c.last < -1 ? `${fmt(-c.last)} km/h dans le dos` : "neutre"} au retour</span>
+        ${c.ov > .08 || c.main > .03 ? `<small>${c.ov > .08 ? `${fmt(c.ov * 100)} % en aller-retour` : ""}${c.ov > .08 && c.main > .03 ? " · " : ""}${c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""}</small>` : ""}
+        <button class="btn" data-gi="${i}">Choisir</button></div></div>`).join("")}</div>` : ""}`;
+  const save = () => { LS.set("soGenKm", clamp(+$("gKm").value || 80, 20, 300)); LS.set("soGenRel", $("gRel").value); LS.set("sortieSet", { ...settings(), date: $("gDate").value, hour: +$("gHour").value, min: 0 }); };
+  ["gKm", "gRel", "gDate", "gHour"].forEach(id => $(id).onchange = save);
+  $("gGo").onclick = async () => { if (GEN.busy) return; save(); GEN.busy = true; GEN.res = null; GEN.msg = "Préparation…"; renderGen();
+    const s2 = settings();
+    try { GEN.res = await makeLoops({ km: LS.get("soGenKm", 80), rel: LS.get("soGenRel", "any"), start: startOf(s2), speed: s2.speed }); GEN.msg = GEN.res.list.length ? "" : "Aucune boucle trouvée, essaie une autre distance."; }
+    catch (e) { GEN.msg = e.message || "Création impossible pour l'instant."; }
+    GEN.busy = false; renderGen(); };
+  $("gHere").onclick = () => { if (!navigator.geolocation) { GEN.msg = "Géolocalisation indisponible sur cet appareil."; return renderGen(); }
+    GEN.msg = "Localisation…"; renderGen();
+    navigator.geolocation.getCurrentPosition(p => { LS.set("soStart", { lat: Math.round(p.coords.latitude * 1e4) / 1e4, lon: Math.round(p.coords.longitude * 1e4) / 1e4, label: "ma position" }); GEN.msg = ""; GEN.res = null; renderGen(); },
+      () => { GEN.msg = "Position refusée ou introuvable."; renderGen(); }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }); };
+  $("gFind").onclick = async () => { const q = $("gAddr").value.trim(); if (!q) return; GEN.msg = "Recherche de l'adresse…"; renderGen();
+    try { const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=fr&q=${encodeURIComponent(q)}`); const j = r.ok ? await r.json() : [];
+      if (!j.length) throw 0; LS.set("soStart", { lat: Math.round(+j[0].lat * 1e4) / 1e4, lon: Math.round(+j[0].lon * 1e4) / 1e4, label: j[0].display_name.split(",").slice(0, 2).join(",") }); GEN.msg = ""; GEN.res = null; }
+    catch (e) { GEN.msg = "Adresse introuvable."; } renderGen(); };
+  if ($("gReset")) $("gReset").onclick = () => { LS.set("soStart", null); GEN.res = null; renderGen(); };
+  box.querySelectorAll("[data-gi]").forEach(b => b.onclick = () => { const c = GEN.res.list[+b.dataset.gi];
+    setRoute({ name: `Boucle ${fmt(c.km)} km · ${GEN.res.calm ? "vent faible" : "vent " + vdu(GEN.res.wd)}`, pts: c.pts, gen: true }); SO.genOpen = false; });
+}
+function toGPX(r) {
+  const x = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Breizh Watts" xmlns="http://www.topografix.com/GPX/1/1">\n<metadata><name>${x(r.name)}</name></metadata>\n<trk><name>${x(r.name)}</name><trkseg>\n${r.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ""}</trkpt>`).join("\n")}\n</trkseg></trk>\n</gpx>\n`;
+}
+function exportGPX() { const r = SO.route; if (!r) return; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([toGPX(r)], { type: "application/gpx+xml" })); a.download = `${r.name.replace(/[^A-Za-z0-9À-ÿ ]/g, "").trim().replace(/\s+/g, "_") || "boucle"}.gpx`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
 // ------------------------------------------------------------------ Entrée
 async function open() {
