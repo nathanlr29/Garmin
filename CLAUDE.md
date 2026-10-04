@@ -24,7 +24,9 @@ Langue de l'interface et des échanges : **français**.
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucle face au vent (BRouter + profil perso), export GPX |
-| `chain.js` | Suivi du graissage de chaîne (localStorage) |
+| `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
+| `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
+| `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
 | `scripts/fetch_garmin.py` | Récupère activités, récup, traces ; extrait les flux FIT → `data/streams/<id>.json` + `index.json` |
 | `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh pour qu'ils apparaissent enregistrés par l'Edge 540 (laps/session reconstruits depuis les records) |
 | `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup et configuration initiale Garmin |
@@ -32,6 +34,19 @@ Langue de l'interface et des échanges : **français**.
 ### Flux (data/streams)
 - Sorties des 42 derniers jours, 6 au maximum par exécution, purge au-delà de 120 j, 1200 points au maximum.
 - **Confidentialité** : le GPS est retiré à moins de 400 m du départ et de l'arrivée, et il n'y a pas de GPS pour les VirtualRide. Le point de départ des boucles (`soStart`) reste en localStorage, **jamais publié**.
+
+## Synchro entre appareils (sync.js + apps-script/sync.gs)
+- Google Sheet **privée** + Apps Script déployé en application web (« Exécuter en tant que : moi », « Accès : tout le monde »). La clé est dans les propriétés du script (`SYNC_KEY`, 16 caractères minimum).
+- **L'URL de l'application web et la clé ne vont JAMAIS dans le dépôt** : saisies une fois par appareil (carte Chaîne > réglages > Synchronisation), stockées en localStorage. Le lien `#sync=<base64 {url,key}>` configure un autre appareil ; il est effacé de l'URL dès sa lecture. URL acceptée : `https://script.google.com/…/exec` (et `http://localhost` ou `127.0.0.1` en local seulement).
+- Transport : **tout en POST `text/plain`** (requête simple, sans preflight CORS qu'Apps Script ne gère pas), clé dans le corps. `doGet` répond seulement `{ok:true}`, sans données. Opérations : `ping` et `sync` (envoie les éléments en attente, reçoit toute la collection).
+- Modèle générique : une **collection** = un onglet de la Sheet = des éléments `{id, ts, v}` ; pour un même id, le `ts` le plus grand gagne (serveur, sous `LockService`). Rien n'est jamais supprimé côté serveur.
+- Côté site : `Sync.register(nom, { local(), apply(items) })`, puis `Sync.push(nom, items)` après chaque enregistrement local. Synchro au chargement, après chaque enregistrement, au retour du réseau (`online`) et quand la page redevient visible ; nouvel essai toutes les 60 s si réseau indisponible. Interface réutilisable : `Sync.dot()` (pastille ✓ / … / ! / ⟳), `Sync.settingsHtml()` + `Sync.bindSettings(el, rerender)`.
+- Migration : au premier sync d'une collection sur un appareil (`syncInit:<nom>` absent), tout le local est envoyé ; le serveur fusionne sans écraser.
+- Collection `chain` : un élément par graissage (`id: "lube:<ISO>"`) ; fusion = union, doublons à moins d'1 min supprimés, tri décroissant, 20 max. Seuil : `id: "km"`, horodaté par `chainKmAt`.
+- Sans configuration, rien ne s'exécute et tout fonctionne comme avant.
+- Test local : faux Apps Script (serveur Python qui exécute le vrai `sync.gs` via `osascript -l JavaScript`, redirection 302 comme Google), deux « appareils » = `localhost` et `127.0.0.1` (localStorage séparés).
+- Clés localStorage : `syncCfg`, `syncQ` (file d'attente par collection), `syncAt`, `syncInit:<collection>`, `chainKmAt`.
+- À réutiliser pour le journal muscu : nouvelle collection, rien à changer dans `sync.gs`.
 
 ## Moteur du Plan (plan.js)
 - Semaine générée par recherche exhaustive (combinaisons de jours clés × permutations muscu) avec un score.
@@ -63,4 +78,4 @@ Langue de l'interface et des échanges : **français**.
 ## Idées en attente (proposées, non faites)
 - Muscu : bouton « Faite » manuel et choix du jour.
 - Journal muscu (exercices et charges) via Google Sheets + Apps Script.
-- Synchro des réglages et du graissage entre appareils.
+- Synchro des réglages (plan) entre appareils : réutiliser `sync.js`. (Graissage : fait.)
