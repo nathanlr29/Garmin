@@ -205,6 +205,11 @@ function build(type, durMin, ph, form) {
     fill(600, .55, "Souple"); cool(600); title = "Test FTP 20 min"; goal = "On mesure : ta nouvelle FTP = 95 % de ta puissance moyenne sur les 20 min. Pars prudemment les 5 premières minutes.";
   }
   for (let k = S.length - 1; k >= 0; k--) if (S[k].d < 30) S.splice(k, 1);
+  // cohérence des rampes : l'échauffement monte jusqu'au niveau de la suite, le retour au calme part d'au plus bas que ce qui précède
+  const first = S[0], next = S[1];
+  if (first && next && first.lo !== first.hi && !next.free && next.lo < .75) { first.hi = next.lo; first.lo = Math.min(first.lo, Math.max(.35, next.lo - .12)); }
+  const last = S[S.length - 1], prev = S[S.length - 2];
+  if (last && prev && last.lo !== last.hi && !prev.free) { last.lo = Math.min(.65, prev.lo, prev.hi); last.hi = Math.min(last.hi, Math.max(.35, last.lo - .12)); }
   const tss = Math.round(S.reduce((a, s) => { const f = s.free ? 1 : (s.lo + s.hi) / 2; return a + s.d / 3600 * f * f * 100; }, 0));
   return { title, goal, steps: S, tss };
 }
