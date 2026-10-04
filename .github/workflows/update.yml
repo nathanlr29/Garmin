@@ -36,7 +36,7 @@ jobs:
           python-version: "3.12"
 
       - name: Installer la bibliothèque Garmin
-        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography fit-tool requests
+        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography fit-tool fitdecode requests
 
       - name: Récupérer les activités Garmin
         env:
@@ -76,7 +76,7 @@ jobs:
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
         run: |
           mkdir -p _site
-          cp -r index.html recup.js recup.css plan.js plan.css chain.js sortie.js sortie.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
+          cp -r index.html *.js *.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
 
       - uses: actions/configure-pages@v5
         if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
