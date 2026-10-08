@@ -235,6 +235,7 @@ function renderLoad() {
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
         <button class="btn" id="soChange">Changer de trace</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
       </div></div>
+    ${altBar(r)}
     <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
     <input type="file" id="soFile" hidden>` : `
     <h2>Planifier une sortie</h2>
@@ -247,6 +248,7 @@ function renderLoad() {
   if ($("soChange")) $("soChange").onclick = () => file.click();
   if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; renderLoad(); };
   if ($("soGpx")) $("soGpx").onclick = exportGPX;
+  bindAlt();
   if ($("soGen") && !$("soGen").hidden) renderGen();
   const drop = $("soDrop");
   if (drop) { drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); }; drop.ondragleave = () => drop.classList.remove("on");
@@ -721,7 +723,8 @@ assign initialcost
  300
  1000000
 `;
-const GEN = { busy: false, res: null, msg: "" };
+const GEN = { busy: false, res: null, msg: "", map: null, layers: [], wind: null, fit: false, refreshing: false };
+const K_GEN = "soGenRes", K_SEL = "soGenSel", GEN_MAX = 6;
 function dest(p, b, km) { const R = 6371, d = km / R, la = rad(p[0]), lo = rad(p[1]), br = rad(b);
   const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(br)), lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
   return [deg(la2), ((deg(lo2) + 540) % 360) - 180]; }
@@ -772,46 +775,242 @@ function scoreLoop(c, o, wx) {
   c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 60 + c.bad * 60 + c.main * 25 + c.dirt * 40;
   return c;
 }
-async function makeLoops(o) {
-  const st = startPt(), S0 = [st.lat, st.lon]; let prof = await brProfile(), profErr = false;
-  GEN.msg = "Prévisions de vent…"; renderGen();
-  const wx = await windHere(st, o.start);
-  const w0 = wxAt(wx, 0, o.start.getTime()), w1 = wxAt(wx, 0, o.start.getTime() + o.km / o.speed * 3600e3 / 2) || w0;
-  if (!w0) throw new Error("Pas de prévisions pour ce départ.");
-  const U = w0.ws * Math.sin(rad(w0.wd)) + w1.ws * Math.sin(rad(w1.wd)), V = w0.ws * Math.cos(rad(w0.wd)) + w1.ws * Math.cos(rad(w1.wd));
-  const ws = Math.hypot(U, V) / 2, wd = (deg(Math.atan2(U, V)) + 360) % 360, calm = ws < 8;
-  // formes : triangle (2 points) et losange (3 points), orientées face au vent (le vent vient de wd)
-  const shapes = [{ k: "tri", pts: [[-35, 1], [35, 1]] }, { k: "los", pts: [[-55, .62], [0, 1], [55, .62]] }];
-  const rots = calm ? [0, 90, 180, 270] : [-25, 0, 25], C = [];
-  shapes.forEach(sh => { const unit = (() => { let pv = S0, L = 0; sh.pts.forEach(([b, f]) => { const q = dest(S0, b, f); L += dist(pv, q) / 1000; pv = q; }); return L + dist(pv, S0) / 1000; })();
-    rots.forEach(rt => [1, -1].forEach(dir => { if (calm && dir < 0 && sh.k === "los") return;
-      const ord = dir > 0 ? sh.pts : sh.pts.slice().reverse();
-      C.push({ sh: sh.k, rt, dir, unit, ord, rk: o.km / 1.3 / unit }); })); });
-  const wpsOf = c => [S0, ...c.ord.map(([b, f]) => dest(S0, wd + c.rt + b, c.rk * f)), S0];
-  const pool = async (items, fn, k = 3) => { const out = []; let i = 0; await Promise.all(Array.from({ length: k }, async () => { while (i < items.length) { const j = i++; out[j] = await fn(items[j]); } })); return out; };
-  let ok = 0;
-  const route = async c => { try { Object.assign(c, await brRoute(wpsOf(c), prof)); ok++; GEN.msg = `Itinéraires : ${ok} calculés…`; renderGen(); return scoreLoop(c, o, wx); }
-    catch (e) { if (e.prof) profErr = true; return null; } };
-  let res = (await pool(C, route)).filter(Boolean);
-  if (!res.length && profErr) { prof = await brProfile(true); profErr = false; res = (await pool(C, route)).filter(Boolean); }  // profil expiré sur le serveur : on le renvoie une fois
-  if (!res.length) throw new Error("Aucun itinéraire trouvé : réessaie, ou choisis un autre point de départ.");
-  // on recale la distance des meilleures boucles
-  res.sort((a, b) => a.pen - b.pen);
-  const top = res.slice(0, 4).filter(c => Math.abs(c.km - o.km) / o.km > .06).map(c => ({ sh: c.sh, rt: c.rt, dir: c.dir, unit: c.unit, ord: c.ord, rk: c.rk * clamp(o.km / c.km, .6, 1.6), refit: true }));
-  res = res.concat((await pool(top, route)).filter(Boolean)).sort((a, b) => a.pen - b.pen);
-  // 3 boucles vraiment différentes
-  // 3 boucles vraiment différentes : on écarte celles qui empruntent en grande partie les mêmes routes
-  const cells = c => new Set(c.pts.map(p => `${Math.round(p[0] * 300)}:${Math.round(p[1] * 200)}`));
-  const seen = new Set(), pick = [];
-  res.forEach(c => { const k = `${c.sh}${c.rt}${c.dir}`; if (seen.has(k) || pick.length >= 3) return; c.cells = cells(c);
-    if (pick.some(p => { let inter = 0; c.cells.forEach(x => { if (p.cells.has(x)) inter++; }); return inter / (c.cells.size + p.cells.size - inter) > .55; })) return;
-    seen.add(k); pick.push(c); });
-  return { list: pick, ws, wd, calm };
+// --- Propositions : générées, gardées (6 max) et comparées sur une carte. Tout reste en localStorage (soGenRes, soGenSel).
+// BRouter : 2 requêtes au plus en même temps, 600 ms entre deux départs, et jamais deux fois les mêmes points de passage.
+const BRQ = { active: 0, last: 0, cache: new Map() };
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
+function brRouteQ(wps, prof) {
+  const k = prof + "|" + wps.map(p => p[0].toFixed(5) + "," + p[1].toFixed(5)).join(";");
+  if (!BRQ.cache.has(k)) {
+    const pr = (async () => {
+      for (;;) { const w = 600 - (Date.now() - BRQ.last); if (BRQ.active < 2 && w <= 0) break; await sleep(Math.max(80, w)); }
+      BRQ.active++; BRQ.last = Date.now();
+      try { return await brRoute(wps, prof); } finally { BRQ.active--; }
+    })();
+    BRQ.cache.set(k, pr); pr.catch(() => BRQ.cache.delete(k));
+  }
+  return BRQ.cache.get(k);
 }
+const pool = async (items, fn, k = 2) => { const out = []; let i = 0; await Promise.all(Array.from({ length: k }, async () => { while (i < items.length) { const j = i++; out[j] = await fn(items[j]); } })); return out; };
+
+// formes : triangle (2 points) et losange (3 points), orientées face au vent (le vent vient de wd) ; [cap relatif, fraction du rayon]
+const SHAPES = { tri: [[-35, 1], [35, 1]], los: [[-55, .62], [0, 1], [55, .62]] };
+const specKey = c => `${c.sh}|${c.rt}|${c.dir}`;
+function genSpecs(calm) {  // dans l'ordre d'essai : les 12 premières au départ, puis 6 par « Proposer d'autres boucles »
+  const rots = calm ? [0, 90, 180, 270, 45, 135, 225, 315, 20, 110, 200, 290] : [-25, 0, 25, -50, 50, -12, 12, -75, 75, -38, 38, -100, 100];
+  const out = [];
+  rots.forEach(rt => ["tri", "los"].forEach(sh => [1, -1].forEach(dir => { if (!(calm && dir < 0 && sh === "los")) out.push({ sh, rt, dir }); })));
+  return out;
+}
+function candOf(sp, S0, km) {
+  const pts = SHAPES[sp.sh]; let pv = S0, L = 0;
+  pts.forEach(([b, f]) => { const q = dest(S0, b, f); L += dist(pv, q) / 1000; pv = q; });
+  const unit = L + dist(pv, S0) / 1000;
+  return { sh: sp.sh, rt: sp.rt, dir: sp.dir, unit, ord: sp.dir > 0 ? pts : pts.slice().reverse(), rk: km / 1.3 / unit };
+}
+const wpsOf = (c, S0, wd) => [S0, ...c.ord.map(([b, f]) => dest(S0, wd + c.rt + b, c.rk * f)), S0];
+function windSum(wx, o) {  // vent moyen sur la première moitié de la sortie
+  const w0 = wxAt(wx, 0, o.start.getTime()), w1 = wxAt(wx, 0, o.start.getTime() + o.km / o.speed * 3600e3 / 2) || w0;
+  if (!w0) return null;
+  const U = w0.ws * Math.sin(rad(w0.wd)) + w1.ws * Math.sin(rad(w1.wd)), V = w0.ws * Math.cos(rad(w0.wd)) + w1.ws * Math.cos(rad(w1.wd)), ws = Math.hypot(U, V) / 2;
+  return { ws, wd: (deg(Math.atan2(U, V)) + 360) % 360, calm: ws < 8 };
+}
+function genOpts() { const s = settings(); return { km: LS.get("soGenKm", 80), rel: LS.get("soGenRel", "any"), start: startOf(s), speed: s.speed, date: s.date, hour: s.hour, min: s.min }; }
+const cellsOf = pts => new Set(pts.map(p => `${Math.round(p[0] * 300)}:${Math.round(p[1] * 200)}`));
+const jac = (a, b) => { let n = 0; a.forEach(x => { if (b.has(x)) n++; }); return n / (a.size + b.size - n); };
+
+async function routeSpecs(specs, R, o, wx, nRefit) {
+  const S0 = [R.key.lat, R.key.lon]; let prof = await brProfile(), profErr = false, ok = 0;
+  const route = async c => { try { Object.assign(c, await brRouteQ(wpsOf(c, S0, R.wd0), prof)); setMsg(`Itinéraires : ${++ok} calculés…`); return scoreLoop(c, o, wx); }
+    catch (e) { if (e.prof) profErr = true; return null; } };
+  let res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean);
+  if (!res.length && profErr) { prof = await brProfile(true); res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean); }  // profil expiré sur le serveur : on le renvoie une fois
+  res.sort((a, b) => a.pen - b.pen);
+  // on recale la distance des meilleures
+  const top = res.slice(0, nRefit).filter(c => Math.abs(c.km - o.km) / o.km > .06).map(c => ({ sh: c.sh, rt: c.rt, dir: c.dir, unit: c.unit, ord: c.ord, rk: c.rk * clamp(o.km / c.km, .6, 1.6) }));
+  return res.concat((await pool(top, route)).filter(Boolean)).sort((a, b) => a.pen - b.pen);
+}
+function addPicks(R, res, k) {  // boucles vraiment différentes de celles déjà gardées (routes en grande partie communes = écartée)
+  const keys = new Set(R.list.map(specKey)); let n = 0;
+  for (const c of res) {
+    if (n >= k) break;
+    if (keys.has(specKey(c))) continue;
+    c.cells = cellsOf(c.pts);
+    if (R.list.some(p => jac(p.cells || (p.cells = cellsOf(p.pts)), c.cells) > .55)) continue;
+    c.id = c.n = R.seq++; keys.add(specKey(c)); R.list.push(c); n++;
+  }
+  return n;
+}
+function dosRet(c) {  // part du retour (seconde moitié) avec le vent dans le dos
+  const P = c.P, r = c.sim, n = P.length, half = P[n - 1].d / 2; let tot = 0, dos = 0;
+  for (let i = 1; i < n; i++) { if (P[i].d <= half) continue; const st = P[i].d - P[i - 1].d, w = r.W[i]; tot += st; if (w && w.ws >= 8 && r.Hd[i] < -w.ws * .5) dos += st; }
+  return tot ? dos / tot : 0;
+}
+function whyAll(R, o) {  // une phrase par boucle : ce qui la distingue des autres
+  const L = R.list, many = L.length > 1, W = {};
+  const best = f => L.reduce((a, b) => f(b) > f(a) ? b : a), add = (c, t) => (W[c.id] = W[c.id] || []).push(t);
+  if (!R.calm) { const b = best(c => c.dosRet); if (b.dosRet >= .3) add(b, `${many ? "le meilleur vent : " : ""}retour poussé sur ${fmt(b.dosRet * 100)} %`); }
+  if (many) {
+    const d = best(c => -Math.abs(c.km - o.km)); add(d, `la plus proche des ${fmt(o.km)} km demandés`);
+    const r = o.rel === "hilly" ? best(c => c.mpk) : best(c => -c.mpk); add(r, o.rel === "hilly" ? `la plus vallonnée (${fmt(r.mpk)} m/km)` : `la plus plate (${fmt(r.mpk)} m/km)`);
+    const q = best(c => -(c.main + c.ov + c.bad)); if (q.main + q.ov + q.bad < .03) add(q, "presque uniquement des petites routes");
+  }
+  L.forEach(c => {
+    const s0 = [c.P[0].lat, c.P[0].lon]; let far = c.P[0], fd = 0;
+    for (let i = 0; i < c.P.length; i += 8) { const d = dist(s0, [c.P[i].lat, c.P[i].lon]); if (d > fd) { fd = d; far = c.P[i]; } }
+    const t = (W[c.id] || []).slice(0, 2).join(", ") || `une variante qui part vers ${vers(brg(s0, [far.lat, far.lon]))}`;
+    c.why = t[0].toUpperCase() + t.slice(1) + ".";
+  });
+}
+function rescoreAll(R, o) {  // profil, vent et phrases recalculés en local (aucun appel BRouter)
+  Object.assign(R, windSum(R.wx, o) || { ws: 0, wd: R.wd0, calm: true });
+  R.list.forEach(c => { scoreLoop(c, o, R.wx); c.dosRet = dosRet(c); });
+  whyAll(R, o);
+  R.scored = `${o.date}|${o.hour}|${o.min}|${o.speed}`;
+}
+async function makeLoops(o) {
+  const st = startPt(); setMsg("Prévisions de vent…");
+  const wx = await windHere(st, o.start), w = windSum(wx, o);
+  if (!w) throw new Error("Pas de prévisions pour ce départ.");
+  const R = { v: 1, key: { km: o.km, rel: o.rel, lat: st.lat, lon: st.lon }, wx, wxDate: o.date, wd0: w.wd, calm0: w.calm, list: [], tried: [], seq: 1, sel: null };
+  const specs = genSpecs(w.calm).slice(0, 12);
+  const res = await routeSpecs(specs, R, o, wx, 4);
+  if (!res.length) throw new Error("Aucun itinéraire trouvé : réessaie, ou choisis un autre point de départ.");
+  R.tried = specs.map(specKey); addPicks(R, res, 3); R.sel = R.list[0].id;
+  rescoreAll(R, o);
+  return R;
+}
+async function moreLoops() {
+  const R = GEN.res; if (!R || GEN.busy) return;
+  const o = genOpts(), specs = genSpecs(R.calm0).filter(sp => !R.tried.includes(specKey(sp))).slice(0, 6);
+  if (!specs.length) return setMsg("J'ai déjà essayé toutes les directions depuis ce départ.");
+  GEN.busy = "more"; GEN.msg = "Recherche de nouvelles boucles…"; renderGen();
+  try {
+    const res = await routeSpecs(specs, R, o, R.wx, 2);
+    R.tried.push(...specs.map(specKey));
+    const n = addPicks(R, res, 3), chosen = SO.route && SO.route.gid;
+    while (R.list.length > GEN_MAX) R.list.splice(R.list.findIndex(c => c.id !== R.sel && c.id !== chosen), 1);  // les plus anciennes partent
+    rescoreAll(R, o); saveRes(); GEN.fit = true;
+    GEN.msg = n ? `${n} nouvelle${n > 1 ? "s" : ""} boucle${n > 1 ? "s" : ""}.` : "Pas de nouvelle boucle assez différente : réessaie pour explorer d'autres directions.";
+  } catch (e) { GEN.msg = e.message || "Recherche impossible pour l'instant."; }
+  GEN.busy = false; if (SO.route) renderLoad(); else renderGen();
+}
+
+// --- Persistance (localStorage uniquement : la liste contient le point de départ)
+const KEEP = ["id", "n", "sh", "rt", "dir", "rk", "unit", "ord", "km", "bad", "main", "dirt", "pts", "rev"];
+function saveRes() {
+  const R = GEN.res; if (!R) return;
+  const pack = th => ({ v: 1, key: R.key, wx: R.wx, wxDate: R.wxDate, wd0: R.wd0, calm0: R.calm0, tried: R.tried, seq: R.seq,
+    list: R.list.map(c => { const o = {}; KEEP.forEach(k => o[k] = c[k]); if (th > 1) o.pts = c.pts.filter((_, i) => i % th === 0 || i === c.pts.length - 1); return o; }) });
+  for (const th of [1, 2, 4]) if (LS.set(K_GEN, pack(th))) break;  // localStorage plein : on allège les traces enregistrées
+  LS.set(K_SEL, R.sel);
+}
+function dropRes() { GEN.res = null; try { localStorage.removeItem(K_GEN); localStorage.removeItem(K_SEL); } catch (e) {} }
+function loadRes() {
+  if (GEN.res) return;
+  const R = LS.get(K_GEN, null), st = startPt();
+  if (!R || R.v !== 1 || !Array.isArray(R.list) || !R.list.length || !R.wx || !R.key) return;
+  if (R.key.km !== LS.get("soGenKm", 80) || R.key.rel !== LS.get("soGenRel", "any") || R.key.lat !== st.lat || R.key.lon !== st.lon) return dropRes();
+  R.sel = LS.get(K_SEL, null); if (!R.list.some(c => c.id === R.sel)) R.sel = R.list[0].id;
+  try { rescoreAll(R, genOpts()); GEN.res = R; GEN.fit = true; } catch (e) { dropRes(); }
+}
+async function syncRes() {  // date, heure ou vitesse changées : on garde les tracés et on recalcule le vent (1 appel météo si la date change)
+  const R = GEN.res; if (!R || GEN.refreshing) return;
+  const o = genOpts(); if (R.scored === `${o.date}|${o.hour}|${o.min}|${o.speed}` && R.wxDate === o.date) return;
+  GEN.refreshing = true;
+  if (R.wxDate !== o.date) { try { R.wx = await windHere({ lat: R.key.lat, lon: R.key.lon }, o.start); } catch (e) { GEN.msg = e.message || "Prévisions indisponibles."; } R.wxDate = o.date; }
+  if (GEN.res === R) { rescoreAll(R, o); saveRes(); }
+  GEN.refreshing = false; renderGen();
+}
+
+// --- Actions
+function setMsg(m) { GEN.msg = m; const e = $("gMsg"); if (e) e.textContent = m; }
+function selectLoop(id, fromMap) {
+  const R = GEN.res; if (!R || R.sel === id) return;
+  R.sel = id; LS.set(K_SEL, id); renderGen();
+  if (fromMap) { const card = document.querySelector(`#soGen .gcard[data-id="${id}"]`), cont = card && card.parentElement;
+    if (cont && cont.scrollWidth > cont.clientWidth) cont.scrollTo({ left: card.offsetLeft - 4, behavior: "smooth" }); }
+}
+function chooseLoop(c, keepOpen) {
+  const R = GEN.res; R.sel = c.id; LS.set(K_SEL, c.id); if (!keepOpen) SO.genOpen = false;
+  setRoute({ name: `Boucle ${c.n} · ${fmt(c.km)} km · ${R.calm ? "vent faible" : "vent " + vdu(R.wd)}${c.rev ? " · sens inversé" : ""}`, pts: c.pts, gen: true, gid: c.id });
+}
+function invertLoop(c) {  // même tracé, parcouru dans l'autre sens : pas de nouvel appel BRouter
+  const R = GEN.res; c.pts = c.pts.slice().reverse(); c.rev = !c.rev;
+  rescoreAll(R, genOpts()); saveRes();
+  if (SO.route && SO.route.gid === c.id) chooseLoop(c, SO.genOpen); else renderGen();
+}
+
+// --- Carte des propositions
+const GC = { sel: "#e8501c", oth: "#868e96" };
+async function renderGenMap() {
+  const R = GEN.res, el = $("gMap"); if (!R || !el) return;
+  try { await ensureLeaflet(); } catch (e) { el.innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
+  if (GEN.res !== R || !el.isConnected) return;
+  if (!GEN.map) {
+    GEN.map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: .25 });  // cadrage plus serré sur les boucles
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(GEN.map);
+    GEN.wind = L.control({ position: "topright" }); GEN.wind.onAdd = () => L.DomUtil.create("div", "gwindctl"); GEN.wind.addTo(GEN.map);
+    GEN.fit = true;
+  }
+  const map = GEN.map, add = l => { l.addTo(map); GEN.layers.push(l); return l; };
+  GEN.layers.forEach(l => l.remove()); GEN.layers = [];
+  const sel = R.list.find(c => c.id === R.sel) || R.list[0], line = c => c.P.map(p => [p.lat, p.lon]);
+  R.list.filter(c => c !== sel).forEach(c => {
+    add(L.polyline(line(c), { color: GC.oth, weight: 3, opacity: .8, interactive: false }));
+    add(L.polyline(line(c), { color: "#000", weight: 20, opacity: 0 })).on("click", () => selectLoop(c.id, true)).bindTooltip(`Boucle ${c.n} · ${fmt(c.km)} km`, { sticky: true });
+  });
+  add(L.polyline(line(sel), { color: "#fff", weight: 9, opacity: .95, interactive: false }));
+  add(L.polyline(line(sel), { color: GC.sel, weight: 5, opacity: 1, interactive: false }));
+  // chevrons : sens de parcours
+  const P = sel.P, N = clamp(Math.round(sel.km / 8), 6, 14);
+  for (let k = 0; k < N; k++) { const p = P[Math.round((k + .5) / N * (P.length - 1))];
+    add(L.marker([p.lat, p.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "gchev", iconSize: [18, 18], iconAnchor: [9, 9],
+      html: `<svg viewBox="-9 -9 18 18" width="18" height="18" style="transform:rotate(${Math.round(p.b)}deg)"><circle r="8" fill="${GC.sel}" stroke="#fff" stroke-width="1.5"/><path d="M-3.5,2 L0,-2.5 L3.5,2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>` }) })); }
+  add(L.circleMarker([R.key.lat, R.key.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#2f9e44", fillOpacity: 1 }).bindTooltip("Départ"));
+  GEN.wind.getContainer().innerHTML = R.calm ? `<b>Vent faible</b><small>${fmt(R.ws)} km/h</small>`
+    : `<svg viewBox="-17 -17 34 34" width="30" height="30" style="transform:rotate(${Math.round((R.wd + 180) % 360)}deg)"><circle r="15" fill="#fff" stroke="#1c7ed6" stroke-width="1.5"/><path d="M0,-11 L7,5 L0,1 L-7,5 Z" fill="#1c7ed6"/></svg><b>${fmt(R.ws)} km/h</b><small>vent ${vdu(R.wd)}</small>`;
+  map.invalidateSize();
+  if (GEN.fit && el.offsetWidth) { map.fitBounds(L.latLngBounds(R.list.flatMap(c => c.P.filter((_, i) => i % 10 === 0).map(p => [p.lat, p.lon]))), { padding: [18, 18] }); GEN.fit = false; }
+  else if (GEN.fit) setTimeout(renderGenMap, 120);  // panneau pas encore affiché
+}
+function miniProf(c) {
+  const P = c.P, n = 48, W = 200, H = 34, es = Array.from({ length: n }, (_, k) => P[Math.round(k * (P.length - 1) / (n - 1))].e);
+  const lo = Math.min(...es), hi = Math.max(lo + 60, ...es), xy = es.map((e, k) => `${(k * W / (n - 1)).toFixed(1)},${(H - 1 - (e - lo) / (hi - lo) * (H - 5)).toFixed(1)}`);
+  return `<div class="gprof"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="M0,${H} L${xy.join(" L")} L${W},${H} Z"/><path class="l" d="M${xy.join(" L")}"/></svg><small>${fmt(lo)}–${fmt(Math.max(...es))} m</small></div>`;
+}
+function altBar(r) {  // bandeau au-dessus de l'analyse : passer à une autre proposition sans relancer BRouter
+  const R = GEN.res; if (!r || !r.gen || !R || !R.list.some(c => c.id === r.gid)) return "";
+  const others = R.list.filter(c => c.id !== r.gid);
+  return `<div class="soalt"><div class="soalt-t">Autres boucles (${others.length})</div>
+    <div class="soalt-s">${others.map(c => `<button class="soalt-c" data-alt="${c.id}"><span class="map">${loopTrace(c)}</span><span><b>Boucle ${c.n}</b><small>${fmt(c.km)} km · ${fmt(c.asc)} m D+${R.calm ? "" : ` · dos ${fmt(c.dosRet * 100)} %`}</small></span></button>`).join("")}</div>
+    <div class="soalt-a"><button class="btn2" id="aRev">⇄ Inverser le sens</button><button class="btn2" id="aCmp">Comparer sur la carte</button></div></div>`;
+}
+function bindAlt() {
+  const R = GEN.res; if (!R || !$("aRev")) return;
+  document.querySelectorAll("#soLoad [data-alt]").forEach(b => b.onclick = () => { const c = R.list.find(x => x.id === +b.dataset.alt); if (c) chooseLoop(c); });
+  $("aRev").onclick = () => { const c = R.list.find(x => x.id === SO.route.gid); if (c) invertLoop(c); };
+  $("aCmp").onclick = () => { SO.genOpen = true; R.sel = SO.route.gid; LS.set(K_SEL, R.sel); GEN.fit = true; renderLoad(); $("soGen").scrollIntoView({ behavior: "smooth", block: "start" }); };
+}
+
 function loopTrace(c) { const st = Math.max(1, Math.floor(c.pts.length / 160)); return traceSvg(c.pts.filter((_, i) => i % st === 0).map(p => [p[0], p[1]])); }
 function renderGen() {
   const box = $("soGen"); if (!box) return;
   const st = startPt(), s = settings(), R = GEN.res;
+  if (R) syncRes();
+  const ready = R && R.list.length && R.list[0].sim, sel = ready ? R.list.find(c => c.id === R.sel) || R.list[0] : null;
+  const keep = GEN.map && GEN.map.getContainer(), sx = box.querySelector(".gres")?.scrollLeft || 0, stOpen = box.querySelector(".gstart")?.open;
+  const chosen = SO.route && SO.route.gen ? SO.route.gid : null;
+  const card = c => { const on = c === sel;
+    return `<div class="gcard${on ? " sel" : ""}" data-id="${c.id}">
+      <button class="ghead" data-sel="${c.id}" aria-pressed="${on}"><i style="background:${on ? GC.sel : GC.oth}"></i><b>Boucle ${c.n}</b><span>${fmt(c.km)} km</span></button>
+      <div class="gstat">${fmt(c.asc)} m D+ · ≈ ${dur(c.sim.secs)}</div>
+      ${miniProf(c)}
+      <div class="gwind">${R.calm ? "Vent faible : peu d'effet" : `Retour vent dans le dos : <b>${fmt(c.dosRet * 100)} %</b>`}</div>
+      <p class="gwhy">${esc(c.why)}</p>
+      ${c.ov > .08 || c.main > .03 ? `<small class="gwarn">${c.ov > .08 ? `${fmt(c.ov * 100)} % en aller-retour` : ""}${c.ov > .08 && c.main > .03 ? " · " : ""}${c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""}</small>` : ""}
+      ${on ? (chosen === c.id ? `<button class="btn2" disabled>Analyse affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
+    </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
     <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>
     <div class="soform gform">
@@ -819,36 +1018,48 @@ function renderGen() {
       <label>Relief <select id="gRel">${[["flat", "plutôt plat"], ["any", "peu importe"], ["hilly", "vallonné"]].map(([v, l]) => `<option value="${v}" ${LS.get("soGenRel", "any") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label>Le <input type="date" id="gDate" value="${s.date}" min="${ymd(new Date())}"></label>
       <label>à <select id="gHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.hour ? "selected" : ""}>${h} h</option>`).join("")}</select></label>
-      <button class="btn2 primary" id="gGo" ${GEN.busy ? "disabled" : ""}>${GEN.busy ? "Calcul…" : "Créer la boucle"}</button>
+      <button class="btn2 primary" id="gGo" ${GEN.busy ? "disabled" : ""}>${GEN.busy === "new" ? "Calcul…" : R ? "Recommencer" : "Créer des boucles"}</button>
     </div>
-    <details class="gstart"><summary>Changer le point de départ</summary>
+    <details class="gstart"${stOpen ? " open" : ""}><summary>Changer le point de départ</summary>
       <div class="soform"><button class="btn" id="gHere">Ma position actuelle</button><input type="text" id="gAddr" placeholder="ou une adresse, une ville…" aria-label="Adresse de départ"><button class="btn" id="gFind">Chercher</button>${st.own ? `<button class="btn" id="gReset">Revenir au centre de ${esc(S.cfg.ville || "Rennes")}</button>` : ""}</div>
       <p class="note">Ce point reste sur cet appareil : il n'est jamais envoyé sur GitHub ni affiché sur le site.</p></details>
     <p class="soerr" id="gMsg">${esc(GEN.msg || "")}</p>
-    ${R && R.list.length ? `<p class="sosmall">${R.calm ? `Vent faible (${fmt(R.ws)} km/h) : boucles dans plusieurs directions.` : `Vent ${vdu(R.wd)} à ${fmt(R.ws)} km/h : on part vers ${vers(R.wd)}, face au vent, pour l'avoir dans le dos au retour.`}</p>
-      <div class="gres">${R.list.map((c, i) => `<div class="gcard"><div class="map">${loopTrace(c)}</div><div class="gtx"><b>Boucle ${i + 1} · ${fmt(c.km)} km</b>
-        <span>${fmt(c.asc)} m D+ · ${dur(c.sim.secs)} à ${fmt(s.speed, 1)} km/h</span>
-        <span>vent de face : ${fmt(Math.max(0, c.first))} km/h à l'aller, ${c.last > 1 ? `${fmt(c.last)} km/h de face` : c.last < -1 ? `${fmt(-c.last)} km/h dans le dos` : "neutre"} au retour</span>
-        ${c.ov > .08 || c.main > .03 ? `<small>${c.ov > .08 ? `${fmt(c.ov * 100)} % en aller-retour` : ""}${c.ov > .08 && c.main > .03 ? " · " : ""}${c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""}</small>` : ""}
-        <button class="btn" data-gi="${i}">Choisir</button></div></div>`).join("")}</div>` : ""}`;
-  const save = () => { LS.set("soGenKm", clamp(+$("gKm").value || 80, 20, 300)); LS.set("soGenRel", $("gRel").value); LS.set("sortieSet", { ...settings(), date: $("gDate").value, hour: +$("gHour").value, min: 0 }); };
+    ${ready ? `<p class="sosmall">${R.calm ? `Vent faible (${fmt(R.ws)} km/h) : boucles dans plusieurs directions.` : `Vent ${vdu(R.wd)} à ${fmt(R.ws)} km/h : on part vers ${vers(R.wd)}, face au vent, pour l'avoir dans le dos au retour.`} Touche une boucle sur la carte ou dans la liste pour la comparer.</p>
+      <div class="gmapbox"><div id="gMapPh" class="gmap"></div></div>
+      <div class="gact"><button class="btn2" id="gRev">⇄ Inverser le sens</button><button class="btn2" id="gMore" ${GEN.busy ? "disabled" : ""}>${GEN.busy === "more" ? "Recherche…" : "+ Proposer d'autres boucles"} <small>${R.list.length}/${GEN_MAX}</small></button></div>
+      ${sel.rev ? `<p class="note gnote">Boucle ${sel.n} inversée sans recalcul de l'itinéraire : attention aux éventuels sens uniques près du départ.</p>` : ""}
+      <div class="gres">${R.list.map(card).join("")}</div>` : ""}`;
+  // réglages : distance, relief ou départ changés = propositions périmées ; date ou heure = vent recalculé
+  const save = () => { const k0 = `${LS.get("soGenKm", 80)}|${LS.get("soGenRel", "any")}`, t0 = `${s.date}|${s.hour}`;
+    LS.set("soGenKm", clamp(+$("gKm").value || 80, 20, 300)); LS.set("soGenRel", $("gRel").value); LS.set("sortieSet", { ...settings(), date: $("gDate").value, hour: +$("gHour").value, min: 0 });
+    if (GEN.res && k0 !== `${LS.get("soGenKm", 80)}|${LS.get("soGenRel", "any")}`) dropRes();
+    if (!SO.route) return renderGen();
+    renderLoad(); if (t0 !== `${$("gDate").value}|${$("gHour").value}`) compute(); };
   ["gKm", "gRel", "gDate", "gHour"].forEach(id => $(id).onchange = save);
-  $("gGo").onclick = async () => { if (GEN.busy) return; save(); GEN.busy = true; GEN.res = null; GEN.msg = "Préparation…"; renderGen();
-    const s2 = settings();
-    try { GEN.res = await makeLoops({ km: LS.get("soGenKm", 80), rel: LS.get("soGenRel", "any"), start: startOf(s2), speed: s2.speed }); GEN.msg = GEN.res.list.length ? "" : "Aucune boucle trouvée, essaie une autre distance."; }
+  $("gGo").onclick = async () => { if (GEN.busy) return; dropRes(); GEN.busy = "new"; GEN.msg = "Préparation…"; renderGen();
+    try { GEN.res = await makeLoops(genOpts()); GEN.fit = true; saveRes(); GEN.msg = ""; }
     catch (e) { GEN.msg = e.message || "Création impossible pour l'instant."; }
-    GEN.busy = false; renderGen(); };
+    GEN.busy = false; if (SO.route) renderLoad(); else renderGen(); };
+  const newStart = v => { LS.set("soStart", v); GEN.msg = ""; dropRes(); renderGen(); };
   $("gHere").onclick = () => { if (!navigator.geolocation) { GEN.msg = "Géolocalisation indisponible sur cet appareil."; return renderGen(); }
-    GEN.msg = "Localisation…"; renderGen();
-    navigator.geolocation.getCurrentPosition(p => { LS.set("soStart", { lat: Math.round(p.coords.latitude * 1e4) / 1e4, lon: Math.round(p.coords.longitude * 1e4) / 1e4, label: "ma position" }); GEN.msg = ""; GEN.res = null; renderGen(); },
+    setMsg("Localisation…");
+    navigator.geolocation.getCurrentPosition(p => newStart({ lat: Math.round(p.coords.latitude * 1e4) / 1e4, lon: Math.round(p.coords.longitude * 1e4) / 1e4, label: "ma position" }),
       () => { GEN.msg = "Position refusée ou introuvable."; renderGen(); }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }); };
-  $("gFind").onclick = async () => { const q = $("gAddr").value.trim(); if (!q) return; GEN.msg = "Recherche de l'adresse…"; renderGen();
+  $("gFind").onclick = async () => { const q = $("gAddr").value.trim(); if (!q) return; setMsg("Recherche de l'adresse…");
     try { const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=fr&q=${encodeURIComponent(q)}`); const j = r.ok ? await r.json() : [];
-      if (!j.length) throw 0; LS.set("soStart", { lat: Math.round(+j[0].lat * 1e4) / 1e4, lon: Math.round(+j[0].lon * 1e4) / 1e4, label: j[0].display_name.split(",").slice(0, 2).join(",") }); GEN.msg = ""; GEN.res = null; }
-    catch (e) { GEN.msg = "Adresse introuvable."; } renderGen(); };
-  if ($("gReset")) $("gReset").onclick = () => { LS.set("soStart", null); GEN.res = null; renderGen(); };
-  box.querySelectorAll("[data-gi]").forEach(b => b.onclick = () => { const c = GEN.res.list[+b.dataset.gi];
-    setRoute({ name: `Boucle ${fmt(c.km)} km · ${GEN.res.calm ? "vent faible" : "vent " + vdu(GEN.res.wd)}`, pts: c.pts, gen: true }); SO.genOpen = false; });
+      if (!j.length) throw 0; newStart({ lat: Math.round(+j[0].lat * 1e4) / 1e4, lon: Math.round(+j[0].lon * 1e4) / 1e4, label: j[0].display_name.split(",").slice(0, 2).join(",") }); }
+    catch (e) { GEN.msg = "Adresse introuvable."; renderGen(); } };
+  if ($("gReset")) $("gReset").onclick = () => newStart(null);
+  if (!ready) { if (GEN.map) { GEN.map.remove(); GEN.map = null; GEN.layers = []; } return; }
+  // la carte survit aux re-rendus : on remet le même conteneur Leaflet à sa place
+  const ph = $("gMapPh"); if (keep) ph.replaceWith(keep); else ph.id = "gMap";
+  const res = box.querySelector(".gres"), selEl = res.querySelector(".gcard.sel");
+  res.scrollLeft = sx || (selEl && res.scrollWidth > res.clientWidth ? selEl.offsetLeft - 4 : 0);  // carrousel : la boucle sélectionnée reste visible
+  res.querySelectorAll(".gcard").forEach(el => el.onclick = e => { if (!e.target.closest("#gChoose")) selectLoop(+el.dataset.id); });
+  if ($("gChoose")) $("gChoose").onclick = () => chooseLoop(sel);
+  $("gRev").onclick = () => invertLoop(sel);
+  $("gMore").onclick = moreLoops;
+  renderGenMap();
 }
 function toGPX(r) {
   const x = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
@@ -862,6 +1073,7 @@ async function open() {
   shell();
   // profil Garmin (FTP, zones) nécessaire à la nutrition : chargé sans toucher à l'affichage
   if (window.Recup && !Recup.data) { try { await Recup.ensure("soProfil", () => {}); } catch (e) {} }
+  loadRes();
   if (!SO.route) { const r = LS.get("sortieRoute", null); if (r && r.pts && r.pts.length > 1) { SO.route = r; SO.P = profile(r.pts); SO.climbs = climbs(SO.P); } }
   renderLoad();
   $("soBody").hidden = !SO.route;

@@ -75,12 +75,47 @@
 #sortie .gstart{margin-top:8px;font-size:13px}
 #sortie .gstart summary{cursor:pointer;color:var(--accent);font-weight:600}
 #sortie .gstart .soform{margin-top:8px}
-#sortie .gres{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
-@media (max-width:900px){#sortie .gres{grid-template-columns:1fr}}
-#sortie .gcard{border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--bg);display:grid;grid-template-columns:84px minmax(0,1fr);gap:12px;align-items:center}
-#sortie .gcard .map{width:84px;height:84px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
-#sortie .gcard .map svg{width:76px;height:76px}
-#sortie .gtx{display:grid;gap:3px;font-size:12.5px;color:var(--muted);min-width:0}
-#sortie .gtx b{font-size:14.5px;color:var(--ink)}
-#sortie .gtx small{color:#c77700}
-#sortie .gtx .btn{justify-self:start;margin-top:4px}
+/* propositions : carte + fiches (grille sur ordinateur, carrousel au doigt sur mobile) */
+#sortie .gmapbox{margin-top:8px}
+#sortie .gmap,#gMap{height:400px;border-radius:12px;overflow:hidden;z-index:0;border:1px solid var(--line)}
+@media (max-width:620px){#sortie .gmap,#gMap{height:300px}}
+#gMap svg{width:auto;height:auto;display:block}
+#sortie .gchev svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))}
+#sortie .gwindctl{display:flex;flex-direction:column;align-items:center;gap:2px;background:#fff;color:#1b1a18;border-radius:10px;padding:6px 8px;box-shadow:0 1px 4px rgba(0,0,0,.25);font-size:11px;line-height:1.2;text-align:center}
+#sortie .gwindctl b{font-size:12px;color:#1c7ed6}#sortie .gwindctl small{color:#555}
+#sortie .gact{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+#sortie .gact .btn2 small{font-weight:500;color:var(--muted);margin-left:4px}
+#sortie .gact .btn2:disabled{opacity:.6;cursor:default}
+#sortie .gnote{margin-top:8px}
+#sortie .gres{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+#sortie .gcard{border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted);cursor:pointer;min-width:0}
+#sortie .gcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+#sortie .ghead{display:flex;align-items:center;gap:8px;border:0;background:none;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;min-height:28px}
+#sortie .ghead i{width:12px;height:12px;border-radius:50%;flex:none}
+#sortie .ghead b{font-size:15px}#sortie .ghead span{margin-left:auto;font-weight:800;font-size:15px}
+#sortie .gstat{color:var(--ink)}
+#sortie .gprof{display:flex;align-items:flex-end;gap:6px}
+#sortie .gprof svg{flex:1;height:34px;min-width:0;display:block}
+#sortie .gprof path{fill:var(--muted);opacity:.18}#sortie .gprof path.l{fill:none;opacity:1;stroke:var(--muted);stroke-width:1.5;vector-effect:non-scaling-stroke}
+#sortie .gcard.sel .gprof path{fill:var(--accent)}#sortie .gcard.sel .gprof path.l{stroke:var(--accent)}
+#sortie .gprof small{font-size:10.5px;white-space:nowrap}
+#sortie .gwind b{color:var(--ink)}
+#sortie .gwhy{margin:0;color:var(--ink);line-height:1.4}
+#sortie .gwarn{color:#c77700}
+#sortie .gcard .btn2{margin-top:auto;min-height:44px}
+@media (max-width:620px){
+  #sortie .gres{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;padding-bottom:6px;overscroll-behavior-x:contain;scrollbar-width:thin}
+  #sortie .gcard{flex:0 0 82%;scroll-snap-align:start}
+  #sortie .gact .btn2{flex:1 1 auto;min-height:44px}
+}
+/* bandeau « Autres boucles » au-dessus de l'analyse */
+#sortie .soalt{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+#sortie .soalt-t{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+#sortie .soalt-s{display:flex;gap:8px;overflow-x:auto;min-width:0;flex:1 1 300px;scroll-snap-type:x mandatory;padding-bottom:2px}
+#sortie .soalt-c{flex:0 0 auto;display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:6px 10px 6px 6px;font:inherit;font-size:12.5px;cursor:pointer;text-align:left;min-height:44px;scroll-snap-align:start}
+#sortie .soalt-c:hover{border-color:var(--accent)}
+#sortie .soalt-c .map{width:34px;height:34px;display:grid;place-items:center}#sortie .soalt-c .map svg{width:34px;height:34px}
+#sortie .soalt-c small{display:block;color:var(--muted);font-size:11.5px}
+#sortie .soalt-a{display:flex;gap:8px;flex-wrap:wrap}
+#sortie .soalt-a .btn2{min-height:40px}
+@media (max-width:620px){#sortie .soalt-a{width:100%}#sortie .soalt-a .btn2{flex:1 1 auto;min-height:44px}}
