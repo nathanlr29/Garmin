@@ -81,6 +81,13 @@ Langue de l'interface et des échanges : **français**.
   - icônes sur le profil ;
   - case « GPS » par point (`soGps`, par trace).
 - Tests : `node tests/arrets.mjs`.
+- **Pause découverte** (case dans la carte Arrêts, `soDecouv`, **désactivée par défaut**) : catégorie « À voir ».
+  - Patrimoine : château, mégalithe, église ou chapelle, moulin, calvaire, monument. Nature : point de vue, site naturel.
+  - Ces lieux viennent de la **même requête Overpass** (couloir de 300 m), seulement s'ils ont un tag `wikipedia` ou `wikidata`.
+  - Fiche française : tag `fr:` ou sitelink `frwiki` (Wikidata `wbgetentities`, 50 lieux par requête, cache `soWd`).
+  - Résumé : API REST de Wikipédia (`page/summary`, cache `soWiki` 30 jours). Lieu écarté si 404 ou page d'homonymie. Anecdote de 1 à 2 phrases tirées du résumé, **sans rien ajouter**. Si les coordonnées de la fiche sont à plus de 2 km du lieu : nom et lien seulement.
+  - 3 à 5 lieux, un par cinquième du parcours (château, mégalithe et point de vue d'abord), 14 fiches lues au plus.
+  - Case « GPS » décochée par défaut. Types FIT info / overlook.
 - **Export (toutes les traces)** : boutons « Exporter en GPX » et « Exporter pour Garmin (.fit) ». Sont exportés les arrêts conseillés (sauf décochés) et les points cochés (`Arrets.gpsPoints`).
   - **Nom court** pour l'Edge, 15 caractères au plus : « Eau cimetière », « Boulang. 19h » (heure de fermeture si elle est connue).
   - **GPX** : `<wpt>` placés avant `<trk>` et **posés sur le tracé**, parce que Garmin Connect ne convertit en points de parcours que les waypoints à moins d'environ 35 m. `<type>` = nom du type FIT (water, food, store, toilet, gear…), `<sym>` = symbole Garmin.
@@ -133,3 +140,4 @@ Langue de l'interface et des échanges : **français**.
 - Muscu : bouton « Faite » manuel et choix du jour.
 - Journal muscu (exercices et charges) via Google Sheets + Apps Script.
 - Synchro des réglages (plan) entre appareils : réutiliser `sync.js`. (Graissage : fait.)
+- Arrêts : vérifier sur un vrai Edge 540 l'import FIT dans Garmin Connect (types et alertes « À venir »).

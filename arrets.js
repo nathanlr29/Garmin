@@ -18,6 +18,7 @@ const CATS = {
   ravito: { ic: "🥖", l: "Ravito", col: "#e8590c" },
   wc: { ic: "🚻", l: "Toilettes", col: "#7048e8" },
   repa: { ic: "🔧", l: "Réparation", col: "#495057" },
+  voir: { ic: "🏰", l: "À voir", col: "#2b8a3e" },
 };
 // sous-types : icône, libellé, nom court (Edge), symbole GPX, type de point de parcours FIT
 const KINDS = {
@@ -30,6 +31,15 @@ const KINDS = {
   toilets: { cat: "wc", ic: "🚻", l: "Toilettes", s: "WC", fit: "toilet", sym: "Restroom" },
   repair: { cat: "repa", ic: "🔧", l: "Station de réparation", s: "Répar. vélo", fit: "gear", sym: "Bike Trail" },
   bikeshop: { cat: "repa", ic: "🚲", l: "Magasin de vélo", s: "Vélociste", fit: "gear", sym: "Bike Trail" },
+  // « À voir » (Pause découverte) : seulement les lieux qui ont une fiche Wikipédia
+  castle: { cat: "voir", ic: "🏰", l: "Château", fit: "info", sym: "Museum", w: 3 },
+  megalith: { cat: "voir", ic: "🗿", l: "Mégalithe", fit: "info", sym: "Museum", w: 3 },
+  viewpoint: { cat: "voir", ic: "🔭", l: "Point de vue", fit: "overlook", sym: "Scenic Area", w: 3 },
+  mill: { cat: "voir", ic: "🌬️", l: "Moulin", fit: "info", sym: "Museum", w: 2 },
+  church: { cat: "voir", ic: "⛪", l: "Église ou chapelle", fit: "info", sym: "Church", w: 2 },
+  nature: { cat: "voir", ic: "🌳", l: "Site naturel", fit: "overlook", sym: "Scenic Area", w: 2 },
+  calvary: { cat: "voir", ic: "✝️", l: "Calvaire", fit: "info", sym: "Church", w: 1 },
+  monument: { cat: "voir", ic: "🏛️", l: "Monument", fit: "info", sym: "Museum", w: 1 },
 };
 function kindOf(t) {
   if (/^(private|no)$/.test(t.access || "") || t.drinking_water === "no" || t.disused === "yes") return null;
@@ -42,6 +52,19 @@ function kindOf(t) {
   if (t.amenity === "toilets") return "toilets";
   if (t.amenity === "bicycle_repair_station") return "repair";
   if (t.shop === "bicycle") return "bikeshop";
+  return null;
+}
+function voirKind(t) {
+  if (!t.wikipedia && !t.wikidata) return null;
+  const h = t.historic || "", is = (v, re) => re.test(v || "");
+  if (is(h, /^(castle|manor|chateau)$/) || t.building === "castle") return "castle";
+  if (is(h, /^(megalith|menhir|dolmen|tumulus)$/) || (h === "archaeological_site" && (/megalith|tumulus/.test((t.site_type || "") + (t.archaeological_site || "")) || t.megalith_type))) return "megalith";
+  if (is(h, /^(wayside_cross|wayside_shrine|calvary)$/)) return "calvary";
+  if (is(h, /^(mill|windmill|watermill)$/) || is(t.man_made, /^(windmill|watermill)$/)) return "mill";
+  if (is(h, /^(church|chapel)$/) || t.amenity === "place_of_worship" || is(t.building, /^(church|chapel|cathedral)$/)) return "church";
+  if (t.tourism === "viewpoint") return "viewpoint";
+  if (t.natural || t.leisure === "nature_reserve") return "nature";
+  if (is(h, /^(monument|ruins|archaeological_site)$/)) return "monument";
   return null;
 }
 function nameOf(t, k) {
@@ -73,11 +96,13 @@ function corridor(P) {  // tracé simplifié, sans les abords du départ et de l
   return idx.map(i => `${Q[i].lat.toFixed(5)},${Q[i].lon.toFixed(5)}`).join(",");
 }
 const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
-const query = L => `[out:json][timeout:40];(nwr(around:${NEAR},${L})[~"^(amenity|shop|landuse)$"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle|cemetery|grave_yard)$"];);out center tags;`;
+const VOIR = 300;  // « À voir » : à moins de 300 m du tracé, avec un tag wikipedia ou wikidata
+const query = L => `[out:json][timeout:40];(nwr(around:${NEAR},${L})[~"^(amenity|shop|landuse)$"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle|cemetery|grave_yard)$"];`
+  + `nwr(around:${VOIR},${L})[~"^(historic|tourism|natural|man_made|amenity|leisure|building)$"~"^(castle|manor|chateau|church|chapel|cathedral|place_of_worship|archaeological_site|megalith|menhir|dolmen|tumulus|windmill|watermill|mill|wayside_cross|wayside_shrine|calvary|monument|ruins|viewpoint|peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge|nature_reserve)$"][~"^wiki(pedia|data)$"~"."];);out center tags;`;
 const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type"];
-const K_POI = "soPoi", POI_V = 1, POI_TTL = 7 * 864e5;
+const K_POI = "soPoi", POI_V = 2, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
-const ST = { inflight: new Map(), poi: null, key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
+const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
 async function fetchPois(L) {
   const key = hash(POI_V + "|" + L), cache = LS.get(K_POI, {});
   if (cache[key] && Date.now() - cache[key].at < POI_TTL) return cache[key].els;
@@ -162,11 +187,11 @@ function place(els, P, r) {
   const c = Math.cos(rad(P[0].lat)), out = [], st = Math.max(1, Math.floor(P.length / 4000));
   const mo = new Date(r.T[0]).getMonth(), winter = mo >= 10 || mo <= 2;
   for (const e of els) {
-    const k = kindOf(e.t); if (!k) continue;
+    const k = kindOf(e.t) || voirKind(e.t); if (!k) continue;
     let bi = 0, bd = Infinity;
     for (let i = 0; i < P.length; i += st) { const dx = (P[i].lon - e.lon) * c * 111320, dy = (P[i].lat - e.lat) * 110540, d = dx * dx + dy * dy; if (d < bd) { bd = d; bi = i; } }
     for (let i = Math.max(0, bi - st); i <= Math.min(P.length - 1, bi + st); i++) { const dx = (P[i].lon - e.lon) * c * 111320, dy = (P[i].lat - e.lat) * 110540, d = dx * dx + dy * dy; if (d < bd) { bd = d; bi = i; } }
-    const off = Math.sqrt(bd), lim = k === "cemetery" ? 300 : NEAR + 30;  // cimetière : centre de la parcelle
+    const off = Math.sqrt(bd), lim = k === "cemetery" || KINDS[k].cat === "voir" ? VOIR : NEAR + 30;  // cimetière, site : centre de la parcelle
     if (off > lim) continue;
     const t0 = new Date(r.T[bi]);
     out.push({ id: e.id, k, cat: KINDS[k].cat, name: nameOf(e.t, k), lat: e.lat, lon: e.lon, t: e.t, i: bi, km: P[bi].d / 1000, t0, off, winter });
@@ -215,7 +240,8 @@ function setGps(id, v) { const s = LS.get(K_GPS, {}), sig = ST.sig; s[sig] = { .
 
 // ------------------------------------------------------------------ Affichage
 const K_CAT = "soStopCat";
-const catsOn = () => ({ eau: true, ravito: true, wc: true, repa: true, ...LS.get(K_CAT, {}) });
+const K_DEC = "soDecouv", decouv = () => LS.get(K_DEC, false) === true;
+const catsOn = () => ({ eau: true, ravito: true, wc: true, repa: true, ...LS.get(K_CAT, {}), voir: decouv() && LS.get(K_CAT, {}).voir !== false });
 function iconHtml(p, big) { const c = CATS[p.cat]; return `<span class="stmk${big ? " big" : ""}" style="--c:${c.col}">${KINDS[p.k].ic}</span>`; }
 function tipHtml(p) { const st = statusTxt(p); return `<b>${esc(p.name)}</b><br>${KINDS[p.k].l} · km ${fmt(p.km, 1)} · vers ${hm(p.t0)}<br>à ${fmt(p.off)} m du tracé${st ? `<br>${esc(st)}` : ""}`; }
 function drawMap() {
@@ -239,21 +265,31 @@ function render() {
   if (ST.err) { box.innerHTML = `<p class="note">${esc(ST.err)} <button class="btn2" id="stRetry">Réessayer</button></p>`; if (info) info.textContent = ""; $("stRetry").onclick = () => update(ST.ctx, true); return; }
   if (!ST.poi) { box.innerHTML = `<p class="note">Recherche des points d'eau, commerces et toilettes le long du parcours (OpenStreetMap)…</p>`; return; }
   const on = catsOn(), L_ = ST.list, cnt = c => L_.filter(p => p.cat === c).length;
-  if (info) info.textContent = L_.length ? `${L_.length} à moins de ${NEAR} m du tracé` : "";
-  const shown = L_.filter(p => on[p.cat]), lim = ST.showAll ? shown.length : 10, nut = ST.ctx.nut;
+  if (info) info.textContent = ST.stops.length ? `${ST.stops.length} à moins de ${NEAR} m du tracé` : "";
+  const shown = L_.filter(p => on[p.cat] && p.cat !== "voir"), lim = ST.showAll ? shown.length : 10, nut = ST.ctx.nut;
   box.innerHTML = `${ST.adv.length ? `<div class="stadv">${ST.adv.map(a => `<div class="stac"><div class="stach"><span class="stbadge">Arrêt conseillé · ${esc(a.role)}</span></div>${row(a.p, true)}<p>${esc(a.why)}</p></div>`).join("")}</div>`
       : `<p class="sosmall">${ST.ctx.r.secs < 2 * 3600 ? "Sortie de moins de 2 h : pas besoin de s'arrêter, 1 ou 2 bidons suffisent." : "Aucun point d'eau ni commerce ouvert trouvé au bon moment près du tracé : pars avec les bidons pleins et prévois un arrêt dans un bourg."}</p>`}
     ${nut && ST.ctx.r.secs >= 2 * 3600 ? `<p class="note stnut">Calé sur la carte Nutrition : ${fmt(nut.drink * 1000)} ml/h à boire${nut.rate ? `, ${nut.rate} g de glucides par heure` : ""}.</p>` : ""}
-    <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
+    <label class="stdec"><input type="checkbox" id="stDec" ${decouv() ? "checked" : ""}><span><b>Pause découverte</b><small>3 à 5 lieux à voir près du tracé (château, mégalithe, chapelle, point de vue…), avec une anecdote Wikipédia</small></span></label>
+    ${decouv() ? voirHtml() : ""}
+    <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).filter(([k]) => k !== "voir" || decouv()).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
     ${shown.length ? `<div class="stlist">${shown.slice(0, lim).map(p => row(p)).join("")}</div>${shown.length > lim ? `<button class="btn2 stmore" id="stMore">Afficher les ${shown.length} points</button>` : ""}` : `<p class="note">Rien dans ces catégories près du tracé.</p>`}
     <p class="note">Données OpenStreetMap, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
     ${HELP}`;
-  box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const c = { ...catsOn() }; c[b.dataset.cat] = !c[b.dataset.cat]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
+  box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const k = b.dataset.cat, c = LS.get(K_CAT, {}); c[k] = !catsOn()[k]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
   box.querySelectorAll("[data-gps]").forEach(i => i.onchange = () => { setGps(i.dataset.gps, i.checked); box.querySelectorAll(`[data-gps="${i.dataset.gps}"]`).forEach(x => x.checked = i.checked); });
   box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const m = ST.mk && ST.mk[b.dataset.go], map = ST.ctx.map; if (!m || !map) return;
     map.setView(m.getLatLng(), Math.max(map.getZoom(), 14)); m.openTooltip();
     const rc = map.getContainer().getBoundingClientRect(); if (rc.bottom < 0 || rc.top > innerHeight) map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" }); });
   if ($("stMore")) $("stMore").onclick = () => { ST.showAll = true; render(); };
+  $("stDec").onchange = e => { LS.set(K_DEC, e.target.checked); setList(); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); if (e.target.checked) findVoir(ST.seq); };
+}
+function voirHtml() {
+  const V = ST.voirSel;
+  if (V == null) return `<p class="note">Recherche des lieux à voir (OpenStreetMap et Wikipédia)…</p>`;
+  if (ST.voirErr) return `<p class="note">${esc(ST.voirErr)}</p>`;
+  if (!V.length) return `<p class="note">Pas de lieu avec une fiche Wikipédia à moins de ${VOIR} m du tracé.</p>`;
+  return `<div class="stvoir"><div class="stbadge">À voir en chemin</div>${V.map(p => `<div class="stvc">${row(p)}${p.wiki.x ? `<p>${esc(p.wiki.x)}</p>` : ""}<a href="${esc(p.wiki.url)}" target="_blank" rel="noopener">En savoir plus sur Wikipédia ↗</a></div>`).join("")}</div>`;
 }
 const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</summary><ol>
   <li><b>Exporte</b> avec « Exporter pour Garmin (.fit) » en haut de la page : les arrêts cochés deviennent des points de parcours typés (eau, nourriture, toilettes…). Le GPX marche aussi, mais il perd souvent les types.</li>
@@ -261,10 +297,77 @@ const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</s
   <li><b>Envoie</b> le parcours vers l'appareil (bouton « Envoyer vers l'appareil », puis synchronise l'Edge). Sur l'Edge : Navigation → Parcours → ce parcours → Rouler. L'écran « À venir » liste les arrêts avec la distance restante, et une alerte s'affiche à l'approche.</li>
 </ol><p class="note">Sans ordinateur : branche l'Edge en USB et copie le .fit dans le dossier Garmin/NewFiles.</p></details>`;
 function annotate() {
-  const { P, r } = ST.ctx;
-  ST.list = place(ST.poi, P, r);
-  ST.list.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; });
-  ST.adv = advise(ST.list, r, ST.ctx.nut);
+  const { P, r } = ST.ctx, all = place(ST.poi, P, r);
+  all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; });
+  ST.stops = all.filter(p => p.cat !== "voir"); ST.cands = all.filter(p => p.cat === "voir");
+  ST.adv = advise(ST.stops, r, ST.ctx.nut);
+  // lieux déjà choisis : on garde le choix, avec km et heure de passage à jour
+  if (ST.voirSel) ST.voirSel = ST.voirSel.map(v => { const c = ST.cands.find(p => p.id === v.id); return c ? Object.assign(c, { wiki: v.wiki }) : null; }).filter(Boolean);
+  setList();
+}
+function setList() { ST.list = decouv() && ST.voirSel ? ST.stops.concat(ST.voirSel).sort((a, b) => a.km - b.km) : ST.stops; }
+
+// ------------------------------------------------------------------ Pause découverte : Wikipédia (fiche en français, résumé)
+const K_WIKI = "soWiki", K_WD = "soWd", WIKI_TTL = 30 * 864e5;
+const frTitle = t => { const m = /^fr:(.+)$/.exec(t.wikipedia || ""); return m ? m[1].trim() : null; };
+async function wdTitles(ids) {  // wikidata → titre de la fiche française (une requête pour 50 lieux)
+  const c = LS.get(K_WD, {}), need = [...new Set(ids.filter(q => /^Q\d+$/.test(q) && c[q] === undefined))];
+  for (let i = 0; i < need.length; i += 50) {
+    const r = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${need.slice(i, i + 50).join("|")}&props=sitelinks&sitefilter=frwiki&format=json&origin=*`);
+    if (!r.ok) throw new Error("wikidata " + r.status);
+    const j = await r.json(); need.slice(i, i + 50).forEach(q => { c[q] = j.entities?.[q]?.sitelinks?.frwiki?.title || ""; });
+  }
+  const keys = Object.keys(c); if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(k => delete c[k]);
+  LS.set(K_WD, c); return c;
+}
+function anecdote(x) {  // 1 à 2 phrases, sans rien ajouter
+  const S_ = String(x || "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Ý«])/);
+  let out = S_[0] || ""; if (S_[1] && (out + " " + S_[1]).length <= 260) out += " " + S_[1];
+  return out.length > 300 ? out.slice(0, 297).replace(/\s+\S*$/, "") + "…" : out;
+}
+async function summary(title, p) {
+  const c = LS.get(K_WIKI, {}), e = c[title];
+  if (e && Date.now() - e.at < WIKI_TTL) return e;
+  const r = await fetch(`https://fr.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
+  let v;
+  if (r.status === 404) v = { ok: false };
+  else if (!r.ok) throw new Error("wikipedia " + r.status);
+  else { const j = await r.json(), co = j.coordinates;
+    // anecdote seulement si la fiche parle bien de ce lieu (coordonnées à moins de 2 km quand elles existent)
+    const sure = !co || dist([co.lat, co.lon], [p.lat, p.lon]) < 2000;
+    v = { ok: j.type === "standard", x: sure ? anecdote(j.extract) : "", url: j.content_urls?.desktop?.page || `https://fr.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}` }; }
+  v.at = Date.now(); c[title] = v;
+  const keys = Object.keys(c).sort((a, b) => c[a].at - c[b].at); if (keys.length > 150) keys.slice(0, keys.length - 150).forEach(k => delete c[k]);
+  LS.set(K_WIKI, c); return v;
+}
+async function findVoir(seq) {
+  if (!ST.cands || ST.voirSel || ST.voirBusy) return;
+  ST.voirBusy = true; ST.voirErr = "";
+  try {
+    const C = ST.cands.slice(), wd = await wdTitles(C.filter(p => !frTitle(p.t) && p.t.wikidata).map(p => p.t.wikidata));
+    C.forEach(p => { p.title = frTitle(p.t) || wd[p.t.wikidata] || null; });
+    // un lieu par fiche (le plus proche), puis réparti le long du parcours : 5 tronçons, le meilleur de chaque
+    const byT = new Map(); C.filter(p => p.title).forEach(p => { const q = byT.get(p.title); if (!q || p.off < q.off) byT.set(p.title, p); });
+    const D = ST.ctx.P[ST.ctx.P.length - 1].d / 1000, score = p => KINDS[p.k].w * 100 - p.off / 3, seg = p => Math.min(4, Math.floor(p.km / D * 5));
+    const pool_ = [...byT.values()].sort((a, b) => score(b) - score(a)), sel = [], tries = {};
+    let fetched = 0;
+    for (const p of pool_) {
+      if (sel.length >= 5 || fetched >= 14) break;
+      const s_ = seg(p); if (sel.some(q => seg(q) === s_) || (tries[s_] || 0) >= 3) continue;
+      tries[s_] = (tries[s_] || 0) + 1; fetched++;
+      const w = await summary(p.title, p); if (w.ok) { p.wiki = w; sel.push(p); }
+    }
+    // moins de 3 : on complète, en restant à plus de D/12 km des lieux déjà choisis
+    for (const p of pool_) {
+      if (sel.length >= 3 || fetched >= 14) break;
+      if (sel.includes(p) || sel.some(q => Math.abs(q.km - p.km) < D / 12)) continue;
+      fetched++; const w = await summary(p.title, p); if (w.ok) { p.wiki = w; sel.push(p); }
+    }
+    if (seq !== ST.seq) return;
+    ST.voirSel = sel.sort((a, b) => a.km - b.km);
+  } catch (e) { if (seq !== ST.seq) return; ST.voirSel = []; ST.voirErr = "Wikipédia ne répond pas pour l'instant : lieux à voir indisponibles."; }
+  finally { ST.voirBusy = false; if (seq !== ST.seq && decouv() && !ST.voirSel) setTimeout(() => findVoir(ST.seq), 0); }  // trace ou heure changée entre-temps
+  setList(); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons();
 }
 // appelé par sortie.js après chaque calcul ; ctx = { P, r, map, nut, route, onDone, onIcons }
 async function update(ctx, retry) {
@@ -272,12 +375,13 @@ async function update(ctx, retry) {
   const sig = sigOf(ctx.route); if (sig !== ST.sig) { ST.sig = sig; ST.gps = (LS.get(K_GPS, {})[sig]) || {}; ST.showAll = false; }
   const L_ = corridor(ctx.P); if (!L_) { ST.poi = []; ST.err = ""; annotate(); render(); return; }
   const key = hash(L_);
-  if (key !== ST.key || retry) { ST.poi = null; ST.err = ""; ST.list = []; ST.adv = []; render(); drawMap();
+  if (key !== ST.key || retry) { ST.poi = null; ST.err = ""; ST.list = []; ST.adv = []; ST.voirSel = null; ST.voirErr = ""; render(); drawMap();
     try { const els = await fetchPois(L_); if (seq !== ST.seq) return; ST.poi = els; ST.key = key; }
     catch (e) { if (seq !== ST.seq) return; ST.err = "Points d'arrêt indisponibles pour l'instant (le service OpenStreetMap ne répond pas)."; ST.key = null; render(); return; } }
   if (ST.poi.some(e => e.t.opening_hours)) await ohLib();
   if (seq !== ST.seq) return;
   annotate(); render(); drawMap(); ctx.onDone && ctx.onDone();
+  if (decouv()) findVoir(seq);
 }
 // icônes sur le profil : [{x (m), ic, adv}]
 function icons() {
@@ -307,5 +411,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _kindOf: kindOf };
 })();

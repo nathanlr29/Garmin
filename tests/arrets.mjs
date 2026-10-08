@@ -34,4 +34,11 @@ assert.equal(adv.length, 2, "un arrêt eau et un ravito");
 assert.equal(adv[0].p.name, "Fontaine"); assert.match(adv[0].role, /eau/);
 assert.equal(adv[1].p.name, "Ouverte", "la boulangerie fermée (samedi matin) n'est pas conseillée"); assert.equal(adv[1].role, "ravito");
 assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de 2 h : pas d'arrêt");
-console.log("OK : horaires lus, arrêts conseillés cohérents.");
+// 3) Pause découverte : seulement les lieux avec une fiche, anecdote de 1 à 2 phrases sans ajout
+assert.equal(A._voirKind({ historic: "castle" }), null, "pas de fiche : écarté");
+assert.equal(A._voirKind({ historic: "archaeological_site", archaeological_site: "megalith", wikidata: "Q1" }), "megalith");
+assert.equal(A._voirKind({ man_made: "windmill", wikipedia: "fr:Moulin" }), "mill");
+assert.equal(A._voirKind({ tourism: "viewpoint", wikidata: "Q2" }), "viewpoint");
+assert.equal(A._anecdote("Le menhir de Champ-Dolent est un menhir de Dol-de-Bretagne. Il mesure 9,5 m. Troisième phrase."), "Le menhir de Champ-Dolent est un menhir de Dol-de-Bretagne. Il mesure 9,5 m.");
+assert.ok(A._anecdote("x ".repeat(400)).length <= 300);
+console.log("OK : horaires lus, arrêts conseillés cohérents, lieux à voir filtrés.");
