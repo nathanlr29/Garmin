@@ -21,15 +21,15 @@ const CATS = {
 };
 // sous-types : icône, libellé, nom court (Edge), symbole GPX, type de point de parcours FIT
 const KINDS = {
-  water: { cat: "eau", ic: "💧", l: "Point d'eau potable", s: "Eau" },
-  cemetery: { cat: "eau", ic: "🪦", l: "Cimetière (eau probable)", s: "Eau cimetière" },
-  bakery: { cat: "ravito", ic: "🥖", l: "Boulangerie", s: "Boulang." },
-  shop: { cat: "ravito", ic: "🛒", l: "Épicerie", s: "Épicerie" },
-  fuel: { cat: "ravito", ic: "⛽", l: "Station-service", s: "Station" },
-  cafe: { cat: "ravito", ic: "☕", l: "Café", s: "Café" },
-  toilets: { cat: "wc", ic: "🚻", l: "Toilettes", s: "WC" },
-  repair: { cat: "repa", ic: "🔧", l: "Station de réparation", s: "Répar. vélo" },
-  bikeshop: { cat: "repa", ic: "🚲", l: "Magasin de vélo", s: "Vélociste" },
+  water: { cat: "eau", ic: "💧", l: "Point d'eau potable", s: "Eau", fit: "water", sym: "Drinking Water" },
+  cemetery: { cat: "eau", ic: "🪦", l: "Cimetière (eau probable)", s: "Eau cimetière", fit: "water", sym: "Drinking Water" },
+  bakery: { cat: "ravito", ic: "🥖", l: "Boulangerie", s: "Boulang.", fit: "food", sym: "Restaurant" },
+  shop: { cat: "ravito", ic: "🛒", l: "Épicerie", s: "Épicerie", fit: "store", sym: "Convenience Store" },
+  fuel: { cat: "ravito", ic: "⛽", l: "Station-service", s: "Station", fit: "store", sym: "Gas Station" },
+  cafe: { cat: "ravito", ic: "☕", l: "Café", s: "Café", fit: "food", sym: "Restaurant" },
+  toilets: { cat: "wc", ic: "🚻", l: "Toilettes", s: "WC", fit: "toilet", sym: "Restroom" },
+  repair: { cat: "repa", ic: "🔧", l: "Station de réparation", s: "Répar. vélo", fit: "gear", sym: "Bike Trail" },
+  bikeshop: { cat: "repa", ic: "🚲", l: "Magasin de vélo", s: "Vélociste", fit: "gear", sym: "Bike Trail" },
 };
 function kindOf(t) {
   if (/^(private|no)$/.test(t.access || "") || t.drinking_water === "no" || t.disused === "yes") return null;
@@ -246,7 +246,8 @@ function render() {
     ${nut && ST.ctx.r.secs >= 2 * 3600 ? `<p class="note stnut">Calé sur la carte Nutrition : ${fmt(nut.drink * 1000)} ml/h à boire${nut.rate ? `, ${nut.rate} g de glucides par heure` : ""}.</p>` : ""}
     <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
     ${shown.length ? `<div class="stlist">${shown.slice(0, lim).map(p => row(p)).join("")}</div>${shown.length > lim ? `<button class="btn2 stmore" id="stMore">Afficher les ${shown.length} points</button>` : ""}` : `<p class="note">Rien dans ces catégories près du tracé.</p>`}
-    <p class="note">Données OpenStreetMap, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter au GPX exporté ; les arrêts conseillés y sont déjà.</p>`;
+    <p class="note">Données OpenStreetMap, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
+    ${HELP}`;
   box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const c = { ...catsOn() }; c[b.dataset.cat] = !c[b.dataset.cat]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
   box.querySelectorAll("[data-gps]").forEach(i => i.onchange = () => { setGps(i.dataset.gps, i.checked); box.querySelectorAll(`[data-gps="${i.dataset.gps}"]`).forEach(x => x.checked = i.checked); });
   box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const m = ST.mk && ST.mk[b.dataset.go], map = ST.ctx.map; if (!m || !map) return;
@@ -254,6 +255,11 @@ function render() {
     const rc = map.getContainer().getBoundingClientRect(); if (rc.bottom < 0 || rc.top > innerHeight) map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" }); });
   if ($("stMore")) $("stMore").onclick = () => { ST.showAll = true; render(); };
 }
+const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</summary><ol>
+  <li><b>Exporte</b> avec « Exporter pour Garmin (.fit) » en haut de la page : les arrêts cochés deviennent des points de parcours typés (eau, nourriture, toilettes…). Le GPX marche aussi, mais il perd souvent les types.</li>
+  <li><b>Importe</b> dans Garmin Connect sur ordinateur : Entraînement et planification → Parcours → Importer → choisis le fichier → Enregistrer. Vérifie que les points apparaissent le long du tracé.</li>
+  <li><b>Envoie</b> le parcours vers l'appareil (bouton « Envoyer vers l'appareil », puis synchronise l'Edge). Sur l'Edge : Navigation → Parcours → ce parcours → Rouler. L'écran « À venir » liste les arrêts avec la distance restante, et une alerte s'affiche à l'approche.</li>
+</ol><p class="note">Sans ordinateur : branche l'Edge en USB et copie le .fit dans le dossier Garmin/NewFiles.</p></details>`;
 function annotate() {
   const { P, r } = ST.ctx;
   ST.list = place(ST.poi, P, r);
@@ -279,7 +285,27 @@ function icons() {
   const on = catsOn(), adv = new Set(ST.adv.map(a => a.p.id));
   return ST.list.filter(p => on[p.cat] || adv.has(p.id)).map(p => ({ d: p.km * 1000, ic: KINDS[p.k].ic, adv: adv.has(p.id), name: p.name }));
 }
+// ------------------------------------------------------------------ Export GPS (GPX et FIT)
+// Nom court lisible sur l'Edge (15 caractères au plus) : « Eau cimetière », « Boulang. 14h » (heure de fermeture si connue)
+const cut15 = t => t.length <= 15 ? t : t.slice(0, 14).trimEnd() + ".";
+const hShort = d => d.getMinutes() ? `${d.getHours()}h${pad(d.getMinutes())}` : `${d.getHours()}h`;
+function shortName(p) {
+  const K = KINDS[p.k] || {}, until = p.oh && p.oh.open === true && p.oh.next && sameDay(p.oh.next, p.t0) ? hShort(p.oh.next) : "";
+  if (p.k === "water") { const n = (p.t.name || "").replace(/^(fontaine|point d'eau|robinet)\s*(du|de la|de l'|des|de)?\s*/i, ""); return cut15(n && n.length <= 11 ? `Eau ${n}` : /^fontaine/i.test(p.t.name || "") ? "Eau fontaine" : "Eau potable"); }
+  if (p.k === "cemetery") return "Eau cimetière";
+  if (p.k === "cafe") return cut15((p.t.amenity === "cafe" ? "Café" : "Bar") + (until ? " " + until : ""));
+  if (p.cat === "voir") return cut15(p.name);
+  return cut15(K.s + (until ? " " + until : ""));
+}
+// arrêts conseillés (sauf décochés) + points cochés, posés sur le tracé (Garmin Connect ignore les waypoints à plus de ~35 m)
+function gpsPoints() {
+  if (!ST.ctx || !ST.poi) return [];
+  const P = ST.ctx.P, r = ST.ctx.r;
+  return ST.list.filter(gpsOn).map(p => { const q = P[p.i], K = KINDS[p.k], st = statusTxt(p);
+    return { lat: +q.lat.toFixed(6), lon: +q.lon.toFixed(6), d: q.d, t: r.T[p.i], name: shortName(p), type: K.fit || "generic", sym: K.sym || "Flag, Blue",
+      desc: `${p.name}${p.name === K.l ? "" : ` · ${K.l}`} · km ${fmt(p.km, 1)} · vers ${hm(p.t0)} · à ${fmt(p.off)} m du tracé${st ? " · " + st : ""}`, adv: ST.adv.some(a => a.p.id === p.id) }; });
+}
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _kindOf: kindOf };
 })();

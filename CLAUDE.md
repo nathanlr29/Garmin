@@ -19,12 +19,13 @@ Langue de l'interface et des échanges : **français**.
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sync.js → chain.js → arrets.js → sortie.js |
+| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js |
 | `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil) |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
 | `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : Overpass, horaires, arrêts conseillés. Utilisé par sortie.js |
+| `fitcourse.js` | Encodeur de parcours FIT (course + course_point typés) pour les alertes « À venir » des Garmin |
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
@@ -80,6 +81,13 @@ Langue de l'interface et des échanges : **français**.
   - icônes sur le profil ;
   - case « GPS » par point (`soGps`, par trace).
 - Tests : `node tests/arrets.mjs`.
+- **Export (toutes les traces)** : boutons « Exporter en GPX » et « Exporter pour Garmin (.fit) ». Sont exportés les arrêts conseillés (sauf décochés) et les points cochés (`Arrets.gpsPoints`).
+  - **Nom court** pour l'Edge, 15 caractères au plus : « Eau cimetière », « Boulang. 19h » (heure de fermeture si elle est connue).
+  - **GPX** : `<wpt>` placés avant `<trk>` et **posés sur le tracé**, parce que Garmin Connect ne convertit en points de parcours que les waypoints à moins d'environ 35 m. `<type>` = nom du type FIT (water, food, store, toilet, gear…), `<sym>` = symbole Garmin.
+  - **FIT** (le plus fiable pour les alertes) : messages file_id (course, fabricant 255, **sans numéro de série**), course, lap, event start, records tous les 25 m avec l'heure simulée, course_point dans l'ordre du trajet, puis event stop.
+  - Types FIT : eau 3, nourriture 4, magasin 48, toilettes 39, matériel 41, point de vue 38, info 53.
+  - Test : `node tests/fit.mjs`. Vérification complète avec le SDK officiel (`pip install garmin-fit-sdk`, `Decoder(Stream.from_file(f)).read()`).
+  - Mode d'emploi en 3 étapes dans la carte Arrêts (« Avoir les alertes sur ton Edge »).
 
 ## Synchro entre appareils (sync.js + apps-script/sync.gs)
 - Google Sheet **privée** + Apps Script déployé en application web (« Exécuter en tant que : moi », « Accès : tout le monde »). La clé est dans les propriétés du script (`SYNC_KEY`, 16 caractères minimum).

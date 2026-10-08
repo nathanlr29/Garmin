@@ -233,7 +233,7 @@ function renderLoad() {
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
-        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
+        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button><button class="btn" id="soGpx">Exporter en GPX</button><button class="btn" id="soFit" title="Parcours FIT avec les points d'arrêt : alertes « À venir » sur le GPS Garmin">Exporter pour Garmin (.fit)</button>
       </div></div>
     ${altBar(r)}
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
@@ -252,6 +252,7 @@ function renderLoad() {
   $("soPickBtn").onclick = () => { SO.pickOpen = !SO.pickOpen; if (SO.pickOpen && SO.route) SO.genOpen = false; renderLoad(); if (SO.pickOpen) $("soPick").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
   if (SO.pickOpen) renderPick();
   if ($("soGpx")) $("soGpx").onclick = exportGPX;
+  if ($("soFit")) $("soFit").onclick = exportFIT;
   bindAlt();
   if ($("soGen") && !$("soGen").hidden) renderGen();
   const drop = $("soDrop");
@@ -1194,11 +1195,21 @@ function renderGen() {
   $("gMore").onclick = moreLoops;
   renderGenMap();
 }
-function toGPX(r) {
-  const x = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Breizh Watts" xmlns="http://www.topografix.com/GPX/1/1">\n<metadata><name>${x(r.name)}</name></metadata>\n<trk><name>${x(r.name)}</name><trkseg>\n${r.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ""}</trkpt>`).join("\n")}\n</trkseg></trk>\n</gpx>\n`;
+// --- Export : GPX (trace + waypoints des arrêts) et parcours FIT (points de parcours typés, le plus fiable pour les alertes Garmin)
+const xml = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+function toGPX(r, W = []) {
+  const wpt = W.map(w => `<wpt lat="${w.lat}" lon="${w.lon}"><name>${xml(w.name)}</name><cmt>${xml(w.desc)}</cmt><desc>${xml(w.desc)}</desc><sym>${xml(w.sym)}</sym><type>${xml(w.type)}</type></wpt>`).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Breizh Watts" xmlns="http://www.topografix.com/GPX/1/1">\n<metadata><name>${xml(r.name)}</name></metadata>\n${wpt ? wpt + "\n" : ""}<trk><name>${xml(r.name)}</name><trkseg>\n${r.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ""}</trkpt>`).join("\n")}\n</trkseg></trk>\n</gpx>\n`;
 }
-function exportGPX() { const r = SO.route; if (!r) return; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([toGPX(r)], { type: "application/gpx+xml" })); a.download = `${r.name.replace(/[^A-Za-z0-9À-ÿ ]/g, "").trim().replace(/\s+/g, "_") || "boucle"}.gpx`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const fileBase = r => r.name.replace(/[^A-Za-z0-9À-ÿ ]/g, "").trim().replace(/\s+/g, "_") || "boucle";
+function download(data, type, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([data], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const stopPts = () => window.Arrets ? Arrets.gpsPoints() : [];
+function exportGPX() { const r = SO.route; if (!r) return; download(toGPX(r, stopPts()), "application/gpx+xml", fileBase(r) + ".gpx"); }
+function exportFIT() {
+  const r = SO.route, res = SO.res, P = SO.P; if (!r || !res || !P || !window.FitCourse) return;
+  const recs = P.map((p, k) => ({ t: res.T[k], lat: p.lat, lon: p.lon, alt: p.e, d: p.d }));
+  download(FitCourse.build(r.name.slice(0, 30).trim(), recs, stopPts()), "application/vnd.ant.fit", fileBase(r) + ".fit");
+}
 
 // ------------------------------------------------------------------ Entrée
 async function open() {
@@ -1212,7 +1223,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Recup?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Recup?.curTab() === "sortie") open(); });
 })();

@@ -171,3 +171,6 @@
 #sortie .soprof .soic.adv text{font-size:16px}
 #sortie .soprof .soic line{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3;opacity:.7}
 #sortie .soprof .soic.adv line{stroke:var(--accent);opacity:1}
+#sortie .sthelp{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg)}
+#sortie .sthelp summary{cursor:pointer;font-weight:700;font-size:14px;min-height:28px;display:flex;align-items:center}
+#sortie .sthelp ol{margin:8px 0 0;padding-left:20px;font-size:13.5px;line-height:1.5;display:grid;gap:6px}
