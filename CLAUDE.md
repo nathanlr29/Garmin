@@ -27,9 +27,14 @@ Langue de l'interface et des échanges : **français**.
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
-| `scripts/fetch_garmin.py` | Récupère activités, récup, traces ; extrait les flux FIT → `data/streams/<id>.json` + `index.json` |
+| `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT → `data/streams/<id>.json` + `index.json` |
 | `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh pour qu'ils apparaissent enregistrés par l'Edge 540 (laps/session reconstruits depuis les records) |
 | `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup et configuration initiale Garmin |
+
+### Traces et parcours
+- `data/traces.json` : les 30 dernières activités dehors (tous sports), 160 points max, chargé avec la page (mini-tracés, chaîne).
+- `data/routes.json` : parcours à refaire (onglet Sortie > « Refaire une sortie Garmin ») = sorties vélo dehors ≥ 20 km des 2 dernières années, hors home trainer / VirtualRide / MyWhoosh / Zwift, 400 points max, même coupure de 400 m. Récupérés **10 par passage** du workflow (`update_routes`) ; `null` = pas de GPS (mémorisé). Chargé seulement à l'ouverture du sélecteur. **Choix assumé : cet historique de parcours (tronqué) est public.**
+- Sélecteur (`renderPick` dans sortie.js) : recherche nom/mois/date, liste des mois, « Masquer les trajets < 30 min » (coché par défaut), repli sur `traces.json` si une sortie n'a pas encore de parcours. Route chargée : `sortieRoute.src = "garmin"` + mention « début et fin tronqués ».
 
 ### Flux (data/streams)
 - Sorties des 42 derniers jours, 6 au maximum par exécution, purge au-delà de 120 j, 1200 points au maximum.
