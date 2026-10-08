@@ -13,7 +13,7 @@ Langue de l'interface et des échanges : **français**.
   - il copie `index.html *.js *.css config.json manifest.webmanifest icon-*.png data` dans `_site/` puis déploie sur Pages.
   - **Tout nouveau fichier à la racine doit correspondre à ce `cp`** (sinon il n'est pas déployé).
 - Les identifiants Garmin sont dans les **secrets GitHub**. Ne jamais les lire, les afficher ni les écrire.
-- Les données propres à un appareil (réglages, graissage de chaîne, départ des boucles) sont dans le `localStorage` du navigateur. Aucune synchro entre appareils, sauf le lien de partage `#plan=<base64>`.
+- Les données propres à un appareil (réglages, graissage de chaîne, départ des boucles) sont dans le `localStorage` du navigateur. Pas de synchro entre appareils, sauf le lien de partage `#plan=<base64>` et le graissage de chaîne via `sync.js` (voir plus bas).
 
 ## Fichiers
 
@@ -23,7 +23,7 @@ Langue de l'interface et des échanges : **français**.
 | `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil) |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
-| `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucle face au vent (BRouter + profil perso), export GPX |
+| `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
@@ -34,6 +34,15 @@ Langue de l'interface et des échanges : **français**.
 ### Flux (data/streams)
 - Sorties des 42 derniers jours, 6 au maximum par exécution, purge au-delà de 120 j, 1200 points au maximum.
 - **Confidentialité** : le GPS est retiré à moins de 400 m du départ et de l'arrivée, et il n'y a pas de GPS pour les VirtualRide. Le point de départ des boucles (`soStart`) reste en localStorage, **jamais publié**.
+
+## Générateur de boucles (sortie.js)
+- Candidats = forme (triangle `tri` / losange `los`) × rotation par rapport au vent × sens, dans l'ordre de `genSpecs()` : 12 au départ, puis 6 par « Proposer d'autres boucles » (jamais deux fois la même combinaison : `tried`). On garde au plus 3 nouvelles boucles vraiment différentes (recouvrement < 55 %) ; **6 propositions max**, les plus anciennes non sélectionnées/non analysées partent.
+- **BRouter (serveur public)** : `brRouteQ` = 2 requêtes au plus en parallèle, 600 ms minimum entre deux départs, cache en mémoire par points de passage. Changer de boucle, inverser le sens ou recharger la page ne rappelle **jamais** BRouter.
+- Interface : carte Leaflet (`#gMap`, conservée entre les rendus) avec toutes les boucles (sélectionnée orange épaisse + chevrons de sens, autres grises cliquables), départ et flèche de vent ; fiches (km, D+, temps, mini-profil, % du retour vent dans le dos, phrase « pourquoi ») en grille, en carrousel `scroll-snap` sous 620 px.
+- « Choisir cette boucle » → `setRoute` (analyse complète) ; le bandeau « Autres boucles (N) » (`altBar`) reste au-dessus de l'analyse pour changer de boucle en un clic. Route générée : `sortieRoute.gid` = id de la proposition.
+- « Inverser le sens » : points inversés en local + score de vent recalculé (note : attention aux sens uniques, pas de recalcul d'itinéraire).
+- Invalidation : distance, relief ou point de départ changés → propositions effacées ; date, heure ou vitesse changées → tracés gardés, vent et scores recalculés (`syncRes`, 1 appel météo si la date change).
+- Clés localStorage : `soGenRes` (réglages de calcul, point de départ, météo au départ, propositions avec leurs points, combinaisons essayées), `soGenSel` (sélection), plus `soGenKm`, `soGenRel`, `soStart`, `soBrf`, `sortieRoute`, `sortieSet`. `soGenRes` contient le point de départ : **localStorage uniquement**, jamais dans le dépôt ni dans une URL.
 
 ## Synchro entre appareils (sync.js + apps-script/sync.gs)
 - Google Sheet **privée** + Apps Script déployé en application web (« Exécuter en tant que : moi », « Accès : tout le monde »). La clé est dans les propriétés du script (`SYNC_KEY`, 16 caractères minimum).
