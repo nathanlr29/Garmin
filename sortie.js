@@ -214,6 +214,7 @@ function shell() {
         <section class="card span8"><h2>Vent sur le parcours <span class="legend"><span><i style="background:${COL.face}"></i>face</span><span><i style="background:${COL.travers}"></i>côté</span><span><i style="background:${COL.dos}"></i>dos</span><span><i style="background:${COL.calme}"></i>faible</span></span></h2><div id="soMap"></div><p class="note">Flèches : sens du vent prévu (à 10 m du sol, au guidon c'est souvent un peu moins, surtout entre les talus).</p></section>
         <section class="card span4"><h2>Meilleur créneau <small id="soBestInfo"></small></h2><div id="soBest"></div></section>
         <section class="card span12"><h2>Profil <small id="soProfInfo"></small></h2><div id="soProf"></div></section>
+        <section class="card span12"><h2>Arrêts sur le parcours <small id="soStopInfo"></small></h2><div id="soStops"></div></section>
         <section class="card span7"><h2>Montées <small id="soClimbInfo"></small></h2><div id="soClimbs"></div></section>
         <section class="card span5"><h2>Pratique</h2><div id="soTips"></div></section>
         <section class="card span12"><h2>Nutrition <small id="soNutInfo"></small></h2><div id="soNut"></div></section>
@@ -332,6 +333,9 @@ async function compute() {
   if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(SO.P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
   renderTiles(res, err); renderVerdict(res, rev, best, err, s); renderBest(best, s);
   await renderMap(res, wx); renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
+  // points d'arrêt (OpenStreetMap) : en dernier, la sortie s'affiche même si le service ne répond pas
+  if (window.Arrets && SO.res === res) Arrets.update({ P: SO.P, r: res, map: SO.map, nut: SO.nut, route: SO.route,
+    onDone: () => { if (SO.res === res) { renderProfile(res); renderNutrition(res); } }, onIcons: () => { if (SO.res === res) renderProfile(res); } });
 }
 
 function renderTiles(r, err) {
@@ -408,7 +412,8 @@ async function renderMap(r, wx) {
 }
 
 function renderProfile(r) {
-  const P = SO.P, box = $("soProf"), Wd = Math.max(320, box.clientWidth || 800), H = 190, pl = 34, pr = 8, pt = 10, pb = 34;
+  const IC = window.Arrets ? Arrets.icons() : [];
+  const P = SO.P, box = $("soProf"), Wd = Math.max(320, box.clientWidth || 800), H = IC.length ? 210 : 190, pl = 34, pr = 8, pt = IC.length ? 30 : 10, pb = 34;
   const total = P[P.length - 1].d, emin = Math.min(...P.map(p => p.e)), emax = Math.max(...P.map(p => p.e));
   const lo = Math.floor((emin - 5) / 10) * 10, hi = Math.max(lo + 40, Math.ceil((emax + 5) / 10) * 10);
   const X = d => pl + d / total * (Wd - pl - pr), Y = e => pt + (1 - (e - lo) / (hi - lo)) * (H - pt - pb);
@@ -419,7 +424,13 @@ function renderProfile(r) {
   const kmT = ticks(0, total / 1000, Wd < 500 ? 4 : 8).map(v => `<text x="${X(v * 1000)}" y="${H - pb + 13}" text-anchor="middle" class="ax">${v}</text>`).join("");
   let strip = "";
   if (r.ok) { const sg = 20; for (let i = 0; i < P.length - 1; i += sg) { const j = Math.min(P.length - 1, i + sg), m = Math.floor((i + j) / 2), w = r.W[m]; if (!w) continue; const c = w.ws < 8 ? COL.calme : r.Hd[m] > w.ws * .5 ? COL.face : r.Hd[m] < -w.ws * .5 ? COL.dos : COL.travers; strip += `<rect x="${X(P[i].d)}" y="${H - 14}" width="${Math.max(.5, X(P[j].d) - X(P[i].d) + .3)}" height="8" fill="${c}"/>`; } }
-  box.innerHTML = `<svg viewBox="0 0 ${Wd} ${H}" width="100%" height="${H}" class="soprof">${yt}<path d="${area}" fill="var(--accent-soft)" stroke="none"/>${cl}<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>${kmT}${strip}<line id="soCur" y1="${pt}" y2="${H - pb}" stroke="var(--ink)" stroke-width="1" opacity="0"/><rect x="${pl}" y="0" width="${Wd - pl - pr}" height="${H}" fill="transparent" id="soHit"/></svg>`;
+  // arrêts : petites icônes à leur distance (les arrêts conseillés passent devant)
+  let ics = "", lastX = -99;
+  IC.filter(i => !i.adv).sort((a, b) => a.d - b.d).concat(IC.filter(i => i.adv)).forEach(i => { const x = X(i.d);
+    if (!i.adv && x - lastX < 12) return; if (!i.adv) lastX = x;
+    const e = P[Math.min(P.length - 1, Math.round(i.d / STEP))].e;
+    ics += `<g class="soic${i.adv ? " adv" : ""}"><title>${esc(i.name)}</title><line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${i.adv ? 23 : 21}" y2="${Y(e).toFixed(1)}"/><text x="${x.toFixed(1)}" y="${i.adv ? 19 : 17}" text-anchor="middle">${i.ic}</text></g>`; });
+  box.innerHTML = `<svg viewBox="0 0 ${Wd} ${H}" width="100%" height="${H}" class="soprof">${yt}${ics}<path d="${area}" fill="var(--accent-soft)" stroke="none"/>${cl}<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>${kmT}${strip}<line id="soCur" y1="${pt}" y2="${H - pb}" stroke="var(--ink)" stroke-width="1" opacity="0"/><rect x="${pl}" y="0" width="${Wd - pl - pr}" height="${H}" fill="transparent" id="soHit"/></svg>`;
   $("soProfInfo").textContent = `${fmt(emin)}–${fmt(emax)} m · bande du bas : vent`;
   const hit = $("soHit"), cur = $("soCur");
   const move = ev => {
@@ -478,6 +489,11 @@ function renderNutrition(r) {
   }
   const cap = 1.2;  // 2 bidons de 600 ml
   for (let k = 1; k * cap < water; k++) { const tt = t0 + k * cap / drink * 3600e3; rows.push({ t: new Date(tt), km: kmAt(tt), what: `<b>Remplir les bidons</b> <small>(${fmt(k * cap, 1)} L bus)</small>`, water: 1 }); }
+  // arrêts conseillés (carte Arrêts) : où remplir les bidons
+  const adv = window.Arrets ? Arrets.advice().filter(a => /eau/.test(a.role)) : [];
+  rows.forEach(rw => { if (!rw.water) return; const a = adv.find(a => Math.abs(a.p.t0 - rw.t) < 50 * 6e4); if (a) rw.what += `<small>→ ${esc(a.p.name)}, km ${fmt(a.p.km)} (${hm(a.p.t0)})</small>`; });
+  if (!rows.some(rw => rw.water)) adv.forEach(a => rows.push({ t: a.p.t0, km: a.p.km, what: `<b>Arrêt eau conseillé</b><small>${esc(a.p.name)}</small>`, water: 1 }));
+  SO.nut = { drink, rate, water, cap, h };
   rows.sort((a, b) => a.t - b.t);
   $("soNutInfo").textContent = `${fmt(kcal)} kcal${ftp ? ` · intensité ${Math.round(x * 100)} % FTP` : ""}`;
   const tile = (l, v, s_) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s_}</div></div>`;

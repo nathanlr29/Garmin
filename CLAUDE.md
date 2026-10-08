@@ -19,11 +19,12 @@ Langue de l'interface et des échanges : **français**.
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sortie.js |
+| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sync.js → chain.js → arrets.js → sortie.js |
 | `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil) |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
+| `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : Overpass, horaires, arrêts conseillés. Utilisé par sortie.js |
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
@@ -56,6 +57,29 @@ Langue de l'interface et des échanges : **français**.
 - « Inverser le sens » : points inversés en local + score de vent recalculé (note : attention aux sens uniques, pas de recalcul d'itinéraire).
 - Invalidation : distance, relief ou point de départ changés → propositions effacées ; date, heure ou vitesse changées → tracés gardés, vent et scores recalculés (`syncRes`, 1 appel météo si la date change).
 - Clés localStorage : `soGenRes` (réglages de calcul, point de départ, météo au départ, propositions avec leurs points, combinaisons essayées), `soGenSel` (sélection), plus `soGenKm`, `soGenRel`, `soStart`, `soBrf`, `sortieRoute`, `sortieSet`. `soGenRes` contient le point de départ : **localStorage uniquement**, jamais dans le dépôt ni dans une URL.
+
+## Points d'arrêt (arrets.js)
+- Concerne toutes les traces : boucle générée, GPX importé, sortie Garmin refaite. `Arrets.update(ctx)` est appelé en fin de `compute()` dans sortie.js.
+- **Overpass** : **une seule requête par trace**, en POST `text/x-www-form-urlencoded`, dans un couloir de 150 m autour du tracé simplifié (Douglas-Peucker, 350 points au plus).
+  - Les **400 premiers et derniers mètres ne sont jamais envoyés** (point de départ).
+  - Cache `soPoi` (7 jours, 4 traces), avec un 2e serveur en secours. Changer l'heure ou la vitesse ne relance rien.
+  - En cas d'échec : message et bouton « Réessayer ». Le reste de la sortie s'affiche normalement.
+- **Catégories** : eau (`drinking_water`, cimetière = « eau probable », souvent coupée l'hiver), ravito (boulangerie, épicerie / supérette, station-service, café / bar), toilettes, réparation (station, magasin de vélo).
+- **Pour chaque point** : km, heure de passage (`r.T` de la simulation) et écart au tracé.
+- **Horaires** : bibliothèque `opening_hours@3.8.0` + `suncalc@1.9.0` (jsDelivr), chargée seulement s'il y a des horaires à lire, avec un bouchon pour `i18next`. Si elle ne charge pas : `ohSimple` lit les cas courants, sinon « horaires à vérifier ».
+- **Arrêts conseillés** (`advise`, 3 au plus), calés sur la carte Nutrition (`SO.nut` : ml/h, bidons de 1,2 L, g/h) :
+  - eau vers le milieu au-delà de 2 h, plus tôt s'il fait chaud ou si les bidons sont vides avant ;
+  - 2e remplissage si la sortie est longue ;
+  - ravito ouvert au-delà de 3 h ;
+  - un commerce qui sert aux deux devient « eau + ravito ».
+  - La carte Nutrition indique où remplir les bidons.
+- **Affichage** :
+  - carte : marqueurs par catégorie, les conseillés en plus gros ;
+  - filtres par catégorie (`soStopCat`) ;
+  - liste compacte : 10 points, puis « Afficher tout » ;
+  - icônes sur le profil ;
+  - case « GPS » par point (`soGps`, par trace).
+- Tests : `node tests/arrets.mjs`.
 
 ## Synchro entre appareils (sync.js + apps-script/sync.gs)
 - Google Sheet **privée** + Apps Script déployé en application web (« Exécuter en tant que : moi », « Accès : tout le monde »). La clé est dans les propriétés du script (`SYNC_KEY`, 16 caractères minimum).
