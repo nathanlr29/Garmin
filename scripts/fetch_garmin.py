@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from garminconnect import (
@@ -29,12 +29,19 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 ACTIVITIES_FILE = DATA / "activities.json"
 TRACES_FILE = DATA / "traces.json"
+ROUTES_FILE = DATA / "routes.json"
 META_FILE = DATA / "meta.json"
 CONFIG_FILE = ROOT / "config.json"
 TOKEN_FILE = ROOT / ".garmin" / "tokens.enc"
 
 MAX_TRACES = 30
 MAX_POINTS = 160
+# Parcours pour « Refaire une sortie Garmin » (onglet Sortie) : sorties vélo dehors de 20 km et plus, sur 2 ans
+ROUTE_POINTS = 400
+ROUTE_MIN_M = 20000
+ROUTE_DAYS = 730
+ROUTES_PER_RUN = 10   # récupérées petit à petit pour ménager Garmin
+NOT_OUTDOOR = ("whoosh", "zwift", "home trainer", "hometrainer", "rouvy")
 PAGE = 200
 
 CYCLING = {
@@ -112,7 +119,7 @@ def dist_m(a, b):
     return 2 * 6371000 * math.asin(math.sqrt(h))
 
 
-def private_trace(pts, radius):
+def private_trace(pts, radius, max_points=MAX_POINTS):
     """Retire les points proches du départ et de l'arrivée (ton domicile n'apparaît pas)."""
     pts = [p for p in pts if p[0] is not None and p[1] is not None]
     if len(pts) < 10:
@@ -122,11 +129,11 @@ def private_trace(pts, radius):
         pts = [p for p in pts if dist_m(p, s) > radius and dist_m(p, e) > radius]
     if len(pts) < 10:
         return None
-    step = max(1, math.ceil(len(pts) / MAX_POINTS))
+    step = max(1, math.ceil(len(pts) / max_points))
     return [[round(p[0], 4), round(p[1], 4)] for p in pts[::step]]
 
 
-def fetch_trace(api, act_id, radius):
+def fetch_trace(api, act_id, radius, max_points=MAX_POINTS):
     try:
         det = api.get_activity_details(str(act_id), maxchart=10, maxpoly=1500)
     except GarminConnectTooManyRequestsError:
@@ -135,7 +142,28 @@ def fetch_trace(api, act_id, radius):
         print(f"  trace {act_id} indisponible : {e}")
         return None
     poly = ((det or {}).get("geoPolylineDTO") or {}).get("polyline") or []
-    return private_trace([(p.get("lat"), p.get("lon")) for p in poly], radius)
+    return private_trace([(p.get("lat"), p.get("lon")) for p in poly], radius, max_points)
+
+
+def update_routes(api, acts, radius):
+    """data/routes.json : tracés (tronqués autour du départ et de l'arrivée) des sorties vélo dehors à refaire."""
+    routes = {int(k): v for k, v in load(ROUTES_FILE, {}).items()}
+    cut = (datetime.now(timezone.utc) - timedelta(days=ROUTE_DAYS)).strftime("%Y-%m-%d")
+    want = [a["id"] for a in reversed(acts)
+            if a["t"] == "Ride" and not a["tr"] and a["m"] >= ROUTE_MIN_M and a["d"][:10] >= cut
+            and not any(w in (a.get("n") or "").lower() for w in NOT_OUTDOOR)]
+    out, fetched = {}, 0
+    for i in want:
+        if i in routes:
+            out[i] = routes[i]
+        elif fetched < ROUTES_PER_RUN:
+            out[i] = fetch_trace(api, i, radius, ROUTE_POINTS)  # None = pas de GPS, mémorisé
+            fetched += 1
+            time.sleep(0.5)
+    if out != routes:
+        dump(ROUTES_FILE, {str(k): v for k, v in out.items()})
+    missing = sum(1 for i in want if i not in out)
+    print(f"Parcours : {sum(1 for v in out.values() if v)} disponibles, {fetched} récupérés, {missing} restants.")
 
 
 # ---------------------------------------------------------------- Activités
@@ -393,6 +421,13 @@ def main():
             update_streams(api, acts, radius)
         except Exception as e:
             print(f"Bilan : erreur {type(e).__name__} : {e}")
+        # Parcours à refaire (onglet Sortie) : une erreur ou une limite Garmin ici ne bloque rien
+        try:
+            update_routes(api, acts, radius)
+        except GarminConnectTooManyRequestsError:
+            print("Parcours : Garmin limite les requêtes (429), on continuera au prochain passage.")
+        except Exception as e:
+            print(f"Parcours : erreur {type(e).__name__} : {e}")
         # Onglet Récup (sommeil, VFC, FC…) : une erreur ici ne bloque pas les sorties vélo
         try:
             import recovery

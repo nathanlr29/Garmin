@@ -119,3 +119,24 @@
 #sortie .soalt-a{display:flex;gap:8px;flex-wrap:wrap}
 #sortie .soalt-a .btn2{min-height:40px}
 @media (max-width:620px){#sortie .soalt-a{width:100%}#sortie .soalt-a .btn2{flex:1 1 auto;min-height:44px}}
+/* Refaire une sortie Garmin */
+#sortie .sopick{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+#sortie .sopick[hidden]{display:none}
+#sortie .sopick h3{font-size:15px;font-weight:800;margin-bottom:4px}
+#sortie .sopick .sosmall{margin:2px 0 10px;line-height:1.45}
+#sortie .pform input[type=search]{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:7px 9px;min-width:0;flex:1 1 200px}
+#sortie .pform select{margin-left:0}
+#sortie .pshort{display:flex;align-items:center;gap:6px;font-size:13px}
+#sortie .pcount{margin-top:8px}
+#sortie .plist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px;max-height:520px;overflow-y:auto;padding-right:2px;overscroll-behavior:contain}
+@media (max-width:760px){#sortie .plist{grid-template-columns:1fr;max-height:60vh}}
+#sortie .prow{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:6px 10px 6px 6px;font:inherit;text-align:left;cursor:pointer;min-height:56px}
+#sortie .prow:hover,#sortie .prow:focus-visible{border-color:var(--accent)}
+#sortie .prow .map{width:52px;height:52px;border-radius:10px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
+#sortie .prow .map svg{width:46px;height:46px}
+#sortie .ptx,#sortie .pst{display:grid;gap:2px;min-width:0}
+#sortie .ptx b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sortie .ptx small,#sortie .pst small{font-size:12px;color:var(--muted)}
+#sortie .pst{text-align:right}#sortie .pst b{font-size:13.5px;white-space:nowrap}#sortie .pst small{white-space:nowrap}
+#sortie .sorecent .btn2{min-height:44px}
+@media (max-width:620px){#sortie .sohead .btn{min-height:40px;padding:8px 12px}}

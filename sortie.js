@@ -224,39 +224,85 @@ function shell() {
 }
 function renderLoad() {
   const r = SO.route, s = settings();
-  const recent = (S.all || []).filter(a => RIDE_TYPES.has(a.t) && !isIndoor(a) && a.km >= 20 && S.traces && S.traces[a.id]).slice(-30).reverse();
   $("soLoad").innerHTML = r ? `
-    <div class="sohead"><div><div class="soname">${esc(r.name)}</div><div class="sosmall">${fmt(SO.P[SO.P.length - 1].d / 1000, 1)} km · ${fmt(gain(SO.P))} m D+</div></div>
+    <div class="sohead"><div><div class="soname">${esc(r.name)}</div><div class="sosmall">${fmt(SO.P[SO.P.length - 1].d / 1000, 1)} km · ${fmt(gain(SO.P))} m D+${r.src === "garmin" ? ` · ${cutNote()}` : ""}</div></div>
       <div class="soform">
         <label>Départ <input type="date" id="soDate" value="${s.date}" min="${ymd(new Date())}"></label>
         <label><select id="soHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.hour ? "selected" : ""}>${h} h</option>`).join("")}</select></label>
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
-        <button class="btn" id="soChange">Changer de trace</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
+        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
       </div></div>
     ${altBar(r)}
+    <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
     <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
     <input type="file" id="soFile" hidden>` : `
     <h2>Planifier une sortie</h2>
     <label class="sodrop" id="soDrop"><input type="file" id="soFile"><b>Importer une trace GPX</b><span>Dans Garmin Connect : Entraînement et planification → Parcours → ouvre le parcours → ⋯ → Exporter au format GPX.</span></label>
-    ${recent.length ? `<div class="sorecent"><label>ou refaire une sortie récente <select id="soRecent"><option value="">choisir…</option>${recent.map(a => `<option value="${a.id}">${a.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} · ${esc(a.n)} · ${fmt(a.km)} km</option>`).join("")}</select></label></div>` : ""}
+    <div class="sorecent"><button class="btn2" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "ou refaire une sortie Garmin"}</button></div>
+    <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
     <p class="soerr" id="soErr"></p>
     <div class="sogen" id="soGen"></div>`;
   const file = $("soFile");
   file.onchange = async () => { const f = file.files[0]; if (!f) return; try { setRoute(parseGPX(await f.text(), f.name)); } catch (e) { showErr(e.message); } };
   if ($("soChange")) $("soChange").onclick = () => file.click();
-  if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; renderLoad(); };
+  if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; if (SO.genOpen) SO.pickOpen = false; renderLoad(); };
+  $("soPickBtn").onclick = () => { SO.pickOpen = !SO.pickOpen; if (SO.pickOpen && SO.route) SO.genOpen = false; renderLoad(); if (SO.pickOpen) $("soPick").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
+  if (SO.pickOpen) renderPick();
   if ($("soGpx")) $("soGpx").onclick = exportGPX;
   bindAlt();
   if ($("soGen") && !$("soGen").hidden) renderGen();
   const drop = $("soDrop");
   if (drop) { drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); }; drop.ondragleave = () => drop.classList.remove("on");
     drop.ondrop = async e => { e.preventDefault(); drop.classList.remove("on"); const f = e.dataTransfer.files[0]; if (f) try { setRoute(parseGPX(await f.text(), f.name)); } catch (er) { showErr(er.message); } }; }
-  if ($("soRecent")) $("soRecent").onchange = e => { const a = S.all.find(x => String(x.id) === e.target.value); if (a) setRoute({ name: a.n, pts: S.traces[a.id].map(p => [p[0], p[1], null]) }); };
   const save = () => { LS.set("sortieSet", { date: $("soDate").value, hour: +$("soHour").value, min: +$("soMin").value, speed: +$("soSpeed").value || defSpeed() }); compute(); };
   ["soDate", "soHour", "soMin", "soSpeed"].forEach(id => { if ($(id)) $(id).onchange = save; });
   if ($("soKg")) $("soKg").onchange = () => { const v = +$("soKg").value; LS.set("bwWeight", v >= 35 && v <= 150 ? v : null); compute(); };
+}
+// ------------------------------------------------------------------ Refaire une sortie Garmin
+// Traces publiées (data/routes.json, complété par data/traces.json) : début et fin tronqués pour la confidentialité.
+const cutNote = () => `début et fin tronqués de ${fmt(S.cfg.rayon_confidentialite_m ?? 400)} m (confidentialité)`;
+const NOT_OUT = /whoosh|zwift|home ?trainer|rouvy/i;
+const norm = t => String(t).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const monthOf = a => a.dt.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+async function routesData() {
+  if (!SO.routes) SO.routes = getJSON("data/routes.json", {});
+  return SO.routes;
+}
+function pickList(R) {
+  return (S.all || []).filter(a => RIDE_TYPES.has(a.t) && !isIndoor(a) && !NOT_OUT.test(a.n || "") && ((R[a.id] && R[a.id].length > 1) || (S.traces && S.traces[a.id] && S.traces[a.id].length > 1)))
+    .sort((a, b) => b.dt - a.dt);
+}
+async function renderPick() {
+  const box = $("soPick"); if (!box || box.hidden) return;
+  if (!SO.routesLoaded) box.innerHTML = `<p class="note">Chargement des sorties…</p>`;
+  const R = await routesData(); SO.routesLoaded = true;
+  if ($("soPick") !== box || box.hidden) return;
+  const all = pickList(R), months = [...new Set(all.map(monthOf))], short = SO.pickShort !== false;
+  // sorties de 20 km et plus des 2 dernières années dont le parcours n'est pas encore publié (récupéré 10 par heure)
+  const cut = Date.now() - 730 * 864e5, todo = (S.all || []).filter(a => a.t === "Ride" && !isIndoor(a) && a.km >= 20 && a.dt.getTime() >= cut && !NOT_OUT.test(a.n || "") && !(a.id in R)).length;
+  box.innerHTML = `<h3>Refaire une sortie Garmin</h3>
+    <p class="sosmall">Sorties vélo dehors uniquement (ni home trainer ni MyWhoosh). Le ${cutNote()}.</p>
+    <div class="soform pform"><input type="search" id="pQ" placeholder="Rechercher : nom, mois…" value="${esc(SO.pickQ || "")}" aria-label="Rechercher une sortie">
+      <select id="pMonth" aria-label="Mois"><option value="">Tous les mois</option>${months.map(m => `<option ${m === SO.pickMonth ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>
+      <label class="pshort"><input type="checkbox" id="pShort" ${short ? "checked" : ""}> Masquer les trajets de moins de 30 min</label></div>
+    <p class="note pcount" id="pCount"></p><div class="plist" id="pList"></div>`;
+  const list = () => {  // seule la liste est redessinée : le champ de recherche garde le focus
+    const q = norm(SO.pickQ || ""), mo = SO.pickMonth || "", sh = SO.pickShort !== false;
+    const shown = all.filter(a => (!sh || a.mt >= 1800) && (!mo || monthOf(a) === mo) && (!q || norm(`${a.n} ${monthOf(a)} ${a.d.slice(0, 10)}`).includes(q)));
+    $("pCount").textContent = `${shown.length} sortie${shown.length > 1 ? "s" : ""}${all.length > shown.length ? ` sur ${all.length}` : ""}${todo ? ` · ${todo} plus ancienne${todo > 1 ? "s" : ""} en cours de récupération (10 par heure)` : ""}`;
+    $("pList").innerHTML = shown.map(a => `<button class="prow" data-aid="${a.id}"><span class="map">${traceSvg(R[a.id] || S.traces[a.id])}</span>
+      <span class="ptx"><b>${esc(a.n || "Sortie")}</b><small>${a.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</small></span>
+      <span class="pst"><b>${fmt(a.km, 1)} km</b><small>${a.el ? `${fmt(a.el)} m D+ · ` : ""}${hfmt(a.mt)}</small></span></button>`).join("") || `<p class="note">Aucune sortie ne correspond.</p>`;
+    $("pList").querySelectorAll("[data-aid]").forEach(b => b.onclick = () => { const a = all.find(x => String(x.id) === b.dataset.aid); if (!a) return;
+      SO.pickOpen = false;
+      setRoute({ name: `${a.n || "Sortie"} du ${a.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}`, pts: (R[a.id] || S.traces[a.id]).map(p => [p[0], p[1], null]), src: "garmin", aid: a.id }); });
+  };
+  $("pQ").oninput = e => { SO.pickQ = e.target.value; clearTimeout(SO.pickT); SO.pickT = setTimeout(list, 120); };
+  $("pMonth").onchange = e => { SO.pickMonth = e.target.value; list(); };
+  $("pShort").onchange = e => { SO.pickShort = e.target.checked; list(); };
+  list();
 }
 function showErr(m) { const e = $("soErr"); if (e) e.textContent = m; else alert(m); }
 function gain(P) { let g = 0; for (let i = 1; i < P.length; i++) g += Math.max(0, P[i].e - P[i - 1].e); return g; }
