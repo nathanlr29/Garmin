@@ -803,12 +803,80 @@ async function windHere(st, day) {  // prévisions à un seul point (départ) po
   const j = await r.json();
   return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: parseLocal(j.hourly.time[0]).getTime(), nH: j.hourly.time.length, step: 1e12 };
 }
-function overlap(pts) {  // part du parcours qui repasse sur ses pas (aller-retour), hors abords du départ
-  const cell = p => `${Math.round(p[0] * 600)}:${Math.round(p[1] * 400)}`, seen = new Map(); let cum = 0, rep = 0, tot = 0;
-  for (let i = 1; i < pts.length; i++) { const d = dist(pts[i - 1], pts[i]); cum += d; const k = cell(pts[i]);
-    if (dist(pts[i], pts[0]) > 2000) { tot += d; const f = seen.get(k); if (f != null && cum - f > 1500) rep += d; }
-    if (!seen.has(k)) seen.set(k, cum); }
-  return tot ? rep / tot : 0;
+// --- Allers-retours (éperons) : un point de passage tombé dans une impasse fait faire à BRouter un aller-retour sur la même route.
+const SP = { step: 10, near: 25, gap: 100, ang: 30, min: 150, home: 2000 };
+function resample(pts, step) {  // un point tous les `step` m, avec l'indice du segment d'origine
+  const R = []; let cum = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], L = dist(a, b), n = Math.max(1, Math.ceil(L / step));
+    for (let k = 0; k < n; k++) { const f = k / n, e = a[2] != null && b[2] != null ? a[2] + (b[2] - a[2]) * f : a[2];
+      R.push({ lat: a[0] + (b[0] - a[0]) * f, lon: a[1] + (b[1] - a[1]) * f, e, c: cum + L * f, i }); }
+    cum += L;
+  }
+  const z = pts[pts.length - 1]; R.push({ lat: z[0], lon: z[1], e: z[2], c: cum, i: pts.length - 1 });
+  R.forEach((p, k) => { const a = R[Math.max(0, k - 1)], b = R[Math.min(R.length - 1, k + 1)]; p.b = brg([a.lat, a.lon], [b.lat, b.lon]); });
+  return R;
+}
+function dblScan(pts) {  // points déjà parcourus (à moins de 25 m, plus de 100 m plus tôt), et ceux parcourus en sens inverse
+  if (!pts || pts.length < 3) return { R: [], tot: 0, dbl: 0, opp: [] };
+  const R = resample(pts, SP.step), tot = R[R.length - 1].c, ky = 1 / (SP.near / 111320), kx = ky * Math.cos(rad(R[0].lat)), G = new Map();
+  const key = (y, x) => y * 1e6 + x;
+  R.forEach((p, k) => { p.y = Math.floor(p.lat * ky); p.x = Math.floor(p.lon * kx); const q = key(p.y, p.x); (G.get(q) || G.set(q, []).get(q)).push(k); });
+  let dbl = 0; const opp = new Array(R.length).fill(-1);
+  for (let k = 1; k < R.length; k++) {
+    const p = R[k]; let any = false, bj = -1, bd = 1e9;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const j of G.get(key(p.y + dy, p.x + dx)) || []) {
+      if (j >= k) break;
+      const q = R[j]; if (p.c - q.c < SP.gap) continue;
+      if (q.c < SP.home && tot - p.c < SP.home) continue;  // même route à l'aller et au retour près du départ : toléré
+      const d = dist([p.lat, p.lon], [q.lat, q.lon]); if (d > SP.near) continue;
+      any = true; const da = Math.abs(((p.b - q.b + 540) % 360) - 180);  // écart de cap : 180° = sens inverse
+      if (da > 180 - SP.ang && d < bd) { bd = d; bj = j; }
+    }
+    if (any) dbl += p.c - R[k - 1].c;
+    opp[k] = bj;
+  }
+  return { R, tot, dbl, opp };
+}
+const DBL = new WeakMap();  // une trace ne change pas : son taux de double est calculé une fois
+function dblShare(pts) { if (!DBL.has(pts)) { const s = dblScan(pts); DBL.set(pts, s.tot ? s.dbl / s.tot : 0); } return DBL.get(pts); }
+function spurs(pts) {  // [{a, b, tip, entry, len}] : retour [a..b] sur l'aller ; on coupe de R[j] (entrée) à R[b] (sortie)
+  const { R, opp } = dblScan(pts), out = []; let k = 1;
+  while (k < R.length) {
+    if (opp[k] < 0) { k++; continue; }
+    let a = k, b = k, gap = 0;
+    for (k++; k < R.length; k++) { if (opp[k] >= 0) { b = k; gap = 0; } else if ((gap += R[k].c - R[k - 1].c) > 30) break; }
+    if (R[b].c - R[a].c < SP.min) continue;
+    let jmin = opp[a], jmax = opp[a]; for (let t = a; t <= b; t++) if (opp[t] >= 0) { jmin = Math.min(jmin, opp[t]); jmax = Math.max(jmax, opp[t]); }
+    const E = R[jmin]; let tip = R[jmax], td = 0;
+    for (let t = jmax; t <= a; t++) { const d = dist([E.lat, E.lon], [R[t].lat, R[t].lon]); if (d > td) { td = d; tip = R[t]; } }
+    out.push({ j: jmin, b, entry: [E.lat, E.lon], tip: [tip.lat, tip.lon], len: R[b].c - E.c, R });
+  }
+  return out;
+}
+function cutSpurs(pts) {  // dernier recours : on raccorde l'entrée et la sortie de chaque éperon
+  let cut = 0;
+  for (let n = 0; n < 6; n++) {
+    const s = spurs(pts)[0]; if (!s) break;
+    const A = s.R[s.j], B = s.R[s.b], r1 = p => [Math.round(p.lat * 1e5) / 1e5, Math.round(p.lon * 1e5) / 1e5, p.e != null ? Math.round(p.e * 10) / 10 : null];
+    pts = pts.slice(0, A.i + 1).concat([r1(A), r1(B)], pts.slice(B.i + 1)); cut += s.len;
+  }
+  return { pts, cut };
+}
+const ptsKm = pts => { let L = 0; for (let i = 1; i < pts.length; i++) L += dist(pts[i - 1], pts[i]); return L / 1000; };
+async function routeFix(wps, prof) {  // itinéraire d'une boucle, sans éperon si possible (1 ou 2 requêtes de plus, seulement si besoin)
+  let r = await brRouteQ(wps, prof), sp = spurs(r.pts); r.wps = wps;
+  const near = (s, w) => { let k = -1, bd = 1500; for (let i = 1; i < w.length - 1; i++) { const d = dist(s.tip, w[i]); if (d < bd) { bd = d; k = i; } } return k; };
+  const better = async w => { try { const r2 = await brRouteQ(w, prof), s2 = spurs(r2.pts); if (s2.length < sp.length) { r = r2; r.wps = w; sp = s2; } } catch (e) {} };
+  if (sp.length) {  // a) point de passage déplacé sur l'entrée de l'éperon : un vrai carrefour, sur une route traversante
+    const w = wps.slice(); let m = false; sp.forEach(s => { const k = near(s, w); if (k > 0) { w[k] = s.entry.map(v => Math.round(v * 1e5) / 1e5); m = true; } });
+    if (m) await better(w);
+  }
+  if (sp.length && r.wps.length > 4) {  // b) losange : on retire le point de passage en cause
+    const k = near(sp[0], r.wps); if (k > 0) await better(r.wps.filter((_, i) => i !== k));
+  }
+  if (sp.length) { const c = cutSpurs(r.pts); r = { ...r, pts: c.pts, km: ptsKm(c.pts), cut: Math.round(c.cut) }; }  // c) coupé, distance et D+ recalculés
+  return r;
 }
 function scoreLoop(c, o, wx) {
   const P = profile(c.pts), r = simulate(P, wx, o.start, o.speed, false), n = P.length; c.asc = gain(P);
@@ -816,9 +884,9 @@ function scoreLoop(c, o, wx) {
   const first = part(0, .4), last = part(.6, 1), mpk = c.asc / Math.max(1, c.km);
   const windPen = r.ok ? Math.max(0, last) * 2 + Math.max(0, last - first) * .8 + Math.max(0, r.head) * .5 : 0;
   const relPen = o.rel === "flat" ? Math.max(0, mpk - 6) * 3 : o.rel === "hilly" ? Math.max(0, 9 - mpk) * 3 : 0;
-  const ov = overlap(c.pts);
+  const ov = dblShare(c.pts);  // part du parcours en double (hors 2 km autour du départ)
   c.P = P; c.sim = r; c.first = first; c.last = last; c.ov = ov; c.mpk = mpk;
-  c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 60 + c.bad * 60 + c.main * 25 + c.dirt * 40;
+  c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 400 + c.bad * 60 + c.main * 25 + c.dirt * 40;
   return c;
 }
 // --- Propositions : générées, gardées (6 max) et comparées sur une carte. Tout reste en localStorage (soGenRes, soGenSel).
@@ -867,14 +935,16 @@ const jac = (a, b) => { let n = 0; a.forEach(x => { if (b.has(x)) n++; }); retur
 
 async function routeSpecs(specs, R, o, wx, nRefit) {
   const S0 = [R.key.lat, R.key.lon]; let prof = await brProfile(), profErr = false, ok = 0;
-  const route = async c => { try { Object.assign(c, await brRouteQ(wpsOf(c, S0, R.wd0), prof)); setMsg(`Itinéraires : ${++ok} calculés…`); return scoreLoop(c, o, wx); }
+  const route = async c => { try { Object.assign(c, await routeFix(wpsOf(c, S0, R.wd0), prof)); setMsg(`Itinéraires : ${++ok} calculés…`); return scoreLoop(c, o, wx); }
     catch (e) { if (e.prof) profErr = true; return null; } };
   let res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean);
   if (!res.length && profErr) { prof = await brProfile(true); res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean); }  // profil expiré sur le serveur : on le renvoie une fois
   res.sort((a, b) => a.pen - b.pen);
+  const keep = res.filter(c => c.ov <= .03); if (keep.length) res = keep;  // plus de 3 % en double : rejetée (sauf s'il ne reste rien)
   // on recale la distance des meilleures
   const top = res.slice(0, nRefit).filter(c => Math.abs(c.km - o.km) / o.km > .06).map(c => ({ sh: c.sh, rt: c.rt, dir: c.dir, unit: c.unit, ord: c.ord, rk: c.rk * clamp(o.km / c.km, .6, 1.6) }));
-  return res.concat((await pool(top, route)).filter(Boolean)).sort((a, b) => a.pen - b.pen);
+  const all = res.concat((await pool(top, route)).filter(Boolean)), ok2 = all.filter(c => c.ov <= .03);
+  return (ok2.length ? ok2 : all).sort((a, b) => a.pen - b.pen);
 }
 function addPicks(R, res, k) {  // boucles vraiment différentes de celles déjà gardées (routes en grande partie communes = écartée)
   const keys = new Set(R.list.map(specKey)); let n = 0;
@@ -943,7 +1013,7 @@ async function moreLoops() {
 }
 
 // --- Persistance (localStorage uniquement : la liste contient le point de départ)
-const KEEP = ["id", "n", "sh", "rt", "dir", "rk", "unit", "ord", "km", "bad", "main", "dirt", "pts", "rev"];
+const KEEP = ["id", "n", "sh", "rt", "dir", "rk", "unit", "ord", "km", "bad", "main", "dirt", "pts", "rev", "wps", "cut"];
 function saveRes() {
   const R = GEN.res; if (!R) return;
   const pack = th => ({ v: 1, key: R.key, wx: R.wx, wxDate: R.wxDate, wd0: R.wd0, calm0: R.calm0, tried: R.tried, seq: R.seq,
@@ -1054,7 +1124,8 @@ function renderGen() {
       ${miniProf(c)}
       <div class="gwind">${R.calm ? "Vent faible : peu d'effet" : `Retour vent dans le dos : <b>${fmt(c.dosRet * 100)} %</b>`}</div>
       <p class="gwhy">${esc(c.why)}</p>
-      ${c.ov > .08 || c.main > .03 ? `<small class="gwarn">${c.ov > .08 ? `${fmt(c.ov * 100)} % en aller-retour` : ""}${c.ov > .08 && c.main > .03 ? " · " : ""}${c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""}</small>` : ""}
+      ${(w => w.length ? `<small class="gwarn">${w.join(" · ")}</small>` : "")([c.ov >= .01 ? `${fmt(c.ov * 100)} % en double` : "", c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""].filter(Boolean))}
+      ${c.cut ? `<small class="gnote2">Aller-retour de ${fmt(c.cut)} m retiré du tracé</small>` : ""}
       ${on ? (chosen === c.id ? `<button class="btn2" disabled>Analyse affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
@@ -1125,7 +1196,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Recup?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Recup?.curTab() === "sortie") open(); });
 })();

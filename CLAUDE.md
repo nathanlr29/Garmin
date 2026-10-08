@@ -45,6 +45,14 @@ Langue de l'interface et des échanges : **français**.
 - **BRouter (serveur public)** : `brRouteQ` = 2 requêtes au plus en parallèle, 600 ms minimum entre deux départs, cache en mémoire par points de passage. Changer de boucle, inverser le sens ou recharger la page ne rappelle **jamais** BRouter.
 - Interface : carte Leaflet (`#gMap`, conservée entre les rendus) avec toutes les boucles (sélectionnée orange épaisse + chevrons de sens, autres grises cliquables), départ et flèche de vent ; fiches (km, D+, temps, mini-profil, % du retour vent dans le dos, phrase « pourquoi ») en grille, en carrousel `scroll-snap` sous 620 px.
 - « Choisir cette boucle » → `setRoute` (analyse complète) ; le bandeau « Autres boucles (N) » (`altBar`) reste au-dessus de l'analyse pour changer de boucle en un clic. Route générée : `sortieRoute.gid` = id de la proposition.
+- **Allers-retours (éperons)** : `dblScan` rééchantillonne le tracé tous les 10 m. Un point est « en double » s'il passe à moins de 25 m d'un point parcouru au moins 100 m plus tôt. C'est un éperon si le cap est opposé (±30°) sur plus de 150 m (`spurs`). Une paire est tolérée si son premier passage est dans les 2 premiers km et le second dans les 2 derniers (même route que l'aller près du départ).
+  - Correction (`routeFix`), boucle par boucle :
+    - a) le point de passage le plus proche du bout de l'éperon est déplacé sur l'entrée de l'éperon (un vrai carrefour), puis la boucle est recalculée (1 requête) ;
+    - b) pour un losange, ce point de passage est supprimé (1 requête) ;
+    - c) sinon l'éperon est coupé en local (`cutSpurs`), la distance et le D+ sont recalculés et la fiche affiche « Aller-retour de x m retiré ».
+  - Les points de passage corrigés sont gardés (`wps`, `cut` dans `soGenRes`).
+  - Score : `dblShare × 400`. Une boucle à plus de 3 % en double est rejetée, sauf s'il ne reste qu'elle.
+  - Test : `node tests/eperons.mjs` (le dossier `tests/` n'est pas déployé).
 - « Inverser le sens » : points inversés en local + score de vent recalculé (note : attention aux sens uniques, pas de recalcul d'itinéraire).
 - Invalidation : distance, relief ou point de départ changés → propositions effacées ; date, heure ou vitesse changées → tracés gardés, vent et scores recalculés (`syncRes`, 1 appel météo si la date change).
 - Clés localStorage : `soGenRes` (réglages de calcul, point de départ, météo au départ, propositions avec leurs points, combinaisons essayées), `soGenSel` (sélection), plus `soGenKm`, `soGenRel`, `soStart`, `soBrf`, `sortieRoute`, `sortieSet`. `soGenRes` contient le point de départ : **localStorage uniquement**, jamais dans le dépôt ni dans une URL.

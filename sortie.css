@@ -102,6 +102,7 @@
 #sortie .gwind b{color:var(--ink)}
 #sortie .gwhy{margin:0;color:var(--ink);line-height:1.4}
 #sortie .gwarn{color:#c77700}
+#sortie .gnote2{display:block;color:var(--muted);font-size:12px}
 #sortie .gcard .btn2{margin-top:auto;min-height:44px}
 @media (max-width:620px){
   #sortie .gres{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;padding-bottom:6px;overscroll-behavior-x:contain;scrollbar-width:thin}
