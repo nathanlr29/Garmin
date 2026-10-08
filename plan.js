@@ -57,11 +57,14 @@ function profile() {
   const ftpSrc = own ? "saisie" : det && det.ftp > (p.ftp || 0) ? `détectée : ${det.l} à ${det.w} W le ${dShort(det.a.dt)}` : p.ftp ? `Garmin${p.ftpDate ? " · " + dShort(new Date(p.ftpDate)) : ""}` : est ? "estimée sur tes séances" : "par défaut";
   return { ...p, ftp, ftpSrc, est, det, auto };
 }
-// FTP détectée : meilleures puissances Garmin des 60 derniers jours (20 min × 95 %, 1 h, 5 min × 78 %)
+// FTP détectée : meilleures puissances Garmin des 60 derniers jours (20 min × 95 %, 1 h, 5 min × 78 %, test rampe : 1 min × 75 %)
+const isRamp = a => /ramp/i.test(a.n || "") && /test/i.test(a.n || "");
 function detectFtp() {
   const cut = addDays(new Date(), -60); let best = null;
   rides().filter(a => a.dt >= cut && a.pc).forEach(a => {
-    [["1200", .95, "20 min"], ["3600", 1, "1 h"], ["300", .78, "5 min"]].forEach(([d, f, l]) => { const w = a.pc[d]; if (w && (!best || w * f > best.ftp)) best = { ftp: Math.round(w * f), w, l, a }; });
+    const R = [["1200", .95, "20 min"], ["3600", 1, "1 h"], ["300", .78, "5 min"]];
+    if (isRamp(a)) R.push(["60", RAMP_F, "test rampe (meilleure minute)"]);
+    R.forEach(([d, f, l]) => { const w = a.pc[d]; if (w && (!best || w * f > best.ftp)) best = { ftp: Math.round(w * f), w, l, a }; });
   });
   return best;
 }
@@ -232,6 +235,7 @@ function genWeek(mon, c, ctx, fixed) {
   slots.forEach(s => { if (!s.fixed) items[s.day].bike = { dur: s.dur, place: s.place, t: null }; });
   const rest = pool.slice(); fixedKeys.forEach(f => { const k = rest.indexOf(f.t); if (k >= 0) rest.splice(k, 1); });
   best.ko.keys.filter(s => !s.fixed).sort((a, b) => a.day - b.day).forEach((s, i) => items[s.day].bike.t = (rest.length ? rest : pool)[i % (rest.length || pool.length)]);
+  items.forEach(it => { if (!isFixed(it.day) && it.bike && it.bike.t === "test") it.bike.place = "mw"; });  // le test rampe se fait sur MyWhoosh
   if (longS && !longS.fixed) { const L = items[longS.day].bike; L.t = best.ko.boost ? "longplus" : "long";
     if (ph.deload) L.dur = DURS.reduce((a, x) => Math.abs(x - L.dur * .7) < Math.abs(a - L.dur * .7) ? x : a, 150); }  // semaine allégée : sortie longue raccourcie
   best.mo.forEach(x => { if (!isFixed(x.day)) items[x.day].muscu = x.s; });
@@ -382,6 +386,7 @@ function effective(mon, c, ctx) {
   return out;
 }
 // ------------------------------------------------------------------ Contenu des séances vélo
+const RAMP_0 = .55, RAMP_STEP = .06, RAMP_N = 18, RAMP_F = .75;  // test rampe : de 55 % à 157 % de FTP, FTP = 75 % de la meilleure minute
 // pas : { d: secondes, lo, hi (fraction de FTP), free?, label }
 function build(type, durMin, ph) {
   const T = durMin * 60, S = [], p = clamp(ph.wk, 1, 3) - 1, light = ph.deload ? .8 : 1;
@@ -439,10 +444,10 @@ function build(type, durMin, ph) {
     const mid = Math.round((T - 900 - 600 - 3 * L - 2 * 360) / 2); st(Math.max(600, mid), .68, "Endurance");
     for (let i = 0; i < 3; i++) { st(L, .95, `Bloc seuil ${i + 1}/3`); if (i < 2) st(360, .62, "Souple"); }
     fill(600, .68); cool(600); title = `Sortie longue ${fmtMin(durMin)} + 3 × ${L / 60}' seuil`; goal = `Ta deuxième séance clé de la semaine, intégrée à la sortie longue : 3 blocs de ${L / 60} min au seuil (zone 4 au cardio) au milieu de la sortie, sur une portion roulante.`;
-  } else if (type === "test") {
-    ramp(600, .5, .75, "Échauffement"); st(180, 1.05, "Ouverture"); st(300, .55, "Récup"); st(300, 1.1, "Effort de 5 min pour vider l'anaérobie"); st(600, .55, "Récup");
-    free(1200, "TEST : 20 min le plus fort possible, régulier");
-    fill(600, .55, "Souple"); cool(600); title = "Test FTP 20 min"; goal = "On mesure : ta nouvelle FTP = 95 % de ta puissance moyenne sur les 20 min. Pars prudemment les 5 premières minutes.";
+  } else if (type === "test") {  // test rampe (celui de MyWhoosh) : paliers d'1 min de +6 % de FTP jusqu'à ne plus tenir
+    ramp(300, .45, .55, "Échauffement");
+    for (let k = 0; k < RAMP_N; k++) st(60, Math.round((RAMP_0 + k * RAMP_STEP) * 100) / 100, k ? `Rampe · palier ${k + 1}` : "RAMPE : tiens chaque palier le plus longtemps possible");
+    cool(600); title = "Test FTP rampe"; goal = "Le plus simple : lance le test « FTP Ramp Test » intégré à MyWhoosh, qui calcule ta FTP à la fin. Sinon, ce fichier reproduit la rampe : paliers d'1 min qui montent de 6 % de FTP, jusqu'à ne plus pouvoir tenir la puissance. Ta FTP = 75 % de ta meilleure minute. Pas de départ trop prudent ni d'échauffement long : l'effort dure 15 à 20 min.";
   } else if (type === "testc") {
     ramp(900, .5, .75, "Échauffement progressif"); st(60, 1.05, "Ouverture"); st(240, .55, "Récup");
     free(10, "SPRINT : 6 à 8 s à fond"); st(230, .5, "Récup"); free(10, "SPRINT : 6 à 8 s à fond"); st(300, .5, "Récup");
@@ -595,6 +600,10 @@ function detailHtml(W, it, prof) {
   if (b.st !== "done") h += b.place === "mw" ? `<button class="btn2 dl" data-dl="${it.day}">Télécharger pour MyWhoosh (.zwo)</button>`
     : `<div class="outnote">${/^vo2/.test(b.t) ? "Sans capteur de puissance, pilote les intervalles courts à la sensation : le cœur met 1 à 2 min à monter." : "Garde un œil sur le cardio : il dérive un peu à la chaleur et en fin de sortie."}</div>`;
   if (b.st === "done" && b.acts) h += `<div class="ddone">${b.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
+  if (b.st === "done" && b.acts && b.t === "test") {  // les séances MyWhoosh arrivent sur Garmin sans le nom du test : on lit la meilleure minute
+    const w = Math.max(0, ...b.acts.map(a => (a.pc && a.pc["60"]) || 0)), f = Math.round(w * RAMP_F);
+    if (w) h += `<p class="sg">Test rampe : meilleure minute ${w} W → <b>FTP ≈ ${f} W</b> (75 %).${f !== prof.ftp ? ` <button class="btn2" data-setftp="${f}">Utiliser ${f} W comme FTP</button>` : " C'est ta FTP actuelle."}</p>`;
+  }
   if (b.st === "plan" && (W.td < 0 || it.day >= W.td)) {
     const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
     h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
@@ -725,6 +734,7 @@ function bind(c, prof) {
   if ($("pRedo")) $("pRedo").onclick = () => { store2.del("planUndo:" + ymd(PS.Wc.mon)); render(); };
   box.querySelectorAll("[data-bilan]").forEach(b => b.onclick = () => window.Bilan ? Bilan.open(+b.dataset.bilan) : window.open(`https://connect.garmin.com/modern/activity/${b.dataset.bilan}`, "_blank", "noopener"));
   box.querySelectorAll("[data-mlbl]").forEach(s => s.onchange = () => { const m = store2.get("muscuLbl") || {}; m[s.dataset.mlbl] = s.value; store2.set("muscuLbl", m); render(); });
+  box.querySelectorAll("[data-setftp]").forEach(b => b.onclick = () => { store2.set("planFtp", +b.dataset.setftp); render(); });
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const it = PS.W.items[+b.dataset.dl]; download(fileName(it.bike, it.date), zwo(it.bike, it.date, prof)); });
   if ($("pZip")) $("pZip").onclick = () => { const L = PS.W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (PS.W.td < 0 || it.day >= PS.W.td)); downloadAll(L, prof).catch(() => toast("Téléchargement groupé impossible : télécharge les séances une par une.")); };
   box.querySelectorAll("[data-ov]").forEach(s => s.onchange = () => { const d = +s.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};

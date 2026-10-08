@@ -114,6 +114,11 @@ Langue de l'interface et des échanges : **français**.
 - Muscu le **matin**, vélo le **soir**. Jambes jamais le matin d'une séance clé, ni la veille d'une clé ou de la sortie longue.
 - 2 séances clés par semaine (3 seulement si ≥6 jours vélo, pas de sortie longue et ≤2 matins muscu).
 - Blocs de 4 semaines, avec test en semaine de décharge (testc en bloc VO2, sinon test FTP).
+- Test FTP = **test rampe** (Nathan préfère celui de MyWhoosh) :
+  - paliers d'1 min de +6 % de FTP, de 55 à 157 %, jusqu'à ne plus tenir ; FTP = 75 % de la meilleure minute (`RAMP_*`) ;
+  - toujours placé sur MyWhoosh ;
+  - séance faite : la carte affiche la FTP mesurée et un bouton « Utiliser » (les séances MyWhoosh arrivent sur Garmin sans le nom du test) ;
+  - `detectFtp` compte aussi les activités nommées « … Ramp Test ».
 - Pools par bloc : [vo2,thr,vo2r] [vo2r,ss,vo2] [thr,vo2r,ss] [ss,thr,tempo].
 - Règles quotidiennes :
   - R1 : clé manquée → déplacée ;
