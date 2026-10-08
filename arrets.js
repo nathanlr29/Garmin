@@ -75,7 +75,7 @@ function nameOf(t, k) {
 }
 
 // ------------------------------------------------------------------ Couloir et requête Overpass
-const CUT = 400, NEAR = 150;
+const CUT = 400, NEAR = 150, VOIR = 300;  // « À voir » : à moins de 300 m du tracé, avec une fiche Wikipédia
 function simplify(xy, tol) {  // Douglas-Peucker itératif
   const keep = new Uint8Array(xy.length); keep[0] = keep[xy.length - 1] = 1;
   const st = [[0, xy.length - 1]];
@@ -92,15 +92,25 @@ function corridor(P) {  // tracé simplifié, sans les abords du départ et de l
   if (Q.length < 2) return null;
   const c = Math.cos(rad(Q[0].lat)), xy = Q.map(p => [p.lon * c * 111320, p.lat * 110540]);
   let tol = 40, idx = simplify(xy, tol);
-  while (idx.length > 350) { tol *= 1.5; idx = simplify(xy, tol); }
+  while (idx.length > 250) { tol *= 1.5; idx = simplify(xy, tol); }
   return idx.map(i => `${Q[i].lat.toFixed(5)},${Q[i].lon.toFixed(5)}`).join(",");
 }
-const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
-const VOIR = 300;  // « À voir » : à moins de 300 m du tracé, avec un tag wikipedia ou wikidata
-const query = L => `[out:json][timeout:40];(nwr(around:${NEAR},${L})[~"^(amenity|shop|landuse)$"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle|cemetery|grave_yard)$"];`
-  + `nwr(around:${VOIR},${L})[~"^(historic|tourism|natural|man_made|amenity|leisure|building)$"~"^(castle|manor|chateau|church|chapel|cathedral|place_of_worship|archaeological_site|megalith|menhir|dolmen|tumulus|windmill|watermill|mill|wayside_cross|wayside_shrine|calvary|monument|ruins|viewpoint|peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge|nature_reserve)$"][~"^wiki(pedia|data)$"~"."];);out center tags;`;
+const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+// filtres sur des clés fixes (index Overpass) : bien plus rapides que les expressions sur les clés
+const query = L => {
+  const A = (r, f) => `nwr${f}(around:${r},${L});`;
+  return `[out:json][timeout:60];(`
+    + A(NEAR, '["amenity"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station)$"]')
+    + A(NEAR, '["shop"~"^(bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle)$"]')
+    + A(NEAR, '["landuse"="cemetery"]') + A(NEAR, '["amenity"="grave_yard"]')
+    // « À voir » : le tag wikipedia ou wikidata est vérifié ensuite (voirKind)
+    + A(VOIR, '["historic"~"^(castle|manor|chateau|church|chapel|archaeological_site|megalith|menhir|dolmen|tumulus|mill|windmill|watermill|wayside_cross|wayside_shrine|calvary|monument|ruins)$"]["wikidata"]')
+    + A(VOIR, '["amenity"="place_of_worship"]["wikidata"]') + A(VOIR, '["tourism"="viewpoint"]') + A(VOIR, '["man_made"~"^(windmill|watermill)$"]["wikidata"]')
+    + A(VOIR, '["natural"~"^(peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge)$"]["wikidata"]') + A(VOIR, '["leisure"="nature_reserve"]["wikidata"]')
+    + `);out center tags;`;
+};
 const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type"];
-const K_POI = "soPoi", POI_V = 2, POI_TTL = 7 * 864e5;
+const K_POI = "soPoi", POI_V = 3, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
 async function fetchPois(L) {
@@ -114,7 +124,10 @@ async function fetchPois(L) {
       try {
         const r = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query(L)), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: ac.signal });
         if (!r.ok) throw new Error("Overpass " + r.status);
-        const j = await r.json(), els = (j.elements || []).map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
+        const j = await r.json();
+        // délai dépassé ou mémoire pleine : Overpass répond 200 avec une « remark » et une liste vide ou incomplète
+        if (j.remark && /runtime error|timed out|out of memory/i.test(j.remark)) throw new Error(j.remark);
+        const els = (j.elements || []).map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
           return { id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }; }).filter(e => e.lat != null);
         const c = LS.get(K_POI, {}); c[key] = { at: Date.now(), els };
         Object.keys(c).sort((a, b) => c[b].at - c[a].at).slice(4).forEach(k => delete c[k]);  // 4 traces gardées au plus
@@ -321,7 +334,8 @@ async function wdTitles(ids) {  // wikidata → titre de la fiche française (un
   LS.set(K_WD, c); return c;
 }
 function anecdote(x) {  // 1 à 2 phrases, sans rien ajouter
-  const S_ = String(x || "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Ý«])/);
+  // pas de « lookbehind » dans les expressions régulières : Safari ne le lit qu'à partir d'iOS 16.4
+  const S_ = String(x || "").replace(/\s+/g, " ").trim().replace(/([.!?])\s+(?=[A-ZÀ-ÖØ-Ý«])/g, "$1\u0001").split("\u0001");
   let out = S_[0] || ""; if (S_[1] && (out + " " + S_[1]).length <= 260) out += " " + S_[1];
   return out.length > 300 ? out.slice(0, 297).replace(/\s+\S*$/, "") + "…" : out;
 }

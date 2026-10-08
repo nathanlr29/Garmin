@@ -214,7 +214,7 @@ function shell() {
         <section class="card span8"><h2>Vent sur le parcours <span class="legend"><span><i style="background:${COL.face}"></i>face</span><span><i style="background:${COL.travers}"></i>côté</span><span><i style="background:${COL.dos}"></i>dos</span><span><i style="background:${COL.calme}"></i>faible</span></span></h2><div id="soMap"></div><p class="note">Flèches : sens du vent prévu (à 10 m du sol, au guidon c'est souvent un peu moins, surtout entre les talus).</p></section>
         <section class="card span4"><h2>Meilleur créneau <small id="soBestInfo"></small></h2><div id="soBest"></div></section>
         <section class="card span12"><h2>Profil <small id="soProfInfo"></small></h2><div id="soProf"></div></section>
-        <section class="card span12"><h2>Arrêts sur le parcours <small id="soStopInfo"></small></h2><div id="soStops"></div></section>
+        <section class="card span12"><h2>Arrêts sur le parcours <small id="soStopInfo"></small></h2><div id="soStops"><p class="note">${window.Arrets ? "Recherche des points d'arrêt…" : "Points d'arrêt indisponibles : recharge la page, ou mets à jour ton navigateur."}</p></div></section>
         <section class="card span7"><h2>Montées <small id="soClimbInfo"></small></h2><div id="soClimbs"></div></section>
         <section class="card span5"><h2>Pratique</h2><div id="soTips"></div></section>
         <section class="card span12"><h2>Nutrition <small id="soNutInfo"></small></h2><div id="soNut"></div></section>
