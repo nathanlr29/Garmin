@@ -102,6 +102,7 @@
 #sortie .gwind b{color:var(--ink)}
 #sortie .gwhy{margin:0;color:var(--ink);line-height:1.4}
 #sortie .gwarn{color:#c77700}
+#sortie .gnote2{display:block;color:var(--muted);font-size:12px}
 #sortie .gcard .btn2{margin-top:auto;min-height:44px}
 @media (max-width:620px){
   #sortie .gres{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:10px;padding-bottom:6px;overscroll-behavior-x:contain;scrollbar-width:thin}
@@ -140,3 +141,47 @@
 #sortie .pst{text-align:right}#sortie .pst b{font-size:13.5px;white-space:nowrap}#sortie .pst small{white-space:nowrap}
 #sortie .sorecent .btn2{min-height:44px}
 @media (max-width:620px){#sortie .sohead .btn{min-height:40px;padding:8px 12px}}
+/* Arrêts sur le parcours (arrets.js) */
+#sortie .stmk{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid var(--c);font-size:13px;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.3);flex:0 0 auto}
+#sortie .stmk.big{width:30px;height:30px;font-size:16px;border-width:3px}
+#sortie .stdiv{background:none;border:0}
+#sortie .stadv{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px}
+#sortie .stac{border:2px solid var(--accent);border-radius:14px;padding:10px 12px;background:var(--bg);min-width:0}
+#sortie .stac p{margin:6px 0 0;font-size:13px;line-height:1.45}
+#sortie .stbadge{display:inline-block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:var(--accent)}
+#sortie .stac .strow{border:0;padding:4px 0 0}
+#sortie .stnut{margin:0 0 10px}
+#sortie .stchips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
+#sortie .stchip{font:inherit;font-size:13.5px;font-weight:600;min-height:40px;padding:6px 12px;border-radius:999px;border:1.5px solid var(--line);background:var(--bg);color:var(--muted);cursor:pointer}
+#sortie .stchip[aria-pressed=true]{border-color:var(--c);color:var(--ink);background:var(--card)}
+#sortie .stchip small{color:var(--muted);font-weight:500;margin-left:2px}
+#sortie .stlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:0 22px}
+@media (max-width:620px){#sortie .stlist{grid-template-columns:1fr}}
+#sortie .strow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);min-width:0}
+#sortie .stname{flex:1;min-width:0;text-align:left;font:inherit;color:var(--ink);background:none;border:0;padding:2px 0;cursor:pointer}
+#sortie .stname b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sortie .stname small{display:block;font-size:12px;color:var(--muted);line-height:1.35}
+#sortie .st.ok{color:#2f9e44;font-weight:700}
+#sortie .st.ko{color:#e03131;font-weight:700}
+#sortie .st.warn{color:#c77700}
+#sortie .stgps{display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:var(--muted);padding:8px 2px 8px 6px;cursor:pointer;flex:0 0 auto}
+#sortie .stgps input{width:20px;height:20px;accent-color:var(--accent);margin:0}
+#sortie .stmore{margin-top:10px;width:100%}
+#sortie .soprof .soic text{font-size:12px}
+#sortie .soprof .soic.adv text{font-size:16px}
+#sortie .soprof .soic line{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3;opacity:.7}
+#sortie .soprof .soic.adv line{stroke:var(--accent);opacity:1}
+#sortie .sthelp{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg)}
+#sortie .sthelp summary{cursor:pointer;font-weight:700;font-size:14px;min-height:28px;display:flex;align-items:center}
+#sortie .sthelp ol{margin:8px 0 0;padding-left:20px;font-size:13.5px;line-height:1.5;display:grid;gap:6px}
+#sortie .stdec{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;margin:4px 0 10px;border:1px solid var(--line);border-radius:12px;background:var(--bg);cursor:pointer}
+#sortie .stdec input{width:22px;height:22px;margin:1px 0 0;accent-color:#2b8a3e;flex:0 0 auto}
+#sortie .stdec b{display:block;font-size:14px}
+#sortie .stdec small{display:block;font-size:12px;color:var(--muted);line-height:1.35}
+#sortie .stvoir{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:12px}
+#sortie .stvoir .stbadge{grid-column:1/-1;color:#2b8a3e}
+#sortie .stvc{border:2px solid #2b8a3e;border-radius:14px;padding:6px 12px 10px;background:var(--bg);min-width:0}
+#sortie .stvc .strow{border:0}
+#sortie .stvc p{margin:2px 0 6px;font-size:13px;line-height:1.45}
+#sortie .stvc a{font-size:13px;font-weight:700;color:#2b8a3e;display:inline-block;padding:4px 0}
+html.night #sortie .stvc a,html.night #sortie .stvoir .stbadge{color:#69db7c}

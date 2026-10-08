@@ -214,6 +214,7 @@ function shell() {
         <section class="card span8"><h2>Vent sur le parcours <span class="legend"><span><i style="background:${COL.face}"></i>face</span><span><i style="background:${COL.travers}"></i>côté</span><span><i style="background:${COL.dos}"></i>dos</span><span><i style="background:${COL.calme}"></i>faible</span></span></h2><div id="soMap"></div><p class="note">Flèches : sens du vent prévu (à 10 m du sol, au guidon c'est souvent un peu moins, surtout entre les talus).</p></section>
         <section class="card span4"><h2>Meilleur créneau <small id="soBestInfo"></small></h2><div id="soBest"></div></section>
         <section class="card span12"><h2>Profil <small id="soProfInfo"></small></h2><div id="soProf"></div></section>
+        <section class="card span12"><h2>Arrêts sur le parcours <small id="soStopInfo"></small></h2><div id="soStops"></div></section>
         <section class="card span7"><h2>Montées <small id="soClimbInfo"></small></h2><div id="soClimbs"></div></section>
         <section class="card span5"><h2>Pratique</h2><div id="soTips"></div></section>
         <section class="card span12"><h2>Nutrition <small id="soNutInfo"></small></h2><div id="soNut"></div></section>
@@ -232,7 +233,7 @@ function renderLoad() {
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
-        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button>${r.gen ? `<button class="btn" id="soGpx">Exporter en GPX</button>` : ""}
+        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button><button class="btn" id="soGpx">Exporter en GPX</button><button class="btn" id="soFit" title="Parcours FIT avec les points d'arrêt : alertes « À venir » sur le GPS Garmin">Exporter pour Garmin (.fit)</button>
       </div></div>
     ${altBar(r)}
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
@@ -251,6 +252,7 @@ function renderLoad() {
   $("soPickBtn").onclick = () => { SO.pickOpen = !SO.pickOpen; if (SO.pickOpen && SO.route) SO.genOpen = false; renderLoad(); if (SO.pickOpen) $("soPick").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
   if (SO.pickOpen) renderPick();
   if ($("soGpx")) $("soGpx").onclick = exportGPX;
+  if ($("soFit")) $("soFit").onclick = exportFIT;
   bindAlt();
   if ($("soGen") && !$("soGen").hidden) renderGen();
   const drop = $("soDrop");
@@ -332,6 +334,9 @@ async function compute() {
   if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(SO.P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
   renderTiles(res, err); renderVerdict(res, rev, best, err, s); renderBest(best, s);
   await renderMap(res, wx); renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
+  // points d'arrêt (OpenStreetMap) : en dernier, la sortie s'affiche même si le service ne répond pas
+  if (window.Arrets && SO.res === res) Arrets.update({ P: SO.P, r: res, map: SO.map, nut: SO.nut, route: SO.route,
+    onDone: () => { if (SO.res === res) { renderProfile(res); renderNutrition(res); } }, onIcons: () => { if (SO.res === res) renderProfile(res); } });
 }
 
 function renderTiles(r, err) {
@@ -408,7 +413,8 @@ async function renderMap(r, wx) {
 }
 
 function renderProfile(r) {
-  const P = SO.P, box = $("soProf"), Wd = Math.max(320, box.clientWidth || 800), H = 190, pl = 34, pr = 8, pt = 10, pb = 34;
+  const IC = window.Arrets ? Arrets.icons() : [];
+  const P = SO.P, box = $("soProf"), Wd = Math.max(320, box.clientWidth || 800), H = IC.length ? 210 : 190, pl = 34, pr = 8, pt = IC.length ? 30 : 10, pb = 34;
   const total = P[P.length - 1].d, emin = Math.min(...P.map(p => p.e)), emax = Math.max(...P.map(p => p.e));
   const lo = Math.floor((emin - 5) / 10) * 10, hi = Math.max(lo + 40, Math.ceil((emax + 5) / 10) * 10);
   const X = d => pl + d / total * (Wd - pl - pr), Y = e => pt + (1 - (e - lo) / (hi - lo)) * (H - pt - pb);
@@ -419,7 +425,13 @@ function renderProfile(r) {
   const kmT = ticks(0, total / 1000, Wd < 500 ? 4 : 8).map(v => `<text x="${X(v * 1000)}" y="${H - pb + 13}" text-anchor="middle" class="ax">${v}</text>`).join("");
   let strip = "";
   if (r.ok) { const sg = 20; for (let i = 0; i < P.length - 1; i += sg) { const j = Math.min(P.length - 1, i + sg), m = Math.floor((i + j) / 2), w = r.W[m]; if (!w) continue; const c = w.ws < 8 ? COL.calme : r.Hd[m] > w.ws * .5 ? COL.face : r.Hd[m] < -w.ws * .5 ? COL.dos : COL.travers; strip += `<rect x="${X(P[i].d)}" y="${H - 14}" width="${Math.max(.5, X(P[j].d) - X(P[i].d) + .3)}" height="8" fill="${c}"/>`; } }
-  box.innerHTML = `<svg viewBox="0 0 ${Wd} ${H}" width="100%" height="${H}" class="soprof">${yt}<path d="${area}" fill="var(--accent-soft)" stroke="none"/>${cl}<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>${kmT}${strip}<line id="soCur" y1="${pt}" y2="${H - pb}" stroke="var(--ink)" stroke-width="1" opacity="0"/><rect x="${pl}" y="0" width="${Wd - pl - pr}" height="${H}" fill="transparent" id="soHit"/></svg>`;
+  // arrêts : petites icônes à leur distance (les arrêts conseillés passent devant)
+  let ics = "", lastX = -99;
+  IC.filter(i => !i.adv).sort((a, b) => a.d - b.d).concat(IC.filter(i => i.adv)).forEach(i => { const x = X(i.d);
+    if (!i.adv && x - lastX < 12) return; if (!i.adv) lastX = x;
+    const e = P[Math.min(P.length - 1, Math.round(i.d / STEP))].e;
+    ics += `<g class="soic${i.adv ? " adv" : ""}"><title>${esc(i.name)}</title><line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${i.adv ? 23 : 21}" y2="${Y(e).toFixed(1)}"/><text x="${x.toFixed(1)}" y="${i.adv ? 19 : 17}" text-anchor="middle">${i.ic}</text></g>`; });
+  box.innerHTML = `<svg viewBox="0 0 ${Wd} ${H}" width="100%" height="${H}" class="soprof">${yt}${ics}<path d="${area}" fill="var(--accent-soft)" stroke="none"/>${cl}<path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join("")}" fill="none" stroke="var(--accent)" stroke-width="2"/>${kmT}${strip}<line id="soCur" y1="${pt}" y2="${H - pb}" stroke="var(--ink)" stroke-width="1" opacity="0"/><rect x="${pl}" y="0" width="${Wd - pl - pr}" height="${H}" fill="transparent" id="soHit"/></svg>`;
   $("soProfInfo").textContent = `${fmt(emin)}–${fmt(emax)} m · bande du bas : vent`;
   const hit = $("soHit"), cur = $("soCur");
   const move = ev => {
@@ -478,6 +490,11 @@ function renderNutrition(r) {
   }
   const cap = 1.2;  // 2 bidons de 600 ml
   for (let k = 1; k * cap < water; k++) { const tt = t0 + k * cap / drink * 3600e3; rows.push({ t: new Date(tt), km: kmAt(tt), what: `<b>Remplir les bidons</b> <small>(${fmt(k * cap, 1)} L bus)</small>`, water: 1 }); }
+  // arrêts conseillés (carte Arrêts) : où remplir les bidons
+  const adv = window.Arrets ? Arrets.advice().filter(a => /eau/.test(a.role)) : [];
+  rows.forEach(rw => { if (!rw.water) return; const a = adv.find(a => Math.abs(a.p.t0 - rw.t) < 50 * 6e4); if (a) rw.what += `<small>→ ${esc(a.p.name)}, km ${fmt(a.p.km)} (${hm(a.p.t0)})</small>`; });
+  if (!rows.some(rw => rw.water)) adv.forEach(a => rows.push({ t: a.p.t0, km: a.p.km, what: `<b>Arrêt eau conseillé</b><small>${esc(a.p.name)}</small>`, water: 1 }));
+  SO.nut = { drink, rate, water, cap, h };
   rows.sort((a, b) => a.t - b.t);
   $("soNutInfo").textContent = `${fmt(kcal)} kcal${ftp ? ` · intensité ${Math.round(x * 100)} % FTP` : ""}`;
   const tile = (l, v, s_) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s_}</div></div>`;
@@ -803,12 +820,80 @@ async function windHere(st, day) {  // prévisions à un seul point (départ) po
   const j = await r.json();
   return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: parseLocal(j.hourly.time[0]).getTime(), nH: j.hourly.time.length, step: 1e12 };
 }
-function overlap(pts) {  // part du parcours qui repasse sur ses pas (aller-retour), hors abords du départ
-  const cell = p => `${Math.round(p[0] * 600)}:${Math.round(p[1] * 400)}`, seen = new Map(); let cum = 0, rep = 0, tot = 0;
-  for (let i = 1; i < pts.length; i++) { const d = dist(pts[i - 1], pts[i]); cum += d; const k = cell(pts[i]);
-    if (dist(pts[i], pts[0]) > 2000) { tot += d; const f = seen.get(k); if (f != null && cum - f > 1500) rep += d; }
-    if (!seen.has(k)) seen.set(k, cum); }
-  return tot ? rep / tot : 0;
+// --- Allers-retours (éperons) : un point de passage tombé dans une impasse fait faire à BRouter un aller-retour sur la même route.
+const SP = { step: 10, near: 25, gap: 100, ang: 30, min: 150, home: 2000 };
+function resample(pts, step) {  // un point tous les `step` m, avec l'indice du segment d'origine
+  const R = []; let cum = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], L = dist(a, b), n = Math.max(1, Math.ceil(L / step));
+    for (let k = 0; k < n; k++) { const f = k / n, e = a[2] != null && b[2] != null ? a[2] + (b[2] - a[2]) * f : a[2];
+      R.push({ lat: a[0] + (b[0] - a[0]) * f, lon: a[1] + (b[1] - a[1]) * f, e, c: cum + L * f, i }); }
+    cum += L;
+  }
+  const z = pts[pts.length - 1]; R.push({ lat: z[0], lon: z[1], e: z[2], c: cum, i: pts.length - 1 });
+  R.forEach((p, k) => { const a = R[Math.max(0, k - 1)], b = R[Math.min(R.length - 1, k + 1)]; p.b = brg([a.lat, a.lon], [b.lat, b.lon]); });
+  return R;
+}
+function dblScan(pts) {  // points déjà parcourus (à moins de 25 m, plus de 100 m plus tôt), et ceux parcourus en sens inverse
+  if (!pts || pts.length < 3) return { R: [], tot: 0, dbl: 0, opp: [] };
+  const R = resample(pts, SP.step), tot = R[R.length - 1].c, ky = 1 / (SP.near / 111320), kx = ky * Math.cos(rad(R[0].lat)), G = new Map();
+  const key = (y, x) => y * 1e6 + x;
+  R.forEach((p, k) => { p.y = Math.floor(p.lat * ky); p.x = Math.floor(p.lon * kx); const q = key(p.y, p.x); (G.get(q) || G.set(q, []).get(q)).push(k); });
+  let dbl = 0; const opp = new Array(R.length).fill(-1);
+  for (let k = 1; k < R.length; k++) {
+    const p = R[k]; let any = false, bj = -1, bd = 1e9;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const j of G.get(key(p.y + dy, p.x + dx)) || []) {
+      if (j >= k) break;
+      const q = R[j]; if (p.c - q.c < SP.gap) continue;
+      if (q.c < SP.home && tot - p.c < SP.home) continue;  // même route à l'aller et au retour près du départ : toléré
+      const d = dist([p.lat, p.lon], [q.lat, q.lon]); if (d > SP.near) continue;
+      any = true; const da = Math.abs(((p.b - q.b + 540) % 360) - 180);  // écart de cap : 180° = sens inverse
+      if (da > 180 - SP.ang && d < bd) { bd = d; bj = j; }
+    }
+    if (any) dbl += p.c - R[k - 1].c;
+    opp[k] = bj;
+  }
+  return { R, tot, dbl, opp };
+}
+const DBL = new WeakMap();  // une trace ne change pas : son taux de double est calculé une fois
+function dblShare(pts) { if (!DBL.has(pts)) { const s = dblScan(pts); DBL.set(pts, s.tot ? s.dbl / s.tot : 0); } return DBL.get(pts); }
+function spurs(pts) {  // [{a, b, tip, entry, len}] : retour [a..b] sur l'aller ; on coupe de R[j] (entrée) à R[b] (sortie)
+  const { R, opp } = dblScan(pts), out = []; let k = 1;
+  while (k < R.length) {
+    if (opp[k] < 0) { k++; continue; }
+    let a = k, b = k, gap = 0;
+    for (k++; k < R.length; k++) { if (opp[k] >= 0) { b = k; gap = 0; } else if ((gap += R[k].c - R[k - 1].c) > 30) break; }
+    if (R[b].c - R[a].c < SP.min) continue;
+    let jmin = opp[a], jmax = opp[a]; for (let t = a; t <= b; t++) if (opp[t] >= 0) { jmin = Math.min(jmin, opp[t]); jmax = Math.max(jmax, opp[t]); }
+    const E = R[jmin]; let tip = R[jmax], td = 0;
+    for (let t = jmax; t <= a; t++) { const d = dist([E.lat, E.lon], [R[t].lat, R[t].lon]); if (d > td) { td = d; tip = R[t]; } }
+    out.push({ j: jmin, b, entry: [E.lat, E.lon], tip: [tip.lat, tip.lon], len: R[b].c - E.c, R });
+  }
+  return out;
+}
+function cutSpurs(pts) {  // dernier recours : on raccorde l'entrée et la sortie de chaque éperon
+  let cut = 0;
+  for (let n = 0; n < 6; n++) {
+    const s = spurs(pts)[0]; if (!s) break;
+    const A = s.R[s.j], B = s.R[s.b], r1 = p => [Math.round(p.lat * 1e5) / 1e5, Math.round(p.lon * 1e5) / 1e5, p.e != null ? Math.round(p.e * 10) / 10 : null];
+    pts = pts.slice(0, A.i + 1).concat([r1(A), r1(B)], pts.slice(B.i + 1)); cut += s.len;
+  }
+  return { pts, cut };
+}
+const ptsKm = pts => { let L = 0; for (let i = 1; i < pts.length; i++) L += dist(pts[i - 1], pts[i]); return L / 1000; };
+async function routeFix(wps, prof) {  // itinéraire d'une boucle, sans éperon si possible (1 ou 2 requêtes de plus, seulement si besoin)
+  let r = await brRouteQ(wps, prof), sp = spurs(r.pts); r.wps = wps;
+  const near = (s, w) => { let k = -1, bd = 1500; for (let i = 1; i < w.length - 1; i++) { const d = dist(s.tip, w[i]); if (d < bd) { bd = d; k = i; } } return k; };
+  const better = async w => { try { const r2 = await brRouteQ(w, prof), s2 = spurs(r2.pts); if (s2.length < sp.length) { r = r2; r.wps = w; sp = s2; } } catch (e) {} };
+  if (sp.length) {  // a) point de passage déplacé sur l'entrée de l'éperon : un vrai carrefour, sur une route traversante
+    const w = wps.slice(); let m = false; sp.forEach(s => { const k = near(s, w); if (k > 0) { w[k] = s.entry.map(v => Math.round(v * 1e5) / 1e5); m = true; } });
+    if (m) await better(w);
+  }
+  if (sp.length && r.wps.length > 4) {  // b) losange : on retire le point de passage en cause
+    const k = near(sp[0], r.wps); if (k > 0) await better(r.wps.filter((_, i) => i !== k));
+  }
+  if (sp.length) { const c = cutSpurs(r.pts); r = { ...r, pts: c.pts, km: ptsKm(c.pts), cut: Math.round(c.cut) }; }  // c) coupé, distance et D+ recalculés
+  return r;
 }
 function scoreLoop(c, o, wx) {
   const P = profile(c.pts), r = simulate(P, wx, o.start, o.speed, false), n = P.length; c.asc = gain(P);
@@ -816,9 +901,9 @@ function scoreLoop(c, o, wx) {
   const first = part(0, .4), last = part(.6, 1), mpk = c.asc / Math.max(1, c.km);
   const windPen = r.ok ? Math.max(0, last) * 2 + Math.max(0, last - first) * .8 + Math.max(0, r.head) * .5 : 0;
   const relPen = o.rel === "flat" ? Math.max(0, mpk - 6) * 3 : o.rel === "hilly" ? Math.max(0, 9 - mpk) * 3 : 0;
-  const ov = overlap(c.pts);
+  const ov = dblShare(c.pts);  // part du parcours en double (hors 2 km autour du départ)
   c.P = P; c.sim = r; c.first = first; c.last = last; c.ov = ov; c.mpk = mpk;
-  c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 60 + c.bad * 60 + c.main * 25 + c.dirt * 40;
+  c.pen = windPen + Math.abs(c.km - o.km) / o.km * 40 + relPen + ov * 400 + c.bad * 60 + c.main * 25 + c.dirt * 40;
   return c;
 }
 // --- Propositions : générées, gardées (6 max) et comparées sur une carte. Tout reste en localStorage (soGenRes, soGenSel).
@@ -867,14 +952,16 @@ const jac = (a, b) => { let n = 0; a.forEach(x => { if (b.has(x)) n++; }); retur
 
 async function routeSpecs(specs, R, o, wx, nRefit) {
   const S0 = [R.key.lat, R.key.lon]; let prof = await brProfile(), profErr = false, ok = 0;
-  const route = async c => { try { Object.assign(c, await brRouteQ(wpsOf(c, S0, R.wd0), prof)); setMsg(`Itinéraires : ${++ok} calculés…`); return scoreLoop(c, o, wx); }
+  const route = async c => { try { Object.assign(c, await routeFix(wpsOf(c, S0, R.wd0), prof)); setMsg(`Itinéraires : ${++ok} calculés…`); return scoreLoop(c, o, wx); }
     catch (e) { if (e.prof) profErr = true; return null; } };
   let res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean);
   if (!res.length && profErr) { prof = await brProfile(true); res = (await pool(specs.map(sp => candOf(sp, S0, o.km)), route)).filter(Boolean); }  // profil expiré sur le serveur : on le renvoie une fois
   res.sort((a, b) => a.pen - b.pen);
+  const keep = res.filter(c => c.ov <= .03); if (keep.length) res = keep;  // plus de 3 % en double : rejetée (sauf s'il ne reste rien)
   // on recale la distance des meilleures
   const top = res.slice(0, nRefit).filter(c => Math.abs(c.km - o.km) / o.km > .06).map(c => ({ sh: c.sh, rt: c.rt, dir: c.dir, unit: c.unit, ord: c.ord, rk: c.rk * clamp(o.km / c.km, .6, 1.6) }));
-  return res.concat((await pool(top, route)).filter(Boolean)).sort((a, b) => a.pen - b.pen);
+  const all = res.concat((await pool(top, route)).filter(Boolean)), ok2 = all.filter(c => c.ov <= .03);
+  return (ok2.length ? ok2 : all).sort((a, b) => a.pen - b.pen);
 }
 function addPicks(R, res, k) {  // boucles vraiment différentes de celles déjà gardées (routes en grande partie communes = écartée)
   const keys = new Set(R.list.map(specKey)); let n = 0;
@@ -943,7 +1030,7 @@ async function moreLoops() {
 }
 
 // --- Persistance (localStorage uniquement : la liste contient le point de départ)
-const KEEP = ["id", "n", "sh", "rt", "dir", "rk", "unit", "ord", "km", "bad", "main", "dirt", "pts", "rev"];
+const KEEP = ["id", "n", "sh", "rt", "dir", "rk", "unit", "ord", "km", "bad", "main", "dirt", "pts", "rev", "wps", "cut"];
 function saveRes() {
   const R = GEN.res; if (!R) return;
   const pack = th => ({ v: 1, key: R.key, wx: R.wx, wxDate: R.wxDate, wd0: R.wd0, calm0: R.calm0, tried: R.tried, seq: R.seq,
@@ -1054,7 +1141,8 @@ function renderGen() {
       ${miniProf(c)}
       <div class="gwind">${R.calm ? "Vent faible : peu d'effet" : `Retour vent dans le dos : <b>${fmt(c.dosRet * 100)} %</b>`}</div>
       <p class="gwhy">${esc(c.why)}</p>
-      ${c.ov > .08 || c.main > .03 ? `<small class="gwarn">${c.ov > .08 ? `${fmt(c.ov * 100)} % en aller-retour` : ""}${c.ov > .08 && c.main > .03 ? " · " : ""}${c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""}</small>` : ""}
+      ${(w => w.length ? `<small class="gwarn">${w.join(" · ")}</small>` : "")([c.ov >= .01 ? `${fmt(c.ov * 100)} % en double` : "", c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""].filter(Boolean))}
+      ${c.cut ? `<small class="gnote2">Aller-retour de ${fmt(c.cut)} m retiré du tracé</small>` : ""}
       ${on ? (chosen === c.id ? `<button class="btn2" disabled>Analyse affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
@@ -1107,11 +1195,21 @@ function renderGen() {
   $("gMore").onclick = moreLoops;
   renderGenMap();
 }
-function toGPX(r) {
-  const x = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Breizh Watts" xmlns="http://www.topografix.com/GPX/1/1">\n<metadata><name>${x(r.name)}</name></metadata>\n<trk><name>${x(r.name)}</name><trkseg>\n${r.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ""}</trkpt>`).join("\n")}\n</trkseg></trk>\n</gpx>\n`;
+// --- Export : GPX (trace + waypoints des arrêts) et parcours FIT (points de parcours typés, le plus fiable pour les alertes Garmin)
+const xml = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+function toGPX(r, W = []) {
+  const wpt = W.map(w => `<wpt lat="${w.lat}" lon="${w.lon}"><name>${xml(w.name)}</name><cmt>${xml(w.desc)}</cmt><desc>${xml(w.desc)}</desc><sym>${xml(w.sym)}</sym><type>${xml(w.type)}</type></wpt>`).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Breizh Watts" xmlns="http://www.topografix.com/GPX/1/1">\n<metadata><name>${xml(r.name)}</name></metadata>\n${wpt ? wpt + "\n" : ""}<trk><name>${xml(r.name)}</name><trkseg>\n${r.pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}">${p[2] != null ? `<ele>${p[2]}</ele>` : ""}</trkpt>`).join("\n")}\n</trkseg></trk>\n</gpx>\n`;
 }
-function exportGPX() { const r = SO.route; if (!r) return; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([toGPX(r)], { type: "application/gpx+xml" })); a.download = `${r.name.replace(/[^A-Za-z0-9À-ÿ ]/g, "").trim().replace(/\s+/g, "_") || "boucle"}.gpx`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const fileBase = r => r.name.replace(/[^A-Za-z0-9À-ÿ ]/g, "").trim().replace(/\s+/g, "_") || "boucle";
+function download(data, type, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([data], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+const stopPts = () => window.Arrets ? Arrets.gpsPoints() : [];
+function exportGPX() { const r = SO.route; if (!r) return; download(toGPX(r, stopPts()), "application/gpx+xml", fileBase(r) + ".gpx"); }
+function exportFIT() {
+  const r = SO.route, res = SO.res, P = SO.P; if (!r || !res || !P || !window.FitCourse) return;
+  const recs = P.map((p, k) => ({ t: res.T[k], lat: p.lat, lon: p.lon, alt: p.e, d: p.d }));
+  download(FitCourse.build(r.name.slice(0, 30).trim(), recs, stopPts()), "application/vnd.ant.fit", fileBase(r) + ".fit");
+}
 
 // ------------------------------------------------------------------ Entrée
 async function open() {
@@ -1125,7 +1223,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Recup?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Recup?.curTab() === "sortie") open(); });
 })();

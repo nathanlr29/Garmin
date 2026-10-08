@@ -19,11 +19,13 @@ Langue de l'interface et des échanges : **français**.
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sortie.js |
+| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js |
 | `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil) |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
+| `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : Overpass, horaires, arrêts conseillés. Utilisé par sortie.js |
+| `fitcourse.js` | Encodeur de parcours FIT (course + course_point typés) pour les alertes « À venir » des Garmin |
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
@@ -45,9 +47,54 @@ Langue de l'interface et des échanges : **français**.
 - **BRouter (serveur public)** : `brRouteQ` = 2 requêtes au plus en parallèle, 600 ms minimum entre deux départs, cache en mémoire par points de passage. Changer de boucle, inverser le sens ou recharger la page ne rappelle **jamais** BRouter.
 - Interface : carte Leaflet (`#gMap`, conservée entre les rendus) avec toutes les boucles (sélectionnée orange épaisse + chevrons de sens, autres grises cliquables), départ et flèche de vent ; fiches (km, D+, temps, mini-profil, % du retour vent dans le dos, phrase « pourquoi ») en grille, en carrousel `scroll-snap` sous 620 px.
 - « Choisir cette boucle » → `setRoute` (analyse complète) ; le bandeau « Autres boucles (N) » (`altBar`) reste au-dessus de l'analyse pour changer de boucle en un clic. Route générée : `sortieRoute.gid` = id de la proposition.
+- **Allers-retours (éperons)** : `dblScan` rééchantillonne le tracé tous les 10 m. Un point est « en double » s'il passe à moins de 25 m d'un point parcouru au moins 100 m plus tôt. C'est un éperon si le cap est opposé (±30°) sur plus de 150 m (`spurs`). Une paire est tolérée si son premier passage est dans les 2 premiers km et le second dans les 2 derniers (même route que l'aller près du départ).
+  - Correction (`routeFix`), boucle par boucle :
+    - a) le point de passage le plus proche du bout de l'éperon est déplacé sur l'entrée de l'éperon (un vrai carrefour), puis la boucle est recalculée (1 requête) ;
+    - b) pour un losange, ce point de passage est supprimé (1 requête) ;
+    - c) sinon l'éperon est coupé en local (`cutSpurs`), la distance et le D+ sont recalculés et la fiche affiche « Aller-retour de x m retiré ».
+  - Les points de passage corrigés sont gardés (`wps`, `cut` dans `soGenRes`).
+  - Score : `dblShare × 400`. Une boucle à plus de 3 % en double est rejetée, sauf s'il ne reste qu'elle.
+  - Test : `node tests/eperons.mjs` (le dossier `tests/` n'est pas déployé).
 - « Inverser le sens » : points inversés en local + score de vent recalculé (note : attention aux sens uniques, pas de recalcul d'itinéraire).
 - Invalidation : distance, relief ou point de départ changés → propositions effacées ; date, heure ou vitesse changées → tracés gardés, vent et scores recalculés (`syncRes`, 1 appel météo si la date change).
 - Clés localStorage : `soGenRes` (réglages de calcul, point de départ, météo au départ, propositions avec leurs points, combinaisons essayées), `soGenSel` (sélection), plus `soGenKm`, `soGenRel`, `soStart`, `soBrf`, `sortieRoute`, `sortieSet`. `soGenRes` contient le point de départ : **localStorage uniquement**, jamais dans le dépôt ni dans une URL.
+
+## Points d'arrêt (arrets.js)
+- Concerne toutes les traces : boucle générée, GPX importé, sortie Garmin refaite. `Arrets.update(ctx)` est appelé en fin de `compute()` dans sortie.js.
+- **Overpass** : **une seule requête par trace**, en POST `text/x-www-form-urlencoded`, dans un couloir de 150 m autour du tracé simplifié (Douglas-Peucker, 350 points au plus).
+  - Les **400 premiers et derniers mètres ne sont jamais envoyés** (point de départ).
+  - Cache `soPoi` (7 jours, 4 traces), avec un 2e serveur en secours. Changer l'heure ou la vitesse ne relance rien.
+  - En cas d'échec : message et bouton « Réessayer ». Le reste de la sortie s'affiche normalement.
+- **Catégories** : eau (`drinking_water`, cimetière = « eau probable », souvent coupée l'hiver), ravito (boulangerie, épicerie / supérette, station-service, café / bar), toilettes, réparation (station, magasin de vélo).
+- **Pour chaque point** : km, heure de passage (`r.T` de la simulation) et écart au tracé.
+- **Horaires** : bibliothèque `opening_hours@3.8.0` + `suncalc@1.9.0` (jsDelivr), chargée seulement s'il y a des horaires à lire, avec un bouchon pour `i18next`. Si elle ne charge pas : `ohSimple` lit les cas courants, sinon « horaires à vérifier ».
+- **Arrêts conseillés** (`advise`, 3 au plus), calés sur la carte Nutrition (`SO.nut` : ml/h, bidons de 1,2 L, g/h) :
+  - eau vers le milieu au-delà de 2 h, plus tôt s'il fait chaud ou si les bidons sont vides avant ;
+  - 2e remplissage si la sortie est longue ;
+  - ravito ouvert au-delà de 3 h ;
+  - un commerce qui sert aux deux devient « eau + ravito ».
+  - La carte Nutrition indique où remplir les bidons.
+- **Affichage** :
+  - carte : marqueurs par catégorie, les conseillés en plus gros ;
+  - filtres par catégorie (`soStopCat`) ;
+  - liste compacte : 10 points, puis « Afficher tout » ;
+  - icônes sur le profil ;
+  - case « GPS » par point (`soGps`, par trace).
+- Tests : `node tests/arrets.mjs`.
+- **Pause découverte** (case dans la carte Arrêts, `soDecouv`, **désactivée par défaut**) : catégorie « À voir ».
+  - Patrimoine : château, mégalithe, église ou chapelle, moulin, calvaire, monument. Nature : point de vue, site naturel.
+  - Ces lieux viennent de la **même requête Overpass** (couloir de 300 m), seulement s'ils ont un tag `wikipedia` ou `wikidata`.
+  - Fiche française : tag `fr:` ou sitelink `frwiki` (Wikidata `wbgetentities`, 50 lieux par requête, cache `soWd`).
+  - Résumé : API REST de Wikipédia (`page/summary`, cache `soWiki` 30 jours). Lieu écarté si 404 ou page d'homonymie. Anecdote de 1 à 2 phrases tirées du résumé, **sans rien ajouter**. Si les coordonnées de la fiche sont à plus de 2 km du lieu : nom et lien seulement.
+  - 3 à 5 lieux, un par cinquième du parcours (château, mégalithe et point de vue d'abord), 14 fiches lues au plus.
+  - Case « GPS » décochée par défaut. Types FIT info / overlook.
+- **Export (toutes les traces)** : boutons « Exporter en GPX » et « Exporter pour Garmin (.fit) ». Sont exportés les arrêts conseillés (sauf décochés) et les points cochés (`Arrets.gpsPoints`).
+  - **Nom court** pour l'Edge, 15 caractères au plus : « Eau cimetière », « Boulang. 19h » (heure de fermeture si elle est connue).
+  - **GPX** : `<wpt>` placés avant `<trk>` et **posés sur le tracé**, parce que Garmin Connect ne convertit en points de parcours que les waypoints à moins d'environ 35 m. `<type>` = nom du type FIT (water, food, store, toilet, gear…), `<sym>` = symbole Garmin.
+  - **FIT** (le plus fiable pour les alertes) : messages file_id (course, fabricant 255, **sans numéro de série**), course, lap, event start, records tous les 25 m avec l'heure simulée, course_point dans l'ordre du trajet, puis event stop.
+  - Types FIT : eau 3, nourriture 4, magasin 48, toilettes 39, matériel 41, point de vue 38, info 53.
+  - Test : `node tests/fit.mjs`. Vérification complète avec le SDK officiel (`pip install garmin-fit-sdk`, `Decoder(Stream.from_file(f)).read()`).
+  - Mode d'emploi en 3 étapes dans la carte Arrêts (« Avoir les alertes sur ton Edge »).
 
 ## Synchro entre appareils (sync.js + apps-script/sync.gs)
 - Google Sheet **privée** + Apps Script déployé en application web (« Exécuter en tant que : moi », « Accès : tout le monde »). La clé est dans les propriétés du script (`SYNC_KEY`, 16 caractères minimum).
@@ -93,3 +140,4 @@ Langue de l'interface et des échanges : **français**.
 - Muscu : bouton « Faite » manuel et choix du jour.
 - Journal muscu (exercices et charges) via Google Sheets + Apps Script.
 - Synchro des réglages (plan) entre appareils : réutiliser `sync.js`. (Graissage : fait.)
+- Arrêts : vérifier sur un vrai Edge 540 l'import FIT dans Garmin Connect (types et alertes « À venir »).
