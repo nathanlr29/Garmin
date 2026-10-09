@@ -156,7 +156,107 @@ const plan = { plannedFor: k => planned[k] || null, isKey: t => ["vo2", "thr", "
 const wr = Y.weekReport(ctxOf({ acts: wacts, loads: Ch.dayLoads(acts) }), MON, plan);
 assert.equal(wr.n, 4, "séances de 10 min et plus, de la semaine dernière seulement"); near(wr.hours, 1 + 2 + .5 + 1 / 3, 1e-9, "heures"); near(wr.tss, 100 + 200 + 24.5 + 33.33333333, 1e-6, "charge"); assert.equal(wr.per.bike.km, 90); assert.equal(wr.per.bike.n, 2); assert.equal(wr.per.run.km, 5); assert.equal(wr.per.strength.n, 1);
 assert.deepEqual({ ...wr.keys }, { planned: 2, done: 1, hasPlan: true }, "séances clés : 2 prévues (vo2, thr), 1 faite"); assert.equal(wr.m0.getDay(), 1); assert.equal(wr.end.getDay(), 0);
-const f0r = Y.fitAt(Ch.dayLoads(acts), wr.m0), f1r = Y.fitAt(Ch.dayLoads(acts), new Date(2026, 9, 12)); near(wr.fond.delta, f1r.ctl - f0r.ctl, 1e-12, "variation du fond sur la semaine");
+const f0r = Y.fitAt(Ch.dayLoads(acts), wr.m0), f1r = Y.fitAt(Ch.dayLoads(acts), new Date(2026, 9, 12)); near(wr.niveau.delta, f1r.ctl - f0r.ctl, 1e-12, "variation du niveau sur la semaine");
 assert.equal(Y.weekReport(ctxOf({ acts: wacts, loads: {} }), MON, null).keys.hasPlan, false, "sans plan : pas de séances clés"); assert.equal(Y.weekReport(ctxOf({ acts: wacts, loads: {} }), MON, { ...plan, plannedFor: () => null }).keys.hasPlan, false);
 const wal = Y.weekReport(ctxOf({ acts: [], loads: {}, days: hrvDays(Array(30).fill(60)) }), MON, plan); assert.ok(wal.alerts.some(a => a.k === "hrv"), "alertes de la semaine : la VFC basse est signalée"); assert.equal(Y.weekReport(ctxOf({ acts: [] }), MON, plan).alerts.length, 0);
 console.log("ok synthese 4b : Theil-Sen, projection et verdicts, détecteurs (actif / inactif / sans données), historique 90 j, relevé du lundi");
+
+// ======================================================================= 4-bis : phrases-réponses, amorce, barres d'objectif
+// ---- amorce : un point n'est gardé que si ses 120 jours précédents sont dans l'historique ; aujourd'hui est toujours gardé et = carte Forme du Plan
+const firstT = Math.min(...acts.map(a => a.dt.getTime()));
+const sw = Y.fitSeries(loads, NOW, 365, firstT), lim = new Date(firstT); lim.setHours(0, 0, 0, 0);
+assert.ok(sw.length > 200 && sw.length <= 365, "historique de 18 mois : presque toute la courbe est gardée");
+assert.ok(sw.every((p, i) => i === sw.length - 1 || p.t - 120 * 864e5 >= lim.getTime()), "aucun point sans ses 120 jours d'amorce");
+assert.equal(sw[sw.length - 1].ctl, f0.ctl, "aujourd'hui = Charge.fitness (carte Forme du Plan)");
+const young = acts.filter(a => a.dt >= new Date(2026, 6, 1)), yl = Ch.dayLoads(young), ys = Y.fitSeries(yl, NOW, 365, Math.min(...young.map(a => a.dt.getTime())));
+assert.ok(ys.length < 100, "historique court : la courbe est tronquée au lieu de partir de 0"); assert.equal(ys[ys.length - 1].t, dayStart0(NOW), "mais aujourd'hui est gardé");
+function dayStart0(d) { const t = new Date(d); t.setHours(0, 0, 0, 0); return t.getTime(); }
+assert.equal(Y.fitSeries(loads, NOW, 365).length, 365, "sans date de départ : tous les points");
+// la courbe du niveau ne démarre pas de zéro : le premier point affiché est proche de ce que donnerait un calcul sur tout l'historique
+const fullS = Ch.series(loads, new Date(NOW.getTime() + 864e5), 700).days, firstPt = sw[0], ref0 = fullS.find(p => p.d === Ch.ymd(new Date(firstPt.t - 864e5)));
+assert.ok(Math.abs(firstPt.ctl - ref0.ctl) / ref0.ctl < .08, `premier point (${firstPt.ctl.toFixed(1)}) à moins de 8 % du calcul sur tout l'historique (${ref0.ctl.toFixed(1)})`);
+
+// ---- 1. « Est-ce que je progresse ? » : mot selon la variation sur 30 jours, repère = pic
+const mkSer = (vals, step = 1) => vals.map((v, i) => ({ t: NOWT - (vals.length - 1 - i) * step * 864e5, ctl: v, atl: 0, tsb: 0 }));
+const flat = (a, b, n = 61) => Array.from({ length: n }, (_, i) => i < n - 31 ? a : a + (b - a) * (i - (n - 31)) / 30);
+assert.equal(Y.trendWord({ delta: 5, pct: 5 }), "en hausse"); assert.equal(Y.trendWord({ delta: -5, pct: -5 }), "en baisse"); assert.equal(Y.trendWord({ delta: 1, pct: 3 }), "stable", "±3 % : stable"); assert.equal(Y.trendWord({ delta: -1, pct: -3 }), "stable"); assert.equal(Y.trendWord(null), null);
+let pg = Y.progress(mkSer(flat(70, 71)).map((p, i, A) => i === 5 ? { ...p, ctl: 97 } : p));   // pic de 97, niveau 71 stable
+assert.equal(pg.word, "stable"); assert.match(pg.text, /^Ton niveau d'entraînement est de 71, stable sur 30 jours, à 73 % de ton pic de l'année \(97, le \d+(er)? \p{L}+\)\.$/u);
+pg = Y.progress(mkSer(flat(60, 66).map((v, i) => i === 3 ? 90 : v))); assert.equal(pg.word, "en hausse"); assert.match(pg.text, /est de 66, en hausse sur 30 jours \(\+6\), à 73 % de ton pic de l'année \(90,/);
+pg = Y.progress(mkSer(flat(80, 60).map((v, i) => i === 3 ? 90 : v))); assert.equal(pg.word, "en baisse"); assert.match(pg.text, /est de 60, en baisse sur 30 jours \(−20\), à 67 % de ton pic/);
+pg = Y.progress(mkSer(flat(60, 90))); assert.equal(pg.atPeak, true); assert.match(pg.text, /en hausse sur 30 jours \(\+30\), à ton plus haut de l'année\.$/);
+pg = Y.progress(mkSer([50, 51, 52])); assert.equal(pg.word, null, "moins de 30 jours : pas de mot de tendance"); assert.ok(!/30 jours/.test(pg.text));
+assert.ok(!/CTL|ATL|TSB|TSS/.test(pg.text), "pas de sigle");
+const realP = Y.progress(Y.fitSeries(loads, NOW, 365, firstT)); assert.equal(realP.cur, f0.ctl, "chiffre en grand = niveau du Plan");
+
+// ---- 2. « Que faire aujourd'hui ? » : seuils du Plan (frais > 5, équilibré > −10, chargé > −25 ; récup < 45)
+const hardPl = { label: "Seuil", dur: 60, hard: true }, easyPl = { label: "Endurance", dur: 90, hard: false };
+let ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "good"); assert.equal(ad.text, "Tu es frais et bien récupéré : bon jour pour ta séance « Seuil » de 60 min prévue ce soir.");
+ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: null }); assert.match(ad.text, /^Tu es frais et bien récupéré : bon jour pour une séance intense/);
+ad = Y.advice({ tsb: 14, reco: null, hrvLow: false, planned: easyPl }); assert.equal(ad.text, "Tu es frais : ta séance « Endurance » de 90 min prévue ce soir se fait sans souci.", "sans récup du jour : pas de « bien récupéré »");
+ad = Y.advice({ tsb: 0, reco: 70, hrvLow: false, planned: null }); assert.equal(ad.tone, "good"); assert.match(ad.text, /^Ta fraîcheur est correcte et bien récupéré/);
+ad = Y.advice({ tsb: -15, reco: 70, hrvLow: true, planned: easyPl }); assert.equal(ad.tone, "bad"); assert.match(ad.text, /^Fatigue récente élevée et VFC basse : /); assert.match(ad.text, /sans chercher|garde|repos|passe/, "chargé + VFC basse : mauvais jour");
+ad = Y.advice({ tsb: -15, reco: 70, hrvLow: true, planned: null }); assert.equal(ad.text, "Fatigue récente élevée et VFC basse : garde la séance facile, ou prends un jour de repos.");
+ad = Y.advice({ tsb: -15, reco: 70, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "mid"); assert.match(ad.text, /^Fatigue récente élevée : ta séance « Seuil » de 60 min prévue ce soir reste jouable/);
+ad = Y.advice({ tsb: -30, reco: 70, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "bad"); assert.match(ad.text, /^Fatigue récente très élevée : ta séance « Seuil » .* à alléger ou à décaler\.$/);
+ad = Y.advice({ tsb: 10, reco: 44, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "bad", "récup < 45 (seuil du Plan)"); assert.match(ad.text, /^Récup basse : /);
+ad = Y.advice({ tsb: 10, reco: 45, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "mid", "récup 45 : pas basse, mais moyenne"); assert.match(ad.text, /^Récup moyenne : /);
+ad = Y.advice({ tsb: 10, reco: 65, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "good", "65 et plus : bien récupéré (libellé « Plutôt en forme »)");
+for (const tsb of [-60, -25.01, -25, -10, 5, 5.01, 40]) assert.equal(Y.advice({ tsb, reco: 70, hrvLow: false, planned: null }).label, planLabel({ tsb }), `étiquette de fraîcheur à ${tsb} = celle du Plan`);
+assert.equal(Y.READY_LOW, 45); assert.match(read("../plan.js"), /ready\.today < 45/, "le seuil 45 est bien celui du Plan");
+
+// ---- 3. « Où j'en suis de mes objectifs ? » : départ au 1er janvier, aujourd'hui, objectif, part du chemin
+const hist = Y.listSeries([["2025-11-01", 190], ["2026-01-24", 209], ["2026-04-25", 245], ["2026-10-03", 260]]);
+let ob = Y.objective(hist, 260, 300, NOWT); assert.equal(ob.start, 190, "valeur connue au 1er janvier reportée (190), pas la première de l'année"); near(ob.pct, 70 / 110 * 100, 1e-9);
+ob = Y.objective(hist.slice(1), 260, 300, NOWT); assert.equal(ob.start, 209, "pas de valeur avant le 1er janvier : première de l'année"); near(ob.pct, 51 / 91 * 100, 1e-9); near(ob.bar, ob.pct, 1e-9);
+assert.equal(Y.objective(hist.slice(1), 200, 300, NOWT).bar, 0, "sous le départ : barre à 0 (pct négatif gardé)"); assert.ok(Y.objective(hist.slice(1), 200, 300, NOWT).pct < 0);
+ob = Y.objective(hist.slice(1), 310, 300, NOWT); assert.equal(ob.bar, 100); assert.equal(ob.reached, true);
+assert.equal(Y.objective([], 260, 300, NOWT), null); assert.equal(Y.objective(hist, null, 300, NOWT), null); assert.equal(Y.objective(Y.listSeries([["2027-01-01", 5]]), 6, 300, NOWT), null, "mesure future ignorée");
+const realFtp = Y.objective(Y.listSeries(profile.ftpHist), win.Recup.data.profile.ftp, 300, NOWT); assert.equal(realFtp.start, 209, "FTP de départ réel : 209 W");
+const real2 = Y.objective(Y.listSeries(profile.vo2), 63.2, 65, NOWT); assert.equal(real2.start, 57.3);
+// phrase sous la barre
+let pj = proj(lineSer(1)); assert.match(Y.objLine(pj, "W", 0), /^Au rythme actuel : ~\d+ W au 31\/12\. Il faudrait \+3,4 W\/semaine \(tu fais \+1,0\)\.$/);
+assert.equal(Y.objLine(proj(lineSer(0), 305), "W", 0), "Objectif atteint."); assert.match(Y.objLine(null, "W", 0), /Pas assez de mesures/);
+assert.match(Y.objLine(proj(lineSer(-2)), "W", 0), /tu fais −2,0\)\.$/, "rythme négatif : signe moins");
+assert.equal(Y.objLine(Y.projection([0, 1, 2, 3, 4].map(i => ({ t: daysAgo(30 - i * 7), v: 63 + .037 * i })), 65, "2026-12-31", NOWT, 63.2, 1), "", 1).startsWith("Au rythme actuel : ~63,"), true);
+// phrase-réponse du bloc
+assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "hors de portée au rythme actuel" }, { name: "VO2max", verdict: "hors de portée au rythme actuel" }]), "Tes deux objectifs sont hors de portée au rythme actuel.");
+assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "dans les temps" }, { name: "VO2max", verdict: "dans les temps" }]), "Tes deux objectifs sont dans les temps.");
+assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "dans les temps" }, { name: "VO2max", verdict: "hors de portée au rythme actuel" }]), "L'objectif FTP est dans les temps et l'objectif VO2max est hors de portée au rythme actuel.");
+assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "un peu juste" }, { name: "VO2max", verdict: null }]), "L'objectif FTP est un peu juste."); assert.match(Y.objectivesAnswer([{ name: "FTP", verdict: null }]), /Pas assez de mesures/);
+
+// ---- 4. « Quelque chose cloche ? »
+const resOf = (o = {}) => ({ gray: { active: false, status: "ok" }, load: { active: false, status: "ok" }, hrv: { active: false, status: "ok" }, sleep: { active: false, status: "ok" }, ...o });
+assert.equal(Y.detAnswer(resOf()), "Rien à signaler aujourd'hui.");
+assert.equal(Y.detAnswer(resOf({ sleep: { active: false, status: "nodata" } })), "Rien à signaler aujourd'hui (pas assez de données pour : dette de sommeil).");
+assert.equal(Y.detAnswer(resOf({ hrv: { active: true, status: "actif" } })), "1 point d'attention : VFC basse.");
+assert.equal(Y.detAnswer(resOf({ hrv: { active: true }, load: { active: true } })), "2 points d'attention : charge qui monte trop vite et VFC basse.");
+assert.match(Y.detAnswer(resOf({ gray: { status: "nodata" }, load: { status: "nodata" }, hrv: { status: "nodata" }, sleep: { status: "nodata" } })), /^Pas assez de données/);
+assert.ok(!/TSS|CTL|ATL|TSB/.test(JSON.stringify(Object.values(Y.DET_TXT).map((f, i) => f({ count: 3, acute: 400, chronic: 250, ratio: 1.6, vals: [{ hrv: 50, lo: 60 }], debt: 4 * 3600, nights: 7, med: 8 * 3600 })))), "pas de sigle dans les explications des alertes");
+
+// ---- 5. Ma semaine
+const ws2 = (cur, avgTo) => ({ cur: { hours: 0, n: 0, bike: 0, run: 0, strength: 0, other: 0, ...cur }, avgTo: { hours: 0, ...avgTo } });
+assert.equal(Y.weekAnswer(ws2({ hours: 4.5, n: 3, bike: 2, run: 1 }, { hours: 3 + 50 / 60 })), "Depuis lundi : 4 h 30, 3 séances (2 vélo, 1 course) : plus que d'habitude (3 h 50 à ce stade de la semaine).");
+assert.match(Y.weekAnswer(ws2({ hours: 2, n: 1, bike: 1 }, { hours: 4 })), /1 séance \(1 vélo\) : moins que d'habitude/);
+assert.match(Y.weekAnswer(ws2({ hours: 4, n: 2, bike: 2 }, { hours: 4.2 })), /: comme d'habitude/);
+assert.equal(Y.weekAnswer(ws2({}, { hours: 3.5 })), "Aucune séance depuis lundi (d'habitude 3 h 30 à ce stade de la semaine).");
+assert.equal(Y.weekAnswer(ws2({ hours: 1, n: 1, bike: 1 }, { hours: 0 })), "Depuis lundi : 1 h 00, 1 séance (1 vélo).", "sans historique : pas de comparaison");
+assert.equal(Y.hmTxt(0.75), "45 min"); assert.equal(Y.hmTxt(2), "2 h 00"); assert.equal(Y.hmTxt(1.999), "2 h 00", "59,94 min arrondi à l'heure");
+// « à ce stade de la semaine » : la moyenne ne compte que les jours jusqu'au même jour de la semaine (vendredi 9 oct. = lun-ven)
+const wsd = Y.weekStats([mk(0), mk(7), mk(7 + 4, { mt: 7200 }), mk(7 + 5, { mt: 3600 }), mk(7 + 6, { mt: 3600 })], NOW, tss);   // d'avant : ven, lun, sam, dim
+near(wsd.avgTo.hours, (1 + 2) / 4, 1e-9, "moyenne à ce stade : ven + lun seulement (samedi et dimanche exclus)"); near(wsd.avg.hours, (1 + 2 + 1 + 1) / 4, 1e-9, "semaine complète inchangée");
+assert.match(Y.shareAnswer({ total: 100, bike: 62, run: 30, strength: 8, other: 0, pct: { bike: 62, run: 30, strength: 8, other: 0 } }), /^Sur 30 jours : 62 % vélo · 30 % course · 8 % muscu\.$/); assert.match(Y.shareAnswer({ total: 0 }), /^Aucune séance/);
+
+// ---- Détails : titres qui disent quoi regarder
+const curve = (vals, step = 1) => vals.map((v, i) => ({ t: NOWT - (vals.length - 1 - i) * step * 864e5, ctl: v }));
+const peakDay = new Date(2026, 7, 4).getTime(), cv = Array.from({ length: 120 }, (_, i) => { const t = NOWT - (119 - i) * 864e5; return { t, ctl: t <= peakDay ? 40 + (t - (NOWT - 119 * 864e5)) / (peakDay - (NOWT - 119 * 864e5)) * 57 : 92 } });   // monte à 97 le 4 août puis palier à 92
+assert.equal(Y.curveTitle(cv), "Ton niveau a culminé début août, puis s'est stabilisé, 5 % plus bas."); assert.equal(Y.partOfMonth(new Date(2026, 7, 15)), "mi-août"); assert.equal(Y.partOfMonth(new Date(2026, 7, 28)), "fin août");
+assert.match(Y.curveTitle(curve(Array.from({ length: 90 }, (_, i) => 50 + i))), /plus haut de la période \(139\)/);
+const drop = Array.from({ length: 90 }, (_, i) => ({ t: NOWT - (89 - i) * 864e5, ctl: i < 20 ? 50 + i * 2 : 88 - (i - 20) * .5 })); assert.match(Y.curveTitle(drop), /^Ton niveau a culminé .*, puis a baissé de \d+ %\.$/); assert.equal(Y.curveTitle(curve([1, 2, 3])), "");
+assert.match(Y.projTitle("FTP", proj(lineSer(1)), "W", 0), /^FTP : la tendance mène à ~\d+ W au 31\/12, pour un objectif de 300 W\.$/); assert.match(Y.projTitle("FTP", null, "W", 0), /pas assez de mesures/); assert.match(Y.weeksTitle(Y.weeklyBySport(daily, NOW, 12)), /semaine la plus chargée/);
+// vocabulaire : le texte de la page n'utilise jamais les sigles (hors commentaires)
+const src = read("../synthese.js").split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n").replace(/\/\/ .*$/gm, "");
+const visible = [...src.matchAll(/`([^`]*)`|"([^"\n]*)"/g)].map(m => m[1] || m[2] || "").filter(t => /[a-zé] [a-zé]/i.test(t) && !/^(#|\.|var\(|M\d|<svg)/.test(t)).join("\n");
+assert.ok(!/\b(CTL|ATL|TSB|TSS)\b/.test(visible), "aucun sigle dans les textes affichés : " + (visible.match(/.{0,30}\b(CTL|ATL|TSB|TSS)\b.{0,30}/) || [""])[0]);
+for (const k in Y.HELP) assert.ok(Y.HELP[k].split(/[.!?]\s/).length <= 3, "explication « ? » de 1 à 2 phrases : " + k);
+console.log("ok synthese 4-bis : amorce de la courbe, phrases (progression, aujourd'hui, objectifs, alertes, semaine), barres d'objectif, titres des détails, pas de sigle");
