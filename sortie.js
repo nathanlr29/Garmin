@@ -1224,6 +1224,6 @@ async function open() {
   if (SO.route) compute();
 }
 window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare };
-let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Recup?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
-document.addEventListener("velo:loaded", () => { if (window.Recup?.curTab() === "sortie") open(); });
+let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
+document.addEventListener("velo:loaded", () => { if (window.Nav?.curTab() === "sortie") open(); });
 })();

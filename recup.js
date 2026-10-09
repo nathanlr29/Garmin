@@ -36,35 +36,6 @@ function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars /
   return d.getDate() > 24 ? (m === 2 ? "Passage à l'heure d'été (1 h de sommeil en moins)" : "Passage à l'heure d'hiver (1 h de plus)") : null;
 }
 
-// ------------------------------------------------------------------ Onglets
-function curTab() { const h = location.hash.slice(1); return ["velo", "recup", "plan", "sortie"].includes(h) ? h : (store.get("tab") || "velo"); }
-function setTab(t) { store.set("tab", t); history.replaceState(null, "", "#" + t); applyTab(); }
-function applyTab() {
-  const t = curTab(), recup = t === "recup", velo = t === "velo";
-  document.documentElement.classList.toggle("night", recup);
-  $("app").hidden = !velo; $("recup").hidden = !recup; $("plan").hidden = t !== "plan"; $("sortie").hidden = t !== "sortie";
-  document.querySelector(".controls").hidden = !velo;
-  $("updated").hidden = !velo;
-  $("title").textContent = recup ? "Ma récupération" : t === "plan" ? "Mon plan" : t === "sortie" ? "Planifier une sortie" : (S.cfg.titre || "Mes kilomètres");
-  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", recup ? "#0c0f1d" : "#f6f3ee");
-  if (recup) openRecup(); else if (t === "plan") window.Plan?.open(); else if (t === "sortie") window.Sortie?.open(); else if (S.all.length) render();
-}
-function mountTabs() {
-  const header = document.querySelector("header");
-  const nav = document.createElement("nav");
-  nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist");
-  nav.innerHTML = `<button role="tab" data-tab="velo">Vélo</button><button role="tab" data-tab="recup">Récup</button><button role="tab" data-tab="plan">Plan</button><button role="tab" data-tab="sortie">Sortie</button>`;
-  header.insertBefore(nav, header.querySelector(".controls"));
-  nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
-  const main = document.createElement("main"); main.id = "recup"; main.hidden = true;
-  $("app").after(main);
-  const plan = document.createElement("main"); plan.id = "plan"; plan.hidden = true;
-  main.after(plan);
-  const sortie = document.createElement("main"); sortie.id = "sortie"; sortie.hidden = true;
-  plan.after(sortie);
-}
-
 // ------------------------------------------------------------------ Données chiffrées
 async function decryptEnv(env, code) {
   if (env.plain) return env.plain;
@@ -173,10 +144,10 @@ function scoreColor(s) { return s >= 75 ? "var(--teal)" : s >= 50 ? "var(--accen
 function afterNote(n) {
   if (!n.dt) return "";
   const wake = n.wakeDt || new Date(n.dt.getFullYear(), n.dt.getMonth(), n.dt.getDate(), 7);
-  const acts = (S.all || []).filter(a => a.d.slice(0, 10) === keyOf(n.dt) && a.dt >= wake), tss = acts.reduce((s, a) => s + tssOf(a), 0);
+  const acts = (S.all || []).filter(a => a.d.slice(0, 10) === Charge.ymd(n.dt) && a.dt >= wake), tss = acts.reduce((s, a) => s + Charge.tssOf(a), 0);
   if (tss < 60) return "";
   const km = acts.reduce((s, a) => s + a.km, 0), nx = new Date(n.dt); nx.setDate(nx.getDate() + 1);
-  const lp = loadPart(nx), today = n.dt.toDateString() === new Date().toDateString();
+  const lp = Charge.loadPart(nx), today = n.dt.toDateString() === new Date().toDateString();
   return `<div class="mafter">Score calculé au réveil (${clock(wake)}). ${today ? "Depuis" : "Dans la journée"} : ${km >= 1 ? `${nf(km)} km` : `${acts.length} séance${acts.length > 1 ? "s" : ""}`} pour ≈ ${nf(tss)} TSS${lp ? `, soit ${nf(lp.ratio, 1)}× ta charge habituelle` : ""}. ${today ? "Ça pèsera sur ton score de demain matin" : "Ça a pesé sur le score du lendemain"}${lp ? ` (charge récente : ${lp.score}/100)` : ""}.</div>`;
 }
 function renderMorning() {
@@ -219,23 +190,6 @@ function baseline(d, key, floor) {
   const m = prev.reduce((a, b) => a + b, 0) / prev.length, sd = Math.sqrt(prev.reduce((a, b) => a + (b - m) ** 2, 0) / prev.length);
   return { m, sd: Math.max(sd, floor) };
 }
-// Charge d'une activité en TSS (même calcul que l'onglet Plan) : puissance si on l'a, sinon cardio rapporté au seuil
-function tssOf(a) {
-  const p = (RC.data && RC.data.profile) || {}, ftp = +store.get("planFtp") || p.ftp || 250, lthr = (p.hrZones && p.hrZones.lthr) || 165;
-  const h = (a.mt || 0) / 3600; if (!h) return 0;
-  const pw = a.np || a.w, IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / ftp : a.hr > 0 ? a.hr / lthr : .65;
-  return h * Math.max(.4, Math.min(1.2, IF)) ** 2 * 100;
-}
-const keyOf = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-function dayLoad(dt) { const key = keyOf(dt); return (S.all || []).filter(a => a.d.slice(0, 10) === key).reduce((s, a) => s + tssOf(a), 0); }
-function loadPart(dt) {  // charge des 2 jours précédents rapportée aux 4 semaines d'avant
-  const day = k => { const t = new Date(dt); t.setDate(t.getDate() - k); return t; };
-  const acute = dayLoad(day(1)) + .5 * dayLoad(day(2));
-  let chronic = 0; for (let k = 2; k <= 29; k++) chronic += dayLoad(day(k)); chronic = chronic / 28 * 1.5;
-  if (!(chronic > 0)) return null;
-  const ratio = acute / chronic, km = (S.all || []).filter(a => a.d.slice(0, 10) === keyOf(day(1))).reduce((s, a) => s + a.km, 0);
-  return { ratio, km, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6))) };
-}
 function recoScore(d) {
   const parts = [];
   const add = (key, label, w, score, detail, good, bad) => { if (score != null && !isNaN(score)) parts.push({ key, label, w, score: Math.round(clamp(score)), detail, good, bad }); };
@@ -252,7 +206,7 @@ function recoScore(d) {
   if (rh(d) && br) { const z = (rh(d) - br.m) / br.sd, dv = rh(d) - br.m;
     add("rhr", "Cœur au repos", 15, 55 - 22 * z, `${rh(d)} bpm, ${dv >= 0 ? "+" : "−"}${nf(Math.abs(dv), 1)} vs ta moyenne 30 j (${nf(br.m, 1)})`, "cœur au repos plus bas que d'habitude", "cœur au repos plus haut que d'habitude"); }
   if (S.all && S.all.length) {
-    const lp = loadPart(d.dt);
+    const lp = Charge.loadPart(d.dt);
     if (lp) add("load", "Charge récente", 20, lp.score, `${lp.km ? `${nf(lp.km)} km la veille · ` : "repos la veille · "}${nf(lp.ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces deux derniers jours");
   }
   if (parts.length < 2) return { score: null, parts };
@@ -568,15 +522,13 @@ async function ensure(target, after) {
   }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, get data() { return RC.data; }, get days() { return RC.days; }, curTab, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
-mountTabs();
-document.addEventListener("velo:loaded", () => { if (curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
-addEventListener("hashchange", applyTab);
+document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
 let rT2, lastW2 = innerWidth;
-addEventListener("resize", () => { if (innerWidth === lastW2) return; lastW2 = innerWidth; clearTimeout(rT2); rT2 = setTimeout(() => { if (curTab() === "recup" && RC.data) renderRecup(); }, 150); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && curTab() === "recup") openRecup(true); });
-setInterval(() => { if (document.visibilityState === "visible" && curTab() === "recup") openRecup(true); }, 5 * 60 * 1000);
-applyTab();
+addEventListener("resize", () => { if (innerWidth === lastW2) return; lastW2 = innerWidth; clearTimeout(rT2); rT2 = setTimeout(() => { if (Nav.curTab() === "recup" && RC.data) renderRecup(); }, 150); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Nav.curTab() === "recup") openRecup(true); });
+setInterval(() => { if (document.visibilityState === "visible" && Nav.curTab() === "recup") openRecup(true); }, 5 * 60 * 1000);
+Nav.apply();
 })();

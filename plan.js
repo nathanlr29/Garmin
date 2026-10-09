@@ -73,21 +73,12 @@ function estimateFtp() { // meilleure puissance normalisée sur 40 min et plus, 
   const c = rides().filter(a => a.dt >= cut && (a.np || a.w) && a.mt >= 2400).map(a => (a.np || a.w) * (a.mt >= 3600 ? .97 : .93));
   return c.length ? W5(Math.max(...c)) : null;
 }
-// Charge d'une activité en TSS : puissance si on l'a (home trainer), sinon fréquence cardiaque rapportée au seuil
-function tssOf(a) {
-  const p = (window.Recup && Recup.data && Recup.data.profile) || {}, ftp = store2.get("planFtp") || p.ftp || 250, lthr = (p.hrZones && p.hrZones.lthr) || 165;
-  const h = (a.mt || 0) / 3600; if (!h) return 0;
-  const pw = a.np || a.w, IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / ftp : a.hr > 0 ? a.hr / lthr : .65;
-  return h * clamp(IF, .4, 1.2) ** 2 * 100;
-}
-function dayLoads() { const m = {}; (S.all || []).forEach(a => { const k = a.d.slice(0, 10); m[k] = (m[k] || 0) + tssOf(a); }); return m; }
+// Charge (TSS, jour par jour, fond / fatigue / forme) : voir charge.js. Ici, ce qui est propre au plan.
 function fitness() {
-  const m = dayLoads(), today = new Date(); let ctl = 0, atl = 0;
-  for (let d = addDays(today, -120); d < today; d = addDays(d, 1)) { const l = m[ymd(d)] || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; }
-  const p = profile();
+  const today = new Date(), f = Charge.fitness(today), p = profile();
   const hard = rides().filter(a => a.te >= 3.8 || ((a.np || a.w) && (a.np || a.w) / p.ftp >= .85 && a.mt >= 1500)).pop();
   const wk = rides().filter(a => a.dt >= addDays(today, -7)), tr = wk.filter(isTraining);
-  return { ctl, atl, tsb: ctl - atl, lastHard: hard ? Math.floor((today - hard.dt) / 864e5) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: tr.length, c7: wk.length - tr.length };
+  return { ctl: f.ctl, atl: f.atl, tsb: f.tsb, lastHard: hard ? Math.floor((today - hard.dt) / 864e5) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: tr.length, c7: wk.length - tr.length };
 }
 function readiness() {
   const k = ymd(new Date()), days = ((window.Recup && Recup.days) || []).filter(d => (d.sl || d.tr != null) && d.d <= k), last = days.slice(-3);
@@ -623,7 +614,7 @@ function weekRow(W, it, prof) {
 function renderWeek(W, prof) {
   const thisMon = mondayOf(new Date()), ph = W.ph;
   const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0), 0);
-  const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + tssOf(a), 0));
+  const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
   return `<section class="card span12 wkc"><h2>La semaine <small>${cyc} · ≈ ${plannedT} TSS prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
@@ -659,7 +650,7 @@ function todayLoad(form, r) {
 }
 function renderToday(form, ready, W) {
   const L = todayLoad(form, ready.today ?? ready.last), today = ymd(new Date());
-  const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + tssOf(a), 0));
+  const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + Charge.tssOf(a), 0));
   const it = W.td >= 0 && W.td < 7 ? W.items[W.td] : null, ps = it && it.bike && it.bike.st === "plan" ? it.bike : null, planned = ps ? ps.w.tss : 0;
   const max = Math.max(L.hi * 1.4, done + planned + 10, 60), X = v => Math.min(100, v / max * 100);
   let msg;
@@ -780,8 +771,8 @@ async function open() {
   render();
 }
 window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase };
-if (importLink() && Recup.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
-document.addEventListener("velo:loaded", () => { if (Recup.curTab() === "plan") open(); });
-let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Recup.curTab() === "plan" && PS.W) render(); }, 200); });
-if (Recup.curTab() === "plan") open();
+if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
+document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
+let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) render(); }, 200); });
+if (Nav.curTab() === "plan") open();
 })();
