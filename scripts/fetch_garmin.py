@@ -50,6 +50,9 @@ CYCLING = {
     "e_bike_mountain", "e_enduro_mtb", "enduro_mtb", "handcycling", "bike_commuting",
 }
 INDOOR_CYCLING = {"indoor_cycling", "virtual_ride", "indoor_handcycling"}
+# Course à pied : mêmes clés que charge.js (RUN_TYPES). Tapis et course virtuelle : pas de GPS publié.
+RUN_TYPES = {"running", "trail_running", "treadmill_running", "track_running", "virtual_run"}
+NO_GPS_TYPES = {"VirtualRide", "treadmill_running", "virtual_run"}
 
 
 # ---------------------------------------------------------------- Jetons chiffrés
@@ -252,8 +255,21 @@ def fit_records(blob):
     return out
 
 
-def build_stream(act_id, recs, radius):
-    """Séance ramenée à des pas réguliers : puissance, cardio, cadence, vitesse, altitude, position."""
+def sport_of(a):
+    """'bike' pour le vélo (dehors ou virtuel), 'run' pour la course, None pour le reste."""
+    if a["t"] in ("Ride", "VirtualRide"):
+        return "bike"
+    return "run" if a["t"] in RUN_TYPES else None
+
+
+def _in(v, lo, hi):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi else None
+
+
+def build_stream(act_id, recs, radius, run=False):
+    """Séance ramenée à des pas réguliers : puissance, cardio, cadence, vitesse, altitude, position.
+    Course (run=True) : cadence en pas/min, et si le FIT les donne, longueur de pas (sl, cm),
+    temps de contact au sol (gct, ms) et oscillation verticale (vo, cm)."""
     recs = [r for r in recs if isinstance(r.get("timestamp"), datetime)]
     if len(recs) < 60:
         return None
@@ -263,7 +279,7 @@ def build_stream(act_id, recs, radius):
         return None
     dt = max(5, int(math.ceil(span / STREAM_BINS / 5)) * 5)
     n = int(span // dt) + 1
-    keys = ("p", "h", "c", "v", "a", "la", "lo")
+    keys = ("p", "h", "c", "v", "a", "la", "lo", "sl", "gct", "vo")
     acc = {k: [[0.0, 0] for _ in range(n)] for k in keys}
     has = set()
     deg = 180 / 2 ** 31
@@ -278,7 +294,16 @@ def build_stream(act_id, recs, radius):
         i = min(n - 1, int((r["timestamp"] - t0).total_seconds() // dt))
         put("p", i, r.get("power"))
         put("h", i, r.get("heart_rate") if (r.get("heart_rate") or 0) > 0 else None)
-        put("c", i, r.get("cadence"))
+        cad = r.get("cadence")
+        if run and isinstance(cad, (int, float)) and not isinstance(cad, bool):
+            # le FIT compte les cycles (une jambe) par minute : × 2 pour des pas/min, fractional_cadence en plus
+            cad = (cad + (r.get("fractional_cadence") if isinstance(r.get("fractional_cadence"), (int, float)) else 0)) * 2
+        put("c", i, cad)
+        if run:  # unités FIT : mm pour la longueur de pas et l'oscillation, ms pour le contact au sol
+            sl, vo = _in(r.get("step_length"), 200, 3000), _in(r.get("vertical_oscillation"), 10, 400)
+            put("sl", i, sl / 10 if sl else None)
+            put("gct", i, _in(r.get("stance_time"), 80, 600))
+            put("vo", i, vo / 10 if vo else None)
         sp = r.get("enhanced_speed", r.get("speed"))
         put("v", i, sp * 3.6 if isinstance(sp, (int, float)) else None)
         put("a", i, r.get("enhanced_altitude", r.get("altitude")))
@@ -298,6 +323,12 @@ def build_stream(act_id, recs, radius):
         out["h"] = [None if v is None else int(v) for v in (mean("h", i) for i in range(n))]
     if "c" in has:
         out["c"] = [None if v is None else int(v) for v in (mean("c", i) for i in range(n))]
+    if "sl" in has:
+        out["sl"] = [None if v is None else int(round(v)) for v in (mean("sl", i, 1) for i in range(n))]
+    if "gct" in has:
+        out["gct"] = [None if v is None else int(round(v)) for v in (mean("gct", i, 1) for i in range(n))]
+    if "vo" in has:
+        out["vo"] = [None if v is None else v for v in (mean("vo", i, 1) for i in range(n))]
     if "v" in has:
         out["v"] = [None if v is None else int(round(v * 10)) for v in (mean("v", i, 2) for i in range(n))]
     if "a" in has:
@@ -316,7 +347,8 @@ def build_stream(act_id, recs, radius):
 
 
 def update_streams(api, acts, radius):
-    """Télécharge le détail des nouvelles sorties vélo, purge les vieux fichiers."""
+    """Télécharge le détail des nouvelles sorties (vélo et course), purge les vieux fichiers.
+    index.json : "s" = "bike" ou "run" (les entrées plus anciennes, sans "s", sont du vélo)."""
     STREAMS.mkdir(exist_ok=True)
     index = load(STREAM_INDEX, {})
     now = datetime.now()
@@ -326,25 +358,25 @@ def update_streams(api, acts, radius):
             (STREAMS / f"{k}.json").unlink(missing_ok=True)
             index.pop(k)
     todo = [a for a in reversed(acts)
-            if a["t"] in ("Ride", "VirtualRide") and a["mt"] >= 600 and age(a["d"]) <= STREAM_DAYS
+            if sport_of(a) and a["mt"] >= 600 and age(a["d"]) <= STREAM_DAYS
             and str(a["id"]) not in index][:STREAM_PER_RUN]
     done = 0
     for a in todo:
         try:
             blob = api.download_activity(a["id"], dl_fmt=api.ActivityDownloadFormat.ORIGINAL)
-            st = build_stream(a["id"], fit_records(blob), radius)
+            st = build_stream(a["id"], fit_records(blob), radius, run=sport_of(a) == "run")
         except GarminConnectTooManyRequestsError:
             print("Bilan : Garmin limite les requêtes (429), on reprendra au prochain passage.")
             break
         except Exception as e:  # séance sans fichier (saisie manuelle…) : on ne redemandera pas
             print(f"Bilan : détail de {a['id']} indisponible ({type(e).__name__})")
             st = None
-        if st and a["t"] == "VirtualRide":
-            st.pop("g", None)  # position virtuelle de l'appli : sans intérêt
+        if st and a["t"] in NO_GPS_TYPES:
+            st.pop("g", None)  # position virtuelle (ou tapis) : sans intérêt, et rien à publier
         if st:
             (STREAMS / f"{a['id']}.json").write_text(json.dumps(st, separators=(",", ":")), encoding="utf-8")
             done += 1
-        index[str(a["id"])] = {"d": a["d"][:10], "ok": 1 if st else 0}
+        index[str(a["id"])] = {"d": a["d"][:10], "ok": 1 if st else 0, "s": sport_of(a)}
         time.sleep(0.5)
     STREAM_INDEX.write_text(json.dumps(index, separators=(",", ":"), sort_keys=True), encoding="utf-8")
     if todo:
