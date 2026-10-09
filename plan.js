@@ -22,18 +22,19 @@ const DAYN = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dima
 const dl = d => DAYN[d].toLowerCase();
 const DURS = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 270, 300];
 const TYPES = {
-  vo2: { l: "VO2max", c: "#d6336c", hard: 1 },
-  vo2r: { l: "VO2max 30/15", c: "#a61e4d", hard: 1 },
-  vo2s: { l: "VO2max 30/30", c: "#c2255c", hard: 1 },
-  thr: { l: "Seuil", c: "#e8501c", hard: 1 },
-  ss: { l: "Sweet spot", c: "#f08c00", hard: 1 },
-  tempo: { l: "Tempo", c: "#e0a800" },
-  end: { l: "Endurance", c: "#2f9e44" },
-  long: { l: "Sortie longue", c: "#1c7ed6" },
-  longplus: { l: "Longue + seuil", c: "#1864ab", hard: 1 },
-  rec: { l: "Récupération", c: "#868e96" },
-  test: { l: "Test FTP", c: "#7048e8", hard: 1 },
-  testc: { l: "Test court", c: "#5f3dc4", hard: 1 },
+  // couleur = zone dominante de la séance, comme sur MyWhoosh / Zwift (gris Z1, bleu Z2, vert Z3, jaune Z4, orange Z5, rouge Z6)
+  vo2: { l: "VO2max", c: "#ff6a2a", hard: 1 },
+  vo2r: { l: "VO2max 30/15", c: "#ff2e2e", hard: 1 },
+  vo2s: { l: "VO2max 30/30", c: "#f04a2a", hard: 1 },
+  thr: { l: "Seuil", c: "#ffc21a", hard: 1 },
+  ss: { l: "Sweet spot", c: "#c9c21f", hard: 1 },
+  tempo: { l: "Tempo", c: "#3fbf5f" },
+  end: { l: "Endurance", c: "#2e8bff" },
+  long: { l: "Sortie longue", c: "#1f63d6" },
+  longplus: { l: "Longue + seuil", c: "#1f63d6", hard: 1 },
+  rec: { l: "Récupération", c: "#8e8e93" },
+  test: { l: "Test FTP", c: "#a855f7", hard: 1 },
+  testc: { l: "Test court", c: "#a855f7", hard: 1 },
 };
 const isKey = t => !!(t && TYPES[t] && TYPES[t].hard && t !== "longplus");
 const isLong = t => t === "long" || t === "longplus";
@@ -41,7 +42,7 @@ const isLong = t => t === "long" || t === "longplus";
 const POOLS = [["vo2", "thr", "vo2r"], ["vo2r", "ss", "vo2"], ["thr", "vo2r", "ss"], ["ss", "thr", "tempo"]];
 const MUSCU = { push: { l: "Push", d: "pecs, épaules, triceps" }, pull: { l: "Pull", d: "dos, biceps" }, legs: { l: "Legs", d: "jambes" }, upper: { l: "Upper", d: "haut du corps" } };
 const MORDER = ["push", "pull", "legs", "upper"];  // ordre du programme ; avec moins de 4 matins on garde les premières
-const ZONES = [[.56, "Z1", "#a5b1bd"], [.76, "Z2", "#4aa3df"], [.88, "Z3", "#2fb380"], [1.05, "Z4", "#f2b134"], [1.2, "Z5", "#ef6c3a"], [9, "Z6", "#d6336c"]];
+const ZONES = [[.56, "Z1", "#8e8e93"], [.76, "Z2", "#2e8bff"], [.88, "Z3", "#3fbf5f"], [1.05, "Z4", "#ffc21a"], [1.2, "Z5", "#ff6a2a"], [9, "Z6", "#ff2e2e"]];   // couleurs de zones MyWhoosh / Zwift
 const zoneOf = f => ZONES.findIndex(z => f < z[0]);
 const RPE = ["2/10, très facile", "3-4/10, conversation facile", "5-6/10, soutenu", "7/10, dur mais tenable", "8-9/10, très dur", "9-10/10, maximal"];
 
@@ -527,11 +528,11 @@ function renderHead(prof, form, ready, ph, c) {
   const vo2 = prof.vo2 && prof.vo2.length ? prof.vo2[prof.vo2.length - 1][1] : null, vo2first = prof.vo2 && prof.vo2.length ? prof.vo2[0][1] : null;
   const pct = (v, a, b) => clamp((v - a) / (b - a || 1) * 100, 0, 100);
   const verdict = need <= 0 ? "objectif atteint" : perW <= 1.2 ? "rythme réaliste" : perW <= 2.5 ? "ambitieux mais jouable" : "très ambitieux";
-  const r = ready.today ?? ready.last, rc = r == null ? "var(--muted)" : r >= 75 ? "#2f9e44" : r >= 55 ? "#1c7ed6" : r >= 40 ? "#f08c00" : "#e03131";
+  const r = ready.today ?? ready.last, rc = r == null ? "var(--muted)" : r >= 75 ? "var(--good)" : r >= 55 ? "var(--info)" : r >= 40 ? "var(--warn)" : "var(--bad)";
   const tsbTxt = form.tsb > 5 ? "frais" : form.tsb > -10 ? "équilibré" : form.tsb > -25 ? "chargé" : "très chargé";
   const until = end.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
   return `
-  <section class="card span12 goalcard">
+  <section class="card hud span12 goalcard">
     <div class="gc">
       <div class="g"><div class="gl">FTP</div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts"><span>W</span><span class="arrow">→ ${G.ftp} W</span></div>
         <div class="pbar"><div style="width:${pct(prof.ftp, Math.min(ftp0, prof.ftp) - 20, G.ftp)}%"></div></div>

@@ -18,14 +18,14 @@ const FIT_DAYS = 120;
 const PERIODS = [[3, 92], [6, 183], [12, 365]];           // puces de la courbe : mois → jours
 const SHARE_DAYS = 30, WEEKS = 12;                          // répartition par sport : barre sur 30 jours, 12 semaines empilées
 const MIN_SESSION = 600;                                    // « séance » de la ligne « Ta semaine » : 10 min et plus
-const SPORTS = [["bike", "Vélo", "var(--accent)"], ["run", "Course", "#1c7ed6"], ["strength", "Muscu", "#7048e8"], ["other", "Autre", "var(--ghost)"]];
-const LINE = { ctl: "var(--accent)", atl: "#c2255c", tsb: "#2f9e44" };
-const RECUP_COL = ["#3cc9b4", "#5aa9f2", "#f2a93b", "#f2708a"];   // couleurs du score de récup de l'onglet Récup (thème nuit), valables dans tous les thèmes
+const SPORTS = [["bike", "Vélo", "var(--accent)"], ["run", "Course", "var(--info)"], ["strength", "Muscu", "var(--z7)"], ["other", "Autre", "var(--ghost)"]];
+const LINE = { ctl: "var(--accent)", atl: "#e0457b", tsb: "var(--good)" };
+const RECUP_COL = ["var(--good)", "var(--info)", "var(--warn)", "var(--bad)"];   // états du score de récup : dans l'onglet Récup (html.night), --teal / --accent-2 / --amber / --rose ont les mêmes valeurs
 const K_PERIOD = "synPeriod", K_DETAILS = "synDetails";
 const READY_LOW = 45;                                       // récup du jour sous 45 : seuil du Plan (clé déplacée ou remplacée)
 const TREND = { stablePct: 3 };                             // niveau à ±3 % de celui d'il y a 30 jours = « stable »
 const CURVE_DAYS = 183;                                     // mini-courbe du niveau : 6 mois
-const BAND = { good: "var(--good)", mid: "#c77700", bad: "var(--bad)" };
+const BAND = { good: "var(--good)", mid: "var(--warn)", bad: "var(--bad)" };
 // Objectifs de fin d'année (projection)
 const GOALS = { ftp: 300, vo2: 65, date: "2026-12-31" };
 const PROJ = { days: 120, justFrac: .6, rampFrac: .75, ftpDec: 0, vo2Dec: 1 };   // tendance sur 120 jours ; « un peu juste » si le rythme actuel couvre au moins 60 % du rythme nécessaire ; test rampe : FTP = 75 % de la meilleure minute (comme le Plan)
@@ -386,16 +386,16 @@ function gauge(v, min, max, segs, good, unitTxt) {
   const labs = (() => { let l0 = min; return segs.map(([hi, , l]) => { const a = pos(l0), b = pos(Math.min(hi, max)); l0 = hi; return `<span style="left:${(a + b) / 2}%">${l}</span>`; }).join(""); })();
   return `<div class="sygbar" role="img" aria-label="${unitTxt}"><div class="sygseg">${bars}</div>${good != null ? `<em class="sygood" style="left:${pos(good)}%">bon pour toi ›</em>` : ""}<b class="sygmark" style="left:${pos(v)}%"></b></div><div class="sygl">${labs}</div>`;
 }
-const FRAIS = { min: -40, max: 25, segs: [[-25, "#f2708a", "très chargé"], [-10, "#f2a93b", "chargé"], [5, "#5aa9f2", "équilibré"], [25, "#3cc9b4", "frais"]], good: 5 };
+const FRAIS = { min: -40, max: 25, segs: [[-25, "var(--bad)", "très chargé"], [-10, "var(--warn)", "chargé"], [5, "var(--info)", "équilibré"], [25, "var(--good)", "frais"]], good: 5 };
 const RECUPG = { min: 0, max: 100, segs: [[READY_LOW, RECUP_COL[3], "basse"], [65, RECUP_COL[2], "moyenne"], [100, RECUP_COL[0], "bonne"]], good: 65 };
 
 // ------------------------------------------------------------------ Rendu : les cinq blocs
 function blkProgress(D) {
-  const P = D.prog; if (!P) return `<section class="card span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2>${note("Pas encore assez d'historique pour calculer ton niveau d'entraînement.")}</section>`;
+  const P = D.prog; if (!P) return `<section class="card hud span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2>${note("Pas encore assez d'historique pour calculer ton niveau d'entraînement.")}</section>`;
   const v = P.v30, arrow = !v ? "" : P.word === "en hausse" ? "↑" : P.word === "en baisse" ? "↓" : "→", c = P.word === "en hausse" ? "var(--good)" : P.word === "en baisse" ? "var(--bad)" : "var(--muted)";
   const ref = v ? `<span class="syvar" style="color:${c}">${Math.abs(v.delta) < .5 ? "inchangé" : `${sgn(v.delta)} pt${Math.abs(v.delta) >= 1.5 ? "s" : ""}${v.pct == null ? "" : ` (${sgn(v.pct)} %)`}`} en 30 jours</span>` : `<span class="syvar">variation sur 30 jours : pas assez de recul</span>`;
   const pk = P.peak ? `<small>${P.atPeak ? "ton plus haut de l'année" : `pic de l'année : ${nf(P.peak.v)} (${dayMonth(P.peak.t)}) · tu es à ${nf(P.share)} %`}</small>` : "";
-  return `<section class="card span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2><p class="syans">${P.text}</p>
+  return `<section class="card hud span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2><p class="syans">${P.text}</p>
     <div class="synum"><span class="crbig syctl">${nf(P.cur)}</span><div class="synumt"><span class="sylab">niveau d'entraînement ${q("niveau")}</span>${ref}${pk}</div></div>${helpP("niveau")}
     <div id="syMini"></div></section>`;
 }
@@ -421,7 +421,7 @@ function blkGoals(D) {
 }
 function blkDet(D) {
   const rows = DETECTORS.filter(([k]) => D.det.res[k].active).map(([k, , , title]) => { const t = DET_TXT[k](D.det.res[k]);
-    return `<div class="sydet on"><div class="syd1"><span class="sydot2" style="background:#e8501c"></span><b>${title}</b></div><p class="bm-p">${t.why}</p><p class="bm-p sytip">À faire : ${t.tip}</p></div>`; }).join("");
+    return `<div class="sydet on"><div class="syd1"><span class="sydot2" style="background:var(--accent)"></span><b>${title}</b></div><p class="bm-p">${t.why}</p><p class="bm-p sytip">À faire : ${t.tip}</p></div>`; }).join("");
   const any = !!rows, nod = DETECTORS.every(([k]) => D.det.res[k].status === "nodata");
   return `<section class="card span12 syblk" id="syDet"><h2>Quelque chose cloche ?</h2><p class="syans ${any ? "" : "syokp"}">${any ? "" : nod ? "" : "✓ "}${detAnswer(D.det.res)}</p>${rows ? `<div class="sydets">${rows}</div>` : ""}</section>`;
 }
@@ -467,7 +467,7 @@ function projChart(box, P, ser, unit, dec, label) {
   const svg = box.querySelector("svg"), tipf = e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = hist[+c.dataset.i]; showTip(e, `<b>${dLong(p.t)}</b><br>${f(p.v)} ${unit}`); };
   svg.addEventListener("pointermove", tipf); svg.addEventListener("pointerdown", tipf); svg.addEventListener("pointerleave", hideTip);
 }
-const verdictCol = v => v === "atteint" || v === "dans les temps" ? "var(--good)" : v === "un peu juste" ? "#c77700" : "var(--bad)";
+const verdictCol = v => v === "atteint" || v === "dans les temps" ? "var(--good)" : v === "un peu juste" ? "var(--warn)" : "var(--bad)";
 const DET_TXT = {
   gray: r => ({ why: `${r.count} séances « ni faciles ni dures » en ${DET.grayDays} jours (plus de ${DET.grayShare * 100} % du temps en zone 3) : fatigantes sans apporter le stimulus d'une vraie séance dure.`, tip: "garde les séances faciles vraiment faciles (zones 1-2) et réserve l'intensité aux séances clés." }),
   load: r => ({ why: `Ta charge des 7 derniers jours (${nf(r.acute)}) est ${nf(r.ratio, 1)}× ta charge hebdomadaire habituelle des 28 jours d'avant (${nf(r.chronic)}).`, tip: "évite d'ajouter de l'intensité cette semaine et garde une journée vraiment facile." }),

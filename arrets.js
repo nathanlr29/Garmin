@@ -14,11 +14,11 @@ function dist(a, b) { const dl = rad(b[0] - a[0]), dn = rad(b[1] - a[1]); const 
 
 // ------------------------------------------------------------------ Catégories
 const CATS = {
-  eau: { ic: "💧", l: "Eau", col: "#1c7ed6" },
-  ravito: { ic: "🥖", l: "Ravito", col: "#e8590c" },
-  wc: { ic: "🚻", l: "Toilettes", col: "#7048e8" },
-  repa: { ic: "🔧", l: "Réparation", col: "#495057" },
-  voir: { ic: "🏰", l: "À voir", col: "#2b8a3e" },
+  eau: { ic: "💧", l: "Eau", col: "#1e88e5" },
+  ravito: { ic: "🥖", l: "Ravito", col: "#ff6a2a" },
+  wc: { ic: "🚻", l: "Toilettes", col: "#a855f7" },
+  repa: { ic: "🔧", l: "Réparation", col: "#5c5c66" },
+  voir: { ic: "🏰", l: "À voir", col: "#16a34a" },
 };
 // sous-types : icône, libellé, nom court (Edge), symbole GPX, type de point de parcours FIT
 const KINDS = {

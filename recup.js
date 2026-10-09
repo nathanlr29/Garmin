@@ -29,7 +29,7 @@ function moonSvg(m, size = 52) {
   const outer = wax ? 1 : 0, inner = wax ? (cres ? 0 : 1) : (cres ? 1 : 0);
   const lit = m.illum < 0.02 ? "" : m.illum > 0.98 ? `<circle cx="${c}" cy="${c}" r="${r}" fill="#f4ecd2"/>` :
     `<path d="M${c},${c - r} A${r},${r} 0 0 ${outer} ${c},${c + r} A${rx.toFixed(2)},${r} 0 0 ${inner} ${c},${c - r}Z" fill="#f4ecd2"/>`;
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-label="${m.name}"><circle cx="${c}" cy="${c}" r="${r}" fill="#2a3158"/>${lit}<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(255,255,255,.12)"/></svg>`;
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-label="${m.name}"><circle cx="${c}" cy="${c}" r="${r}" fill="#2a2a30"/>${lit}<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(255,255,255,.12)"/></svg>`;
 }
 function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars / octobre)
   const m = d.getMonth(); if ((m !== 2 && m !== 9) || d.getDay() !== 0) return null;
@@ -418,7 +418,7 @@ function renderReg(P) {
   const ab = bs.reduce((a, b) => a + b, 0) / bs.length, aw = ws.reduce((a, b) => a + b, 0) / ws.length;
   s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(ab)}" y2="${y(ab)}" stroke="var(--accent)" stroke-dasharray="3 4" opacity=".7"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(aw)}" y2="${y(aw)}" stroke="var(--amber)" stroke-dasharray="3 4" opacity=".7"/>`;
   N.forEach((d, i) => { const cx = m.l + gw * i + gw / 2; s += `<rect x="${cx - bw / 2}" y="${y(bs[i])}" width="${bw}" height="${Math.max(2, y(ws[i]) - y(bs[i]))}" rx="${bw / 2}" fill="url(#rg)" data-i="${i}"/>`; });
-  s = s.replace("<g class=\"axis\">", `<defs><linearGradient id="rg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--amber)"/></linearGradient></defs><g class="axis">`);
+  s = s.replace("<g class=\"axis\">", `<defs><linearGradient id="rg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--deep)"/><stop offset="1" stop-color="var(--light)"/></linearGradient></defs><g class="axis">`);
   box.innerHTML = s + "</svg>";
   const fmt = v => `${pad(Math.floor((18 * 60 + v) / 60) % 24)}:${pad(Math.round(v % 60))}`;
   const sd = arr => { const a = arr.reduce((x, y) => x + y, 0) / arr.length; return Math.sqrt(arr.reduce((x, y) => x + (y - a) ** 2, 0) / arr.length); };
@@ -435,14 +435,14 @@ function renderBB(P) {
   const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(260, Math.max(180, W * .44))), m = { l: 30, r: 8, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const mm = t => { const [h, mi] = t.split(":").map(Number); return h * 60 + mi; };
   const x = v => m.l + v / 1440 * iw, y = v => m.t + ih - v / 100 * ih;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Body Battery aujourd'hui"><defs><linearGradient id="bbg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--teal)" stop-opacity=".45"/><stop offset="1" stop-color="var(--teal)" stop-opacity="0"/></linearGradient></defs><g class="axis">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Body Battery aujourd'hui"><g class="axis">`;
   [0, 25, 50, 75, 100].forEach(v => s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`);
   for (let h = 0; h <= 24; h += W < 480 ? 6 : 3) s += `<text x="${x(h * 60)}" y="${H - 5}" text-anchor="middle">${h} h</text>`;
   s += "</g>";
   const pts = bb.map(([t, v]) => [x(mm(t)), y(v)]);
   const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
-  s += `<path d="${d}L${pts[pts.length - 1][0]},${y(0)}L${pts[0][0]},${y(0)}Z" fill="url(#bbg)"/><path d="${d}" fill="none" stroke="var(--teal)" stroke-width="2.4" stroke-linejoin="round"/>`;
-  const lp = pts[pts.length - 1]; s += `<circle cx="${lp[0]}" cy="${lp[1]}" r="4.5" fill="var(--teal)" stroke="var(--card)" stroke-width="2"/><text x="${lp[0] + 8}" y="${lp[1] - 8}" font-weight="700" font-size="13" fill="var(--ink)">${bb[bb.length - 1][1]}</text>`;
+  s += `<path d="${d}L${pts[pts.length - 1][0]},${y(0)}L${pts[0][0]},${y(0)}Z" fill="var(--info)" fill-opacity=".16"/><path d="${d}" fill="none" stroke="var(--info)" stroke-width="2.4" stroke-linejoin="round"/>`;
+  const lp = pts[pts.length - 1]; s += `<circle cx="${lp[0]}" cy="${lp[1]}" r="4.5" fill="var(--info)" stroke="var(--card)" stroke-width="2"/><text x="${lp[0] + 8}" y="${lp[1] - 8}" font-weight="700" font-size="13" fill="var(--ink)">${bb[bb.length - 1][1]}</text>`;
   box.innerHTML = s + "</svg>";
 }
 

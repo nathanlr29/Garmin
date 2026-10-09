@@ -86,17 +86,17 @@ async function render() {
     const open = box.querySelector("details.chmore")?.open;
     const pct = Math.min(100, km / lim * 100);
     let st, col, msg;
-    if (wet.length) { st = "Graissage obligatoire"; col = "#e03131"; msg = `Sortie sous la pluie le ${fmtD(wet[0].a.dt)} (${String(wet[0].mm).replace(".", ",")} mm) : la Squirt est une cire, l'eau la lessive. Nettoie, sèche et regraisse avant la prochaine sortie.`; }
-    else if (km >= lim) { st = "À graisser"; col = "#e8501c"; msg = `${nf(km)} km dehors depuis le dernier graissage : c'est le moment.`; }
-    else if (km >= lim * .8) { st = "Bientôt"; col = "#f08c00"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
-    else { st = "OK"; col = "#2f9e44"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
+    if (wet.length) { st = "Graissage obligatoire"; col = "var(--bad)"; msg = `Sortie sous la pluie le ${fmtD(wet[0].a.dt)} (${String(wet[0].mm).replace(".", ",")} mm) : la Squirt est une cire, l'eau la lessive. Nettoie, sèche et regraisse avant la prochaine sortie.`; }
+    else if (km >= lim) { st = "À graisser"; col = "var(--accent)"; msg = `${nf(km)} km dehors depuis le dernier graissage : c'est le moment.`; }
+    else if (km >= lim * .8) { st = "Bientôt"; col = "var(--warn)"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
+    else { st = "OK"; col = "var(--good)"; msg = `Encore ${nf(lim - km)} km environ avant le prochain graissage.`; }
     box.classList.toggle("chdue", st !== "OK" && st !== "Bientôt");
     box.innerHTML = `<h2>Chaîne <small>Squirt · graissée ${days === 0 ? "aujourd'hui" : days === 1 ? "hier" : `il y a ${days} jours`}</small><span class="chright"><span class="chst" style="background:${col}">${st}</span>${SY ? SY.dot() : ""}</span></h2>
       <div class="chrow"><div class="chkm"><b>${nf(km)}</b> / ${lim} km dehors</div><div class="chbar"><div style="width:${pct}%;background:${col}"></div></div></div>
       <p class="chmsg">${msg}${rainKnown ? "" : " <small>(météo indisponible : je ne peux pas détecter la pluie pour l'instant)</small>"}</p>
       <details class="chmore"><summary>Graissage et réglages</summary>${form}
         <div class="chopts"><label>Rappel tous les <select id="chKm">${[150, 200, 250, 300, 400].map(v => `<option ${v === lim ? "selected" : ""}>${v}</option>`).join("")}</select> km</label><span class="chnote">trajets de moins de 30 min ignorés (vélo du taff)</span></div>
-        ${rides.length ? `<div class="chlist">${rides.slice(-6).reverse().map(a => { const w = wet.find(x => x.a === a); return `<div>${fmtD(a.dt)} · ${nf(a.km)} km${w ? ` · <b style="color:#e03131">pluie ${String(w.mm).replace(".", ",")} mm</b>` : ""}</div>`; }).join("")}</div>` : ""}
+        ${rides.length ? `<div class="chlist">${rides.slice(-6).reverse().map(a => { const w = wet.find(x => x.a === a); return `<div>${fmtD(a.dt)} · ${nf(a.km)} km${w ? ` · <b style="color:var(--bad)">pluie ${String(w.mm).replace(".", ",")} mm</b>` : ""}</div>`; }).join("")}</div>` : ""}
         ${hist.length > 1 ? `<div class="chhist">Graissages précédents : ${hist.slice(1, 5).map(h => fmtD(new Date(h))).join(", ")}</div>` : ""}
         ${SY ? SY.settingsHtml() : ""}
       </details>`;
@@ -119,19 +119,18 @@ function bind(box) {
 const css = document.createElement("style");
 css.textContent = `#chain h2{display:flex;align-items:center;gap:8px}
 #chain .chright{margin-left:auto;display:flex;align-items:center;gap:6px}
-#chain .chst{color:#fff;border-radius:999px;padding:3px 10px;font-size:11.5px;letter-spacing:.02em}
-#chain.chdue{border-color:#e03131;box-shadow:0 0 0 1px #e03131 inset,var(--shadow)}
-#chain .chrow{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
-#chain .chkm{font-size:14px;color:var(--muted);white-space:nowrap}#chain .chkm b{font-size:24px;color:var(--ink);font-weight:800}
-#chain .chbar{height:10px;border-radius:999px;background:var(--h0);overflow:hidden}#chain .chbar div{height:100%;border-radius:999px}
-#chain .chmsg{font-size:13.5px;margin:10px 0 0;line-height:1.4}#chain .chmsg small{color:var(--muted)}
-#chain .chmore summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent);margin-top:10px}
-#chain .chform,#chain .chopts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:10px;font-size:13px}
-#chain input[type=datetime-local],#chain select{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-left:4px}
-#chain .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-#chain .chlist{margin-top:10px;font-size:12.5px;color:var(--muted);display:grid;gap:3px}
-#chain .chnote{color:var(--muted);font-size:12px}
-#chain .chhist{margin-top:8px;font-size:12px;color:var(--muted)}`;
+#chain .chst{color:#fff;border-radius:var(--r-sm);padding:3px 8px;font-size:12px;font-weight:700}
+#chain.chdue{border-color:var(--bad);box-shadow:inset 3px 0 0 var(--bad)}
+#chain .chrow{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+#chain .chkm{font-size:14px;color:var(--muted);white-space:nowrap}#chain .chkm b{font:700 28px/1 var(--font-num);color:var(--ink)}
+#chain .chbar{height:8px;border-radius:2px;background:var(--h0);overflow:hidden}#chain .chbar div{height:100%;border-radius:2px}
+#chain .chmsg{font-size:14px;margin:10px 0 0;line-height:1.45}#chain .chmsg small{color:var(--muted)}
+#chain .chmore summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--accent-ink);margin-top:10px}
+#chain .chform,#chain .chopts{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:10px;font-size:13.5px}
+#chain input[type=datetime-local],#chain select{font:inherit;font-size:14px;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-md);padding:6px 8px;margin-left:4px}
+#chain .chlist{margin-top:10px;font-size:13px;color:var(--muted);display:grid;gap:3px}
+#chain .chnote{color:var(--muted);font-size:12.5px}
+#chain .chhist{margin-top:8px;font-size:12.5px;color:var(--muted)}`;
 document.head.appendChild(css);
 function status() {  // pour l'onglet Sortie : km depuis le dernier graissage
   const hist = ls.get(K_LUBE, []); if (!hist.length) return null;

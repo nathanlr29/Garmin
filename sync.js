@@ -138,14 +138,13 @@ function importLink() {  // #sync=<base64 de { url, key }> : configure un nouvel
 
 const css = document.createElement("style");
 css.textContent = `.syncdot{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;line-height:1;color:#fff;background:var(--muted);cursor:help;flex:none}
-.syncdot[data-s=ok]{background:#2f9e44}.syncdot[data-s=wait]{background:#f08c00}.syncdot[data-s=err]{background:#e03131}.syncdot[data-s=sync]{background:var(--muted)}
+.syncdot[data-s=ok]{background:var(--good)}.syncdot[data-s=wait]{background:var(--warn)}.syncdot[data-s=err]{background:var(--bad)}.syncdot[data-s=sync]{background:var(--muted)}
 .syncdot[hidden]{display:none}
 .syncbox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px;display:grid;gap:8px}
 .syncbox .synch{font-weight:700}.syncbox .syncstate{margin:0;color:var(--muted);font-size:12.5px}
 .syncbox label{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
-.syncbox input{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
+.syncbox input{font:inherit;font-size:14px;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-md);padding:6px 8px;min-width:0;width:100%;box-sizing:border-box}
 .syncbox .syncbtns{display:flex;flex-wrap:wrap;gap:8px}
-.syncbox .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .syncbox .syncshare{margin-top:6px}
 .syncbox .syncout{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}.syncbox .syncout:empty{display:none}`;
 document.head.appendChild(css);

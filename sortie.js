@@ -18,8 +18,8 @@ const DIRF = ["le nord", "le nord-nord-est", "le nord-est", "l'est-nord-est", "l
 const vers = d => DIRF[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
 const vdu = d => { const n = dirName(d); return /^[AEIOU]/.test(n) ? `d'${n}` : `du ${n}`; };  // « vent d'ouest », « vent du nord »
 const WMO = c => c == null ? "" : c === 0 ? "Ciel clair" : c === 1 ? "Peu nuageux" : c === 2 ? "Éclaircies" : c === 3 ? "Couvert" : c <= 48 ? "Brouillard" : c <= 57 ? "Bruine" : c <= 67 ? "Pluie" : c <= 77 ? "Neige" : c <= 82 ? "Averses" : c <= 86 ? "Averses de neige" : "Orage";
-const COL = { face: "#e03131", travers: "#f2a93b", dos: "#2f9e44", calme: "#868e96" };
-const CAT = [["HC", 80000, "#7b1fa2"], ["1", 64000, "#c2255c"], ["2", 32000, "#e03131"], ["3", 16000, "#e8501c"], ["4", 8000, "#f08c00"], ["", 3500, "#a0896b"]];
+const COL = { face: "#e5484d", travers: "#f2a20d", dos: "#16a34a", calme: "#8e8e93" };   // vent (aussi sur la carte : couleurs en clair, pas de variables CSS pour Leaflet)
+const CAT = [["HC", 80000, "#8b2fc9"], ["1", 64000, "#d6245a"], ["2", 32000, "#ff2e2e"], ["3", 16000, "#ff6a2a"], ["4", 8000, "#e09a00"], ["", 3500, "#8e8e93"]];
 
 const SO = { route: null, P: null, climbs: null, wx: null, wxKey: null, res: null, map: null, layers: [], hover: null, busy: false };
 
@@ -239,7 +239,7 @@ function renderLoad() {
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
     <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
     <input type="file" id="soFile" hidden>` : `
-    <h2>Planifier une sortie</h2>
+    <h2>Choisis ton parcours</h2>
     <label class="sodrop" id="soDrop"><input type="file" id="soFile"><b>Importer une trace GPX</b><span>Dans Garmin Connect : Entraînement et planification → Parcours → ouvre le parcours → ⋯ → Exporter au format GPX.</span></label>
     <div class="sorecent"><button class="btn2" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "ou refaire une sortie Garmin"}</button></div>
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
@@ -344,11 +344,11 @@ function renderTiles(r, err) {
   const tile = (l, v, s, c) => `<div class="tile"><div class="l">${l}</div><div class="v"${c ? ` style="color:${c}"` : ""}>${v}</div><div class="s">${s}</div></div>`;
   $("soTiles").innerHTML = [
     tile("Distance", `${fmt(r.total, 1)}<small> km</small>`, `${fmt(gain(SO.P))} m D+ · ${fmt(r.total ? gain(SO.P) / r.total : 0)} m/km`),
-    tile("Durée estimée", dur(r.secs), `arrivée vers ${hm(r.end)}${late ? " · après le coucher du soleil" : ""}`, late ? "#e03131" : null),
+    tile("Durée estimée", dur(r.secs), `arrivée vers ${hm(r.end)}${late ? " · après le coucher du soleil" : ""}`, late ? "var(--bad)" : null),
     r.ok ? tile("Vent", `${fmt(r.ws)}<small> km/h</small>`, `${vdu(r.wd)} · rafales ${fmt(r.gust)} km/h`) : tile("Vent", "–", err || "prévisions indisponibles"),
-    r.ok ? tile("Vent de face", `${fmt(r.face / r.total * 100)}<small> %</small>`, `de dos ${fmt(r.dos / r.total * 100)} % · côté ${fmt(r.trav / r.total * 100)} %`, r.face / r.total > .4 ? "#e03131" : r.dos > r.face ? "#2f9e44" : null) : "",
+    r.ok ? tile("Vent de face", `${fmt(r.face / r.total * 100)}<small> %</small>`, `de dos ${fmt(r.dos / r.total * 100)} % · côté ${fmt(r.trav / r.total * 100)} %`, r.face / r.total > .4 ? "var(--bad)" : r.dos > r.face ? "var(--good)" : null) : "",
     r.ok ? tile("Températures", `${fmt(r.tmin)}–${fmt(r.tmax)}<small> °C</small>`, `ressenti mini ${fmt(r.amin)} °C`) : "",
-    r.ok ? tile("Pluie", r.rain >= .2 ? `${fmt(r.rain, 1)}<small> mm</small>` : `${fmt(r.ppMax)}<small> %</small>`, r.rain >= .2 ? `risque max ${fmt(r.ppMax)} % · ${WMO(r.codeMax).toLowerCase()}` : `risque max · ${WMO(r.codeMax).toLowerCase()}`, r.rain >= 1 ? "#1c7ed6" : null) : "",
+    r.ok ? tile("Pluie", r.rain >= .2 ? `${fmt(r.rain, 1)}<small> mm</small>` : `${fmt(r.ppMax)}<small> %</small>`, r.rain >= .2 ? `risque max ${fmt(r.ppMax)} % · ${WMO(r.codeMax).toLowerCase()}` : `risque max · ${WMO(r.codeMax).toLowerCase()}`, r.rain >= 1 ? "#1e88e5" : null) : "",
   ].join("");
 }
 function renderVerdict(r, rev, best, err, s) {
@@ -373,7 +373,7 @@ function renderBest(best, s) {
   if (!best.length) { box.innerHTML = `<p class="note">Choisis une date dans les 16 prochains jours.</p>`; $("soBestInfo").textContent = ""; return; }
   const mx = Math.max(...best.map(b => b.p)), mn = Math.min(...best.map(b => b.p));
   $("soBestInfo").textContent = new Date(startOf(s)).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric" });
-  box.innerHTML = `<div class="sobest">${best.map(b => { const q = mx > mn ? 1 - (b.p - mn) / (mx - mn) : 1, col = q > .75 ? "#2f9e44" : q > .45 ? "#f2a93b" : "#e03131";
+  box.innerHTML = `<div class="sobest">${best.map(b => { const q = mx > mn ? 1 - (b.p - mn) / (mx - mn) : 1, col = q > .75 ? "var(--good)" : q > .45 ? "var(--warn)" : "var(--bad)";
     return `<button data-h="${b.h}" class="${b.h === s.hour ? "sel" : ""}" title="${b.h} h : vent de face ${fmt(b.r.face / b.r.total * 100)} %, pluie ${fmt(b.r.rain, 1)} mm, ${fmt(b.r.tmin)}-${fmt(b.r.tmax)} °C"><i style="height:${18 + q * 62}px;background:${col}"></i><span>${b.h}</span></button>`; }).join("")}</div>
     <p class="note">Plus la barre est haute, plus le créneau est agréable (vent, pluie, froid, nuit). Touche une heure pour la choisir.</p>`;
   box.querySelectorAll("[data-h]").forEach(b => b.onclick = () => { LS.set("sortieSet", { ...settings(), hour: +b.dataset.h, min: 0 }); renderLoad(); compute(); });
@@ -382,7 +382,7 @@ function renderBest(best, s) {
 function arrowIcon(w) {
   const sz = 28;
   return L.divIcon({ className: "sowind", iconSize: [sz, sz + 14], iconAnchor: [sz / 2, sz / 2],
-    html: `<svg viewBox="-17 -17 34 34" width="${sz}" height="${sz}" style="transform:rotate(${(w.wd + 180) % 360}deg)"><circle r="15" fill="#fff" stroke="#1c7ed6" stroke-width="1.5" opacity=".92"/><path d="M0,-11 L7,5 L0,1 L-7,5 Z" fill="#1c7ed6"/></svg><b>${fmt(w.ws)}</b>` });
+    html: `<svg viewBox="-17 -17 34 34" width="${sz}" height="${sz}" style="transform:rotate(${(w.wd + 180) % 360}deg)"><circle r="15" fill="#fff" stroke="#1e88e5" stroke-width="1.5" opacity=".92"/><path d="M0,-11 L7,5 L0,1 L-7,5 Z" fill="#1e88e5"/></svg><b>${fmt(w.ws)}</b>` });
 }
 async function renderMap(r, wx) {
   try { await ensureLeaflet(); } catch (e) { $("soMap").innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
@@ -397,7 +397,7 @@ async function renderMap(r, wx) {
   add(L.polyline(P.map(p => [p.lat, p.lon]), { color: "#fff", weight: 8, opacity: .9 }));
   for (let i = 0; i < P.length - 1; i += seg) {
     const j = Math.min(P.length - 1, i + seg), mid = Math.floor((i + j) / 2), w = r.W[mid] || r.W[j];
-    const c = !w ? "#e8501c" : w.ws < 8 ? COL.calme : r.Hd[mid] > w.ws * .5 ? COL.face : r.Hd[mid] < -w.ws * .5 ? COL.dos : COL.travers;
+    const c = !w ? "#fc4c02" : w.ws < 8 ? COL.calme : r.Hd[mid] > w.ws * .5 ? COL.face : r.Hd[mid] < -w.ws * .5 ? COL.dos : COL.travers;
     add(L.polyline(P.slice(i, j + 1).map(p => [p.lat, p.lon]), { color: c, weight: 5, opacity: 1, lineCap: "round" }));
   }
   // montées
@@ -405,9 +405,9 @@ async function renderMap(r, wx) {
   SO.climbs.forEach((c, k) => add(L.marker([P[c.hi].lat, P[c.hi].lon], { icon: L.divIcon({ className: "soclimb", html: `<span style="background:${c.col}">${c.cat || "▲"}</span>`, iconSize: [22, 22], iconAnchor: [11, 11] }) }).bindTooltip(`Montée ${k + 1} · ${fmt(c.len / 1000, 1)} km à ${fmt(c.avg, 1)} %`)));
   // flèches de vent aux points météo, à l'heure de passage
   if (wx) wx.S.filter((_, i, a) => a.length <= 9 || i % Math.ceil(a.length / 9) === 0).forEach(p => { const k = Math.min(P.length - 1, Math.round(p.d / STEP)), w = r.W[k] || wxAt(wx, p.d, r.T[k]); if (w) add(L.marker([p.lat, p.lon], { icon: arrowIcon(w), interactive: false })); });
-  add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#2f9e44", fillOpacity: 1 }).bindTooltip("Départ"));
-  add(L.circleMarker([P[P.length - 1].lat, P[P.length - 1].lon], { radius: 6, color: "#fff", weight: 3, fillColor: "#15171c", fillOpacity: 1 }).bindTooltip("Arrivée"));
-  SO.hover = add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#e8501c", opacity: 0, fillOpacity: 0 }));
+  add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#16a34a", fillOpacity: 1 }).bindTooltip("Départ"));
+  add(L.circleMarker([P[P.length - 1].lat, P[P.length - 1].lon], { radius: 6, color: "#fff", weight: 3, fillColor: "#222226", fillOpacity: 1 }).bindTooltip("Arrivée"));
+  SO.hover = add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#fc4c02", opacity: 0, fillOpacity: 0 }));
   SO.map.fitBounds(L.latLngBounds(P.map(p => [p.lat, p.lon])), { padding: [24, 24] });
   setTimeout(() => SO.map.invalidateSize(), 50);
 }
@@ -1075,7 +1075,7 @@ function invertLoop(c) {  // même tracé, parcouru dans l'autre sens : pas de n
 }
 
 // --- Carte des propositions
-const GC = { sel: "#e8501c", oth: "#868e96" };
+const GC = { sel: "#fc4c02", oth: "#8e8e93" };
 async function renderGenMap() {
   const R = GEN.res, el = $("gMap"); if (!R || !el) return;
   try { await ensureLeaflet(); } catch (e) { el.innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
@@ -1100,9 +1100,9 @@ async function renderGenMap() {
   for (let k = 0; k < N; k++) { const p = P[Math.round((k + .5) / N * (P.length - 1))];
     add(L.marker([p.lat, p.lon], { interactive: false, keyboard: false, icon: L.divIcon({ className: "gchev", iconSize: [18, 18], iconAnchor: [9, 9],
       html: `<svg viewBox="-9 -9 18 18" width="18" height="18" style="transform:rotate(${Math.round(p.b)}deg)"><circle r="8" fill="${GC.sel}" stroke="#fff" stroke-width="1.5"/><path d="M-3.5,2 L0,-2.5 L3.5,2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>` }) })); }
-  add(L.circleMarker([R.key.lat, R.key.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#2f9e44", fillOpacity: 1 }).bindTooltip("Départ"));
+  add(L.circleMarker([R.key.lat, R.key.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#16a34a", fillOpacity: 1 }).bindTooltip("Départ"));
   GEN.wind.getContainer().innerHTML = R.calm ? `<b>Vent faible</b><small>${fmt(R.ws)} km/h</small>`
-    : `<svg viewBox="-17 -17 34 34" width="30" height="30" style="transform:rotate(${Math.round((R.wd + 180) % 360)}deg)"><circle r="15" fill="#fff" stroke="#1c7ed6" stroke-width="1.5"/><path d="M0,-11 L7,5 L0,1 L-7,5 Z" fill="#1c7ed6"/></svg><b>${fmt(R.ws)} km/h</b><small>vent ${vdu(R.wd)}</small>`;
+    : `<svg viewBox="-17 -17 34 34" width="30" height="30" style="transform:rotate(${Math.round((R.wd + 180) % 360)}deg)"><circle r="15" fill="#fff" stroke="#1e88e5" stroke-width="1.5"/><path d="M0,-11 L7,5 L0,1 L-7,5 Z" fill="#1e88e5"/></svg><b>${fmt(R.ws)} km/h</b><small>vent ${vdu(R.wd)}</small>`;
   map.invalidateSize();
   if (GEN.fit && el.offsetWidth) { map.fitBounds(L.latLngBounds(R.list.flatMap(c => c.P.filter((_, i) => i % 10 === 0).map(p => [p.lat, p.lon]))), { padding: [18, 18] }); GEN.fit = false; }
   else if (GEN.fit) setTimeout(renderGenMap, 120);  // panneau pas encore affiché
