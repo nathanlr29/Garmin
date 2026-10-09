@@ -183,6 +183,7 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
   <main id="app"></main>
   <footer>Données Garmin Connect · Page générée automatiquement</footer>
 </div>
+<div id="recProbe" hidden></div>
 <div class="tip" id="tip"></div>
 <div class="pop" id="pop" role="dialog"></div>
 
@@ -190,10 +191,14 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
 "use strict";
 // ------------------------------------------------------------------ Config & state
 const RIDE_TYPES = new Set(["Ride","VirtualRide","GravelRide","MountainBikeRide","EBikeRide","EMountainBikeRide","Velomobile","Handcycle"]);
+// Course = Charge.RUN_TYPES (charge.js est chargé après ce script : lu au moment du filtre, jamais au chargement)
+const isRunAct = a => !!(window.Charge && Charge.RUN_TYPES.has(a.t));
+const isRunIndoor = a => a.t==="treadmill_running" || a.t==="virtual_run";   // tapis : badge TAPIS, pas de tracé (isIndoor reste celui du vélo)
 const SPORTS = [
   {id:"bike", label:"Vélo", f:a=>RIDE_TYPES.has(a.t)},
   {id:"out", label:"Extérieur", f:a=>RIDE_TYPES.has(a.t) && !isIndoor(a)},
   {id:"in", label:"Home trainer", f:a=>RIDE_TYPES.has(a.t) && isIndoor(a)},
+  {id:"run", label:"Course", f:isRunAct},
   {id:"all", label:"Tout", f:()=>true},
 ];
 const MONTHS = ["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
@@ -212,6 +217,12 @@ function wd(dt){return (dt.getDay()+6)%7} // 0 = lundi
 function hfmt(sec){const h=Math.floor(sec/3600),m=Math.round(sec%3600/60);return h?`${h} h ${String(m).padStart(2,"0")}`:`${m} min`}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmtDate(dt,withYear){return dt.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short",...(withYear?{year:"numeric"}:{})})}
+// Course à pied (filtre « Course ») : allure en min:s/km à la place de la vitesse
+const runMode=()=>S.sport==="run";
+function paceTxt(sec){if(!isFinite(sec)||sec<=0)return "–";let m=Math.floor(sec/60),s=Math.round(sec%60);if(s===60){m++;s=0}return m+":"+String(s).padStart(2,"0")}
+function timeTxt(sec){sec=Math.round(sec);const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${m}:${String(s).padStart(2,"0")}`}
+const actPace=a=>a.km>0&&a.mt>0?a.mt/a.km:null;   // s/km en mouvement
+const goalKm=()=>+(runMode()?S.cfg.objectif_km_course:S.cfg.objectif_km)||0;   // objectif_km_course vide ou 0 : pas de barre
 
 // ------------------------------------------------------------------ Data loading
 async function getJSON(url,fallback){
@@ -268,7 +279,7 @@ function render(){
   <div class="grid">
     <section class="card hero span12" id="hero"></section>
     <section class="span12"><div class="tiles" id="tiles"></div></section>
-    <section class="card span12" id="chain"></section>
+    <section class="card span12" id="chain"${runMode()?" hidden":""}></section>
     <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
     <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="shuffle">Autres anecdotes</button></h2><div class="facts" id="facts"></div></section>
@@ -290,7 +301,7 @@ function render(){
   renderHeat(cur.daily,Y,isCur,todayIdx,acts);
   renderRides();
   renderYears();
-  window.Chain?.render();
+  if(!runMode()) window.Chain?.render();   // graissage de chaîne : propre au vélo
   document.getElementById("shuffle").onclick=()=>{S.factSeed++;renderFacts(acts,Y,isCur,todayIdx)};
 }
 
@@ -310,8 +321,8 @@ function renderChips(){
   y.innerHTML=S.years.map(v=>`<button class="chip" aria-pressed="${v===S.year}" data-y="${v}">${v}</button>`).join("");
   const present=new Set(S.all.map(a=>a.t));
   const hasOther=[...present].some(t=>!RIDE_TYPES.has(t));
-  const hasIn=S.all.some(a=>RIDE_TYPES.has(a.t)&&isIndoor(a));
-  s.innerHTML=SPORTS.filter(x=>(x.id!=="all"||hasOther)&&((x.id!=="in"&&x.id!=="out")||hasIn))
+  const hasIn=S.all.some(a=>RIDE_TYPES.has(a.t)&&isIndoor(a)), hasRun=S.all.some(isRunAct);
+  s.innerHTML=SPORTS.filter(x=>(x.id!=="all"||hasOther)&&((x.id!=="in"&&x.id!=="out")||hasIn)&&(x.id!=="run"||hasRun))
     .map(v=>`<button class="chip" aria-pressed="${v.id===S.sport}" data-s="${v.id}">${v.label}</button>`).join("");
   if(!s.querySelector('[aria-pressed="true"]')){S.sport="bike";s.firstElementChild?.setAttribute("aria-pressed","true")}
   y.onclick=e=>{const b=e.target.closest("[data-y]");if(!b)return;S.year=+b.dataset.y;store.set("year",S.year);render()};
@@ -328,7 +339,7 @@ function countUp(el,to,dur=1100){
 }
 
 function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
-  const goal=+S.cfg.objectif_km||0;
+  const goal=goalKm();
   const n=daysInYear(Y), elapsed=todayIdx+1;
   const proj=isCur?km/elapsed*n:km;
   const diff=km-prevSame;
@@ -353,7 +364,7 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
     goalHtml=`<div class="goal"><div class="goalrow"><span>Projection au 31 décembre</span><b>${nf(proj)} km</b></div>
       <div class="goalrow"><span>${Y-1} au total</span><b>${nf(prevTotal)} km</b></div></div>`;
   }
-  const label=S.sport==="in"?"sur home trainer":S.sport==="out"?"en extérieur":S.sport==="all"?"toutes activités":"à vélo";
+  const label=S.sport==="in"?"sur home trainer":S.sport==="out"?"en extérieur":S.sport==="all"?"toutes activités":S.sport==="run"?"en course à pied":"à vélo";
   document.getElementById("hero").innerHTML=`
     <div>
       <div class="big"><span id="bigkm">0</span><span class="unit">km</span></div>
@@ -363,7 +374,27 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
   countUp(document.getElementById("bigkm"),km);
 }
 
+function renderTilesRun(acts){
+  const n=acts.length, mt=sum(acts,a=>a.mt), el=sum(acts,a=>a.el), km=sum(acts,a=>a.km);
+  const outdoor=acts.filter(a=>!isRunIndoor(a)&&actPace(a));
+  const pace=outdoor.length?sum(outdoor,a=>a.mt)/Math.max(1,sum(outdoor,a=>a.km)):null;
+  const longest=maxBy(acts,a=>a.km), ge10=acts.filter(a=>a.km>=10).length, ge21=acts.filter(a=>a.km>=21.1).length;
+  const hrActs=acts.filter(a=>a.hr>0), hrAvg=sum(hrActs,a=>a.hr*a.mt)/Math.max(1,sum(hrActs,a=>a.mt));
+  const tss=window.Charge?sum(acts,a=>Charge.tssOf(a)):0;
+  const tiles=[
+    ["Sorties",nf(n),"",`${nf(km/Math.max(1,n),1)} km en moyenne`],
+    ["Temps de course",nf(Math.floor(mt/3600)),"h",`${nf(mt/3600/Math.max(1,n),1)} h par sortie`],
+    ["Dénivelé",nf(el),"m",`${nf(el/Math.max(1,km)*10,1)} m/10 km`],
+    ["Allure moyenne",pace?paceTxt(pace):"–","/km","sorties dehors"],
+    ["Plus longue sortie",longest?nf(longest.km,1):"–","km",longest?fmtDate(longest.dt):""],
+    ["Sorties ≥ 10 km",nf(ge10),"",`${nf(ge21)} de plus de 21 km`],
+    ["FC moyenne",hrActs.length?nf(hrAvg):"–","bpm","sorties avec capteur"],
+    ["Charge (rTSS)",nf(tss),"",`${nf(tss/Math.max(1,n))} par sortie`],
+  ];
+  document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="l">${t[0]}</div><div class="v">${t[1]}<small>${t[2]}</small></div><div class="s">${esc(t[3])||"&nbsp;"}</div></div>`).join("");
+}
 function renderTiles(acts,Y){
+  if(runMode()) return renderTilesRun(acts);
   const n=acts.length, mt=sum(acts,a=>a.mt), el=sum(acts,a=>a.el), km=sum(acts,a=>a.km);
   const outdoor=acts.filter(a=>!isIndoor(a));
   const v=sum(outdoor,a=>a.km)/Math.max(1,sum(outdoor,a=>a.mt))*3600;
@@ -402,7 +433,7 @@ function renderCum(cur,prev,todayIdx,isCur,Y){
   const box=document.getElementById("cum");
   const W=Math.max(300,box.clientWidth), H=Math.round(Math.min(400,Math.max(210,W*.56)));
   const m={l:44,r:12,t:14,b:24}, iw=W-m.l-m.r, ih=H-m.t-m.b;
-  const goal=+S.cfg.objectif_km||0;
+  const goal=goalKm();
   const showGoal=goal>0&&S.sport!=="all";
   const curEnd=isCur?todayIdx:cur.length-1;
   const maxY=Math.max(cur[curEnd]||0,prev[prev.length-1]||0,showGoal?goal:0,10)*1.06;
@@ -456,13 +487,14 @@ function renderHabits(acts){
   const box=document.getElementById("habits");
   if(!acts.length){box.innerHTML=`<div class="empty">Aucune sortie</div>`;return}
   const d=new Array(7).fill(0);acts.forEach(a=>d[wd(a.dt)]+=a.km);const mx=Math.max(...d,1);
-  const ind=acts.filter(isIndoor),indKm=sum(ind,a=>a.km),tot=sum(acts,a=>a.km);
+  const rm=runMode(), ind=acts.filter(rm?isRunIndoor:isIndoor),indKm=sum(ind,a=>a.km),tot=sum(acts,a=>a.km);
   const hrs=[0,0,0,0];acts.forEach(a=>{const h=a.dt.getHours();hrs[h<9?0:h<13?1:h<18?2:3]++});
   const hl=["avant 9 h","9 h–13 h","13 h–18 h","après 18 h"];const hi=hrs.indexOf(Math.max(...hrs));
   box.innerHTML=d.map((v,i)=>`<div class="hbar"><span>${DAYS[i]}</span><div class="tr"><div style="width:${v/mx*100}%;${v===mx?"":"opacity:.55"}"></div></div><span class="num">${nf(v)} km</span></div>`).join("")+
-   `<div style="margin-top:14px;font-size:13px;color:var(--muted)">Extérieur / home trainer</div>
+   (rm&&!ind.length?"":`<div style="margin-top:14px;font-size:13px;color:var(--muted)">${rm?"Dehors / tapis":"Extérieur / home trainer"}</div>
     <div class="split"><div style="width:${(1-indKm/Math.max(tot,1))*100}%"></div><div style="width:${indKm/Math.max(tot,1)*100}%"></div></div>
-    <div class="goalrow"><span><b>${nf(100-indKm/Math.max(tot,1)*100)} %</b> dehors</span><span><b>${nf(ind.length)}</b> séances indoor · ${hfmt(sum(ind,a=>a.mt))}</span></div>
+    <div class="goalrow"><span><b>${nf(100-indKm/Math.max(tot,1)*100)} %</b> dehors</span><span><b>${nf(ind.length)}</b> séances ${rm?"sur tapis":"indoor"} · ${hfmt(sum(ind,a=>a.mt))}</span></div>`)+
+   `
     <div class="goalrow" style="margin-top:10px"><span>Créneau favori</span><b>${hl[hi]} (${nf(hrs[hi]/acts.length*100)} %)</b></div>`;
 }
 
@@ -471,7 +503,7 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
   const jan1=new Date(Y,0,1),off=wd(jan1),n=daysInYear(Y),weeks=Math.ceil((n+off)/7);
   const avail=wrap.clientWidth-30;const cs=Math.max(11,Math.min(18,Math.floor(avail/weeks)-2)),gap=cs>13?3:2,pitch=cs+gap;
   const W=30+weeks*pitch,H=18+7*pitch;
-  const lv=v=>v<=0?0:v<40?1:v<80?2:v<130?3:v<200?4:5;
+  const lv=runMode()?(v=>v<=0?0:v<5?1:v<10?2:v<15?3:v<21.1?4:5):(v=>v<=0?0:v<40?1:v<80?2:v<130?3:v<200?4:5);   // km par jour : seuils à pied
   let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="width:${W}px" role="img" aria-label="Calendrier des sorties"><g class="axis">`;
   [0,2,4].forEach(i=>s+=`<text x="0" y="${18+i*pitch+cs-2}">${DAYS[i]}</text>`);
   for(let mo=0;mo<12;mo++){const di=dayOfYear(new Date(Y,mo,1));s+=`<text x="${30+Math.floor((di+off)/7)*pitch}" y="11">${MONTHS[mo]}</text>`}
@@ -480,7 +512,7 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
     s+=`<rect x="${30+wx*pitch}" y="${18+dy*pitch}" width="${cs}" height="${cs}" rx="${cs>12?3:2}" fill="var(--h${lv(daily[i])})" ${fut?'opacity=".35"':""} data-i="${i}" ${isCur&&i===todayIdx?'stroke="var(--ink)" stroke-width="1.5"':""}/>`}
   box.innerHTML=s+"</svg>";
   const active=daily.filter(v=>v>0).length;
-  document.getElementById("heatInfo").textContent=`${active} jours roulés sur ${isCur?todayIdx+1:n}`;
+  document.getElementById("heatInfo").textContent=`${active} jours ${runMode()?"courus":"roulés"} sur ${isCur?todayIdx+1:n}`;
   const byDay={};acts.forEach(a=>{const i=dayOfYear(a.dt);(byDay[i]=byDay[i]||[]).push(a)});
   box.querySelector("svg").addEventListener("pointermove",e=>{const r=e.target.closest("rect[data-i]");if(!r)return hideTip();const i=+r.dataset.i,d=new Date(Y,0,1+i);
     const L=byDay[i]||[];showTip(e,`<b>${d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</b><br>${L.length?L.map(a=>`${esc(a.n).slice(0,34)} · ${nf(a.km,1)} km`).join("<br>"):"Repos"}`)});
@@ -494,7 +526,36 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
   if(isCur) wrap.scrollLeft=Math.max(0,30+Math.floor((todayIdx+off)/7)*pitch-wrap.clientWidth+60);
 }
 
+function renderRunPr(){
+  const box=document.getElementById("recPr"); if(!box) return;
+  const pr=(window.Recup&&Recup.data&&Recup.data.profile&&Recup.data.profile.run||{}).pr;
+  if(!pr||!Object.keys(pr).length){box.innerHTML="";return}
+  const L=[["1k","1 km"],["1mi","1 mile"],["5k","5 km"],["10k","10 km"],["hm","Semi-marathon"],["m","Marathon"]];
+  box.innerHTML=`<div class="sub" style="margin:14px 0 2px;font-weight:600;color:var(--ink)">Records Garmin <small style="font-weight:500;color:var(--muted)">(tous temps)</small></div>`+
+    L.filter(([k])=>Array.isArray(pr[k])&&pr[k][0]>0).map(([k,l])=>{const [sec,d,id]=pr[k],dt=d?parseLocal(d+"T00:00:00"):null;
+      const inner=`<span class="k">${l}</span><span class="val">${timeTxt(sec)}</span><small class="rs"><span class="rd">${dt?fmtDate(dt,true):""}</span></small>`;
+      return id?`<a class="rec" href="${actUrl({id})}" target="_blank" rel="noopener" title="Ouvrir dans Garmin Connect">${inner}</a>`:`<div class="rec">${inner}</div>`}).join("");
+}
+function renderRecordsRun(acts){
+  const out=acts.filter(a=>!isRunIndoor(a)&&actPace(a));
+  const longest=maxBy(acts,a=>a.km),climb=maxBy(acts,a=>a.el),dur=maxBy(acts,a=>a.mt);
+  const wk={};acts.forEach(a=>{const k=weekKey(a.dt);wk[k]=(wk[k]||0)+a.km});
+  const bw=Object.entries(wk).sort((a,b)=>b[1]-a[1])[0];
+  const r=[];
+  const add=(k,v,a,sub)=>r.push(a?`<a class="rec" href="${actUrl(a)}" target="_blank" rel="noopener" title="Ouvrir dans Garmin Connect"><span class="k">${k}</span><span class="val">${v}</span><small class="rs"><span class="rn">${esc(a.n)}</span><span class="rd">· ${fmtDate(a.dt)}</span></small></a>`:`<div class="rec"><span class="k">${k}</span><span class="val">${v}</span>${sub?`<small class="rs"><span class="rd">${sub}</span></small>`:""}</div>`);
+  if(longest&&longest.km>0) add("Plus longue",`${nf(longest.km,1)} km`,longest);
+  if(climb&&climb.el) add("Plus de dénivelé",`${nf(climb.el)} m`,climb);
+  if(dur&&dur.mt) add("Plus longue durée",hfmt(dur.mt),dur);
+  [[5,"5 km"],[10,"10 km"],[21.1,"21,1 km"]].forEach(([min,l])=>{const f=maxBy(out.filter(a=>a.km>=min),a=>a.km/a.mt);if(f) add(`Meilleure allure (≥ ${l})`,`${paceTxt(actPace(f))} /km`,f)});
+  if(bw) add("Plus grosse semaine",`${nf(bw[1])} km`,null,`sem. du ${new Date(+bw[0]).toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`);
+  r.push('<div id="recPr"></div>');
+  document.getElementById("records").innerHTML=acts.length?r.join(""):`<div class="empty">Aucune sortie</div>`;
+  renderRunPr();
+  // profil Garmin pas encore chargé : on le demande une fois, la ligne apparaît dès qu'il est là
+  if(!(window.Recup&&Recup.data)&&window.Recup&&!S.prTried){S.prTried=true;Recup.ensure("recProbe",()=>{}).then(ok=>{if(ok)renderRunPr()}).catch(()=>{})}
+}
 function renderRecords(acts){
+  if(runMode()) return renderRecordsRun(acts);
   const out=acts.filter(a=>!isIndoor(a));
   const longest=maxBy(acts,a=>a.km),climb=maxBy(acts,a=>a.el),fast=maxBy(out.filter(a=>a.km>=40&&a.mt>0),a=>a.km/a.mt),
         watts=maxBy(acts.filter(a=>RIDE_TYPES.has(a.t)&&a.w>0&&a.mt>=1800),a=>a.w),vmax=maxBy(out,a=>a.vmax),dur=maxBy(acts,a=>a.mt);
@@ -557,8 +618,39 @@ function facts(acts,Y,isCur,todayIdx){
   add(MONTHS[bm].replace(".",""),`ton plus gros mois : ${MONTHS_FULL[bm]}`,`${nf(months[bm])} km`,2);
   return F;
 }
+function factsRun(acts,Y,isCur,todayIdx){
+  const km=sum(acts,a=>a.km),el=sum(acts,a=>a.el),mt=sum(acts,a=>a.mt);
+  if(!acts.length) return [];
+  const F=[];const city=S.cfg.ville||"Rennes";
+  const add=(n,t,sub,w=1)=>F.push({n,t,sub,w});
+  if(el>0){const ev=el/8849;add(ev>=1?`×${nf(ev,1)}`:`${nf(ev*100)} %`,ev>=1?"l'Everest gravi depuis le niveau de la mer":"de l'Everest gravi",`${nf(el)} m de dénivelé positif`,3)}
+  const c=[...CITIES].filter(x=>x[1]<=km).sort((a,b)=>b[1]-a[1])[0];
+  if(c) add(nf(km/c[1],1)+"×",`la route ${city} → ${c[0]}, à pied`,`≈ ${nf(c[1])} km par la route`,3);
+  add(`${nf(km/40075*100,1)} %`,"du tour de la Terre à pied",`il en reste ${nf(Math.max(0,40075-km))} km`,2);
+  if(km>=10) add(nf(km/42.195,1),"marathons mis bout à bout",`${nf(km)} km au total`,3);
+  add(nf(km*1000/400),"tours de piste de 400 m",`${nf(km)} km au total`,1);
+  add(`${nf(mt/3600)} h`,"passées à courir",`soit ${nf(mt/86400,1)} jour${mt/86400>=2?"s":""} non-stop`,2);
+  const cal=sum(acts,a=>a.cal||0);if(cal>0) add(nf(cal/240),"croissants brûlés","à 240 kcal le croissant",3);
+  const d=new Array(7).fill(0);acts.forEach(a=>d[wd(a.dt)]+=a.km);const fav=d.indexOf(Math.max(...d));
+  if(km>0) add(DAYS[fav],`ton jour préféré pour courir : le ${DAYS_FULL[fav]}`,`${nf(d[fav]/km*100)} % de tes km`,3);
+  const early=acts.filter(a=>a.dt.getHours()<8).length;
+  if(early) add(nf(early),`sorties lancées avant 8 h`,`${nf(early/acts.length*100)} % de tes sorties`,2);
+  const st=streaks(acts);
+  if(st.bestW>1) add(nf(st.bestW),"semaines d'affilée avec au moins une course","ta meilleure série",3);
+  if(st.bestD>1) add(nf(st.bestD),"jours de suite à courir","ta plus longue série",2);
+  const lastA=S.all.filter(isRunAct).slice(-1)[0];
+  if(isCur&&lastA){const ago=Math.floor((Date.now()-lastA.dt)/864e5);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as couru aujourd'hui":"depuis ta dernière course",lastA.n,2)}
+  const elapsed=isCur?todayIdx+1:daysInYear(Y);add(`${nf(km/elapsed,1)}`,"km par jour en moyenne","jours de repos compris",2);
+  const semi=acts.filter(a=>a.km>=21.1);if(semi.length) add(nf(semi.length),`sortie${semi.length>1?"s":""} de 21,1 km et plus`,`${nf(sum(semi,a=>a.km))} km au total`,3);
+  const hrA=acts.filter(a=>a.hr>0),beats=sum(hrA,a=>a.hr*a.mt/60);if(beats>0) add(beats>=1e6?`${nf(beats/1e6,1)} M`:nf(beats),"battements de cœur en courant",`à ${nf(sum(hrA,a=>a.hr*a.mt)/Math.max(1,sum(hrA,a=>a.mt)))} bpm de moyenne`,2);
+  const hte=acts.filter(a=>a.te>=4).length;if(hte) add(nf(hte),"courses à effet aérobie « très important » (4+)","selon le Training Effect Garmin",1);
+  const wkend=acts.filter(a=>wd(a.dt)>=5),wk=sum(wkend,a=>a.km);if(km>0) add(`${nf(wk/km*100)} %`,"de tes km faits le week-end",`${nf(km-wk)} km en semaine`,1);
+  const months=new Array(12).fill(0);acts.forEach(a=>months[a.dt.getMonth()]+=a.km);const bm=months.indexOf(Math.max(...months));
+  if(km>0) add(MONTHS[bm].replace(".",""),`ton plus gros mois : ${MONTHS_FULL[bm]}`,`${nf(months[bm])} km`,2);
+  return F;
+}
 function renderFacts(acts,Y,isCur,todayIdx){
-  const F=facts(acts,Y,isCur,todayIdx);
+  const F=runMode()?factsRun(acts,Y,isCur,todayIdx):facts(acts,Y,isCur,todayIdx);
   // tirage pondéré déterministe, change à chaque clic sur « Autres anecdotes »
   let seed=S.factSeed*9301+Y*49297+S.sport.length*233;const rnd=()=>(seed=(seed*9301+49297)%233280)/233280;
   const pool=F.map(f=>({f,k:Math.pow(rnd(),1/f.w)})).sort((a,b)=>b.k-a.k).slice(0,6).map(x=>x.f);
@@ -578,6 +670,13 @@ function traceSvg(pts){
 function renderRides(){
   const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];
   const L=S.all.filter(sp.f).slice(innerWidth<520?-5:-9).reverse();
+  if(runMode()){
+    document.getElementById("rides").innerHTML=L.map(a=>{const tapis=isRunIndoor(a);return `<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
+    <div class="map">${tapis?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
+    <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${tapis?' · <span class="indoor">TAPIS</span>':""}</div>
+    <div class="st"><span><b>${nf(a.km,1)}</b> km</span>${a.el?`<span><b>${nf(a.el)}</b> m D+</span>`:""}<span><b>${hfmt(a.mt)}</b></span>${actPace(a)?`<span><b>${paceTxt(actPace(a))}</b> /km</span>`:""}${a.hr>0?`<span><b>${nf(a.hr)}</b> bpm</span>`:""}</div></div></a>`}).join("")||`<div class="empty">Aucune sortie</div>`;
+    return;
+  }
   document.getElementById("rides").innerHTML=L.map(a=>`<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
     <div class="map">${isIndoor(a)?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
     <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${isIndoor(a)?' · <span class="indoor">HOME TRAINER</span>':""}</div>
@@ -595,7 +694,7 @@ function renderYears(){
 let rT,lastW=innerWidth;addEventListener("resize",()=>{if(innerWidth===lastW)return;lastW=innerWidth;clearTimeout(rT);rT=setTimeout(()=>{if(S.all.length)render()},150)});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")load()});
 setInterval(()=>{if(document.visibilityState==="visible")load()},5*60*1000);
-load();
+addEventListener("DOMContentLoaded",()=>load());   // après les scripts du bas de page (Charge, Nav, Recup…)
 </script>
 <script src="charge.js"></script>
 <script src="nav.js"></script>
