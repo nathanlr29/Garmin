@@ -19,17 +19,37 @@ function sportOf(a) {
   return "other";
 }
 
-// Seuils lus au moment du calcul : FTP = saisie dans le Plan, sinon FTP Garmin, sinon 250 ; LTHR = seuil Garmin, sinon 165
+// Course : 1 m de dénivelé positif compte comme RUN_CLIMB m de plat (approximation simple de la montée, sans crédit en descente)
+const RUN_CLIMB = 8;
+const RUN_PACE_RANGE = [180, 480];   // allure seuil acceptée pour le réglage de secours runThrPace (s/km)
+
+// Seuils lus au moment du calcul :
+//  - FTP = saisie dans le Plan, sinon FTP Garmin, sinon 250 ; LTHR (vélo) = seuil Garmin, sinon 165
+//  - course : runPace = allure au seuil lactique en s/km, runHr = FC au seuil lactique (profile.run.lt).
+//    Le réglage de secours runThrPace (localStorage, 180 à 480 s/km) remplace l'allure Garmin. Aucune interface pour l'instant.
+//    lt est UNE valeur (le seuil actuel, pas d'historique) : toute la charge passée est calculée avec ce seuil.
 function params() {
   const p = (window.Recup && window.Recup.data && window.Recup.data.profile) || {};
-  let own = 0; try { own = +localStorage.getItem("planFtp"); } catch (e) {}
-  return { ftp: own || p.ftp || 250, lthr: (p.hrZones && p.hrZones.lthr) || 165 };
+  let own = 0, thr = 0; try { own = +localStorage.getItem("planFtp"); thr = +localStorage.getItem("runThrPace"); } catch (e) {}
+  const lt = (p.run && p.run.lt) || {}, pos = v => typeof v === "number" && isFinite(v) && v > 0 ? v : null;
+  const runPace = thr >= RUN_PACE_RANGE[0] && thr <= RUN_PACE_RANGE[1] ? thr : pos(lt.pace);
+  return { ftp: own || p.ftp || 250, lthr: (p.hrZones && p.hrZones.lthr) || 165, runPace, runHr: pos(lt.hr) };
 }
 
-// Charge d'une activité en TSS : puissance si on l'a (vélo), sinon cardio rapporté au seuil
+// Intensité d'une course (IF) : vitesse « à plat équivalent » rapportée à la vitesse au seuil lactique ; null si on ne peut pas.
+// La puissance de course (w, np) n'est pas utilisée. Repli : FC rapportée à la FC au seuil de course.
+function runIF(a, p) {
+  if (p.runPace && a.m > 0 && a.mt > 0) return (a.m + RUN_CLIMB * (a.el || 0)) / a.mt / (1000 / p.runPace);
+  if (p.runHr && a.hr > 0) return a.hr / p.runHr;
+  return null;
+}
+
+// Charge d'une activité en TSS (course : rTSS à l'allure). Vélo : puissance si on l'a, sinon cardio rapporté au seuil ;
+// muscu et autres : cardio rapporté au seuil (formule d'origine, inchangée)
 function tssOf(a, p = params()) {
   const h = (a.mt || 0) / 3600; if (!h) return 0;
-  const pw = a.np || a.w, IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / p.ftp : a.hr > 0 ? a.hr / p.lthr : .65;
+  let IF = RUN_TYPES.has(a.t) ? runIF(a, p) : null;
+  if (IF == null) { const pw = a.np || a.w; IF = pw > 0 && RIDE_TYPES.has(a.t) ? pw / p.ftp : a.hr > 0 ? a.hr / p.lthr : .65; }
   return h * clamp(IF, .4, 1.2) ** 2 * 100;
 }
 
