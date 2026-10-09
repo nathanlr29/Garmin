@@ -19,8 +19,10 @@ Langue de l'interface et des échanges : **français**.
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge recup.js → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js |
-| `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil) |
+| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge **charge.js → nav.js → recup.js** → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js (l'ordre compte : recup.js appelle `Nav.apply()` à la fin, plan.js et sortie.js lisent `Nav` et `Charge`) |
+| `charge.js` | `window.Charge` : classement des sports (vélo = `RIDE_TYPES`, course, muscu, autre), `tssOf`, charge par jour et par sport, série fond/fatigue/forme (CTL 42 j / ATL 7 j / TSB), `loadPart` (charge récente de la récup). Seuils lus au moment du calcul : FTP = `planFtp` (localStorage), sinon `profile.ftp`, sinon 250 ; LTHR = `profile.hrZones.lthr`, sinon 165. Test : `node tests/charge.mjs` |
+| `nav.js` | `window.Nav` : onglets décrits par une liste de données `TABS` (id, libellé, titre, `open`, alias de hash, thème sombre…). `Nav.curTab()`, `Nav.setTab()`, `Nav.apply()`. Ajouter ou renommer un onglet = une ligne dans `TABS` |
+| `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil). Expose `Recup.open` à `Nav` ; lance le premier `Nav.apply()` |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
 | `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
@@ -110,6 +112,7 @@ Langue de l'interface et des échanges : **français**.
 - À réutiliser pour le journal muscu : nouvelle collection, rien à changer dans `sync.gs`.
 
 ## Moteur du Plan (plan.js)
+- **La charge (TSS, fond/fatigue/forme) vient de `charge.js`** : plan.js n'a plus de copie de `tssOf`/`dayLoads`. Il garde ce qui lui est propre (dernière séance dure, km et heures de la semaine…) dans `fitness()`, qui complète `Charge.fitness()`.
 - Semaine générée par recherche exhaustive (combinaisons de jours clés × permutations muscu) avec un score.
 - Muscu le **matin**, vélo le **soir**. Jambes jamais le matin d'une séance clé, ni la veille d'une clé ou de la sortie longue.
 - 2 séances clés par semaine (3 seulement si ≥6 jours vélo, pas de sortie longue et ≤2 matins muscu).
@@ -130,6 +133,24 @@ Langue de l'interface et des échanges : **français**.
 - Le contenu des séances muscu n'est **pas** géré ici : on place seulement les 4 séances.
 - Clés localStorage : `planCfg`, `planWk:<lundi>`, `planOv:<lundi>`, `planUndo:<lundi>`, `muscuLbl`, `planSince`, `planFtp`, `bwWeight`, `bwAge`.
 - API de test : `window.Plan._gen/_eff/_cfg/_phase/_build/_zwo`.
+
+## Feuille de route multisport
+Breizh Watts devient un outil d'analyse multisport (vélo + course + muscu), façon « Finary du sport ». On avance par étapes.
+- **Pas de version beta ni d'interrupteur** : chaque étape est poussée en ligne, donc complète et testée.
+- **Navigation cible : 5 onglets** : Synthèse · Activités (filtres Vélo / Extérieur / Home trainer / Course / Tout) · Récup · Plan · Sortie. Les anciens liens `#velo` mènent à Activités (alias de hash dans `Nav.TABS`).
+- **Compatibilité** : le localStorage existant, les liens `#plan=` et `#sync=` et l'onglet mémorisé (clé `tab`) continuent de marcher ; tout nouveau réglage a une valeur par défaut qui reproduit le comportement actuel.
+
+| Étape | Contenu | État |
+|---|---|---|
+| 0 | Fondations : `charge.js` (charge, sports, fond/fatigue/forme, par sport) et `nav.js` (onglets en liste de données). Aucun changement visible ; formules strictement identiques, vérifiées par `tests/charge.mjs` | **faite** |
+| 1 | Données course : flux FIT course dans `fetch_garmin.py` ; une fois par jour dans `recovery.py` : seuil lactique, prédictions de course, tolérance course, score d'endurance, hill score, records | à faire |
+| 2 | Charge course calculée à l'allure seuil (rTSS) au lieu de la FC | à faire |
+| 3 | Course visible : filtre Course, allure, records par distance, objectif km course séparé dans `config.json`, bilan de séance course sans vent ni profil Coggan | à faire |
+| 4 | Onglet Synthèse : fond/fatigue/forme sur 12 mois, variations 7 et 30 j, répartition de la charge par sport, FTP / VO2max / allure seuil / récup du jour, projection lissée vers 300 W et VO2max 65 fin 2026, détecteurs (zone grise, charge aiguë/chronique > 1,5, VFC sous la normale 3 jours, dette de sommeil 7 jours) | à faire |
+| 5 | Plan multisport : jours de course dans `planCfg` ; sans jour coché, plan identique ; appliqué à partir du lundi suivant, semaine en cours jamais modifiée | à faire |
+| 6 | Ressenti 1-10 après séance (collection sync `rpe`) et boucles à pied (profil piéton BRouter) | à faire |
+
+Étape 0 — tests : `node tests/charge.mjs` compare `Charge` à `tests/charge.ref.json` (généré avec l'ancien code de recup.js et plan.js sur `data/activities.json`, date figée au 2026-10-09, trois jeux de seuils) : TSS de chaque activité, charge par jour, CTL/ATL/TSB sur 120 jours, `loadPart` et `dayLoad` jour par jour, égalité exacte. Ce qui dépend du DOM (score de récup, cartes Forme et Charge conseillée du Plan) a été comparé dans le navigateur avant/après (1280 et 390 px, clair et sombre) : aucune différence. **À l'étape 2, la charge course change : régénérer la référence en connaissance de cause.**
 
 ## Règles impératives
 - Ne jamais supprimer d'activité Garmin.
