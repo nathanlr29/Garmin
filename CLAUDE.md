@@ -31,9 +31,10 @@ Langue de l'interface et des échanges : **français**.
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
-| `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT → `data/streams/<id>.json` + `index.json` |
+| `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT (vélo et course) → `data/streams/<id>.json` + `index.json` |
 | `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh pour qu'ils apparaissent enregistrés par l'Edge 540 (laps/session reconstruits depuis les records) |
-| `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup et configuration initiale Garmin |
+| `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup (+ profil : FTP, VO2max, zones, bloc course `profile.run`) et configuration initiale Garmin |
+| `tests/test_garmin.py` | Tests Python des scripts (lecture des réponses Garmin, flux de course, vrai FIT factice) : `python3 tests/test_garmin.py` (`fitdecode` pour le test FIT, sinon sauté) |
 
 ### Traces et parcours
 - `data/traces.json` : les 30 dernières activités dehors (tous sports), 160 points max, chargé avec la page (mini-tracés, chaîne).
@@ -41,8 +42,10 @@ Langue de l'interface et des échanges : **français**.
 - Sélecteur (`renderPick` dans sortie.js) : recherche nom/mois/date, liste des mois, « Masquer les trajets < 30 min » (coché par défaut), repli sur `traces.json` si une sortie n'a pas encore de parcours. Route chargée : `sortieRoute.src = "garmin"` + mention « début et fin tronqués ».
 
 ### Flux (data/streams)
-- Sorties des 42 derniers jours, 6 au maximum par exécution, purge au-delà de 120 j, 1200 points au maximum.
-- **Confidentialité** : le GPS est retiré à moins de 400 m du départ et de l'arrivée, et il n'y a pas de GPS pour les VirtualRide. Le point de départ des boucles (`soStart`) reste en localStorage, **jamais publié**.
+- Sorties **vélo et course** (running, trail_running, treadmill_running, track_running, virtual_run) des 42 derniers jours, **6 au maximum par exécution pour l'ensemble** (les plus récentes d'abord), purge au-delà de 120 j, 1200 points au maximum.
+- `index.json` : `{"<id>": {"d", "ok", "s"}}`, `s` = `"bike"` ou `"run"`. **Les entrées sans `s` (anciennes) sont du vélo.** Rien côté vélo ne lit les flux course : `Bilan.open` est limité aux `RIDE_TYPES` (clic sur une sortie, bilan du Plan) et `Bilan.progress` filtre sur `RIDE_TYPES`.
+- Champs communs : `p` (puissance, aussi la puissance de course), `h` (FC), `c` (cadence), `v` (km/h × 10), `a` (altitude), `g` (GPS). **Course seulement**, s'ils sont dans le FIT : `c` en **pas/min** ((cadence + fractional_cadence) × 2), `sl` longueur de pas (cm, entier), `gct` temps de contact au sol (ms), `vo` oscillation verticale (cm, 1 décimale). Valeurs hors plage écartées.
+- **Confidentialité** : le GPS est retiré à moins de 400 m du départ et de l'arrivée, et il n'y a pas de GPS pour les VirtualRide, les tapis (treadmill_running) et virtual_run. Le point de départ des boucles (`soStart`) reste en localStorage, **jamais publié**.
 
 ## Générateur de boucles (sortie.js)
 - Candidats = forme (triangle `tri` / losange `los`) × rotation par rapport au vent × sens, dans l'ordre de `genSpecs()` : 12 au départ, puis 6 par « Proposer d'autres boucles » (jamais deux fois la même combinaison : `tried`). On garde au plus 3 nouvelles boucles vraiment différentes (recouvrement < 55 %) ; **6 propositions max**, les plus anciennes non sélectionnées/non analysées partent.
@@ -111,6 +114,18 @@ Langue de l'interface et des échanges : **français**.
 - Clés localStorage : `syncCfg`, `syncQ` (file d'attente par collection), `syncAt`, `syncInit:<collection>`, `chainKmAt`.
 - À réutiliser pour le journal muscu : nouvelle collection, rien à changer dans `sync.gs`.
 
+## Profil course (scripts/recovery.py, `profile.run`)
+- Bloc `profile.run` de `data/recovery.json`, rafraîchi **une seule fois par jour** : si `run.d` est la date du jour, `fetch_profile` reprend le bloc tel quel (aucun appel Garmin en plus à l'heure). Sur un 429, les appels course s'arrêtent et l'ancien bloc est gardé (réessai au passage suivant). Chaque appel est indépendant : en échec ou sans donnée de la montre, le champ est simplement absent.
+- Extraits bruts dans `profile.raw` : `runLt`, `runRaces`, `runRacesHist`, `runTol`, `runEndu`, `runHill`, `runPr` (à lire quand un champ est vide).
+- Format (listes `[date, valeur]` comme `ftpHist` / `vo2`) :
+  - `d` : date du rafraîchissement.
+  - `lt` : `{pace, hr, d}` = seuil lactique, allure en **s/km**, FC en bpm. `get_lactate_threshold` rend la vitesse à une échelle variable : `pace_from_speed` essaie m/s, m/s ÷ 10 et km/h et ne garde que l'échelle qui donne 3:00–6:00/km, la plus proche de 4:13/km (allure semi de février 2026) ; sinon le champ est absent.
+  - `races` : `{d, "5k", "10k", "hm", "m"}` en secondes (`get_race_predictions`) et `hist` = `[[date, 5k, 10k, semi, marathon], …]` quotidien depuis le 1er mars 2025, sans répéter les jours identiques (demandes d'un an au plus).
+  - `tol` : tolérance à la course, hebdo, `[[date, {champ: valeur}]]` (champs « charge / ratio » rendus par Garmin). Peut être vide selon la montre.
+  - `endu`, `hill` : score d'endurance et hill score, `[[date, score]]`, un point par semaine, depuis `START` (1er janvier 2026, comme `ftpHist`).
+  - `pr` : records de course `{"1k","1mi","5k","10k","hm","m": [secondes, date, activityId], "long": [mètres, date, id]}` (records vélo ignorés).
+  - `vo2` : VO2max course (partie `generic` de `get_max_metrics_range`). **`profile.vo2` n'est pas modifié** (il sert à l'onglet Plan).
+
 ## Moteur du Plan (plan.js)
 - **La charge (TSS, fond/fatigue/forme) vient de `charge.js`** : plan.js n'a plus de copie de `tssOf`/`dayLoads`. Il garde ce qui lui est propre (dernière séance dure, km et heures de la semaine…) dans `fitness()`, qui complète `Charge.fitness()`.
 - Semaine générée par recherche exhaustive (combinaisons de jours clés × permutations muscu) avec un score.
@@ -143,7 +158,7 @@ Breizh Watts devient un outil d'analyse multisport (vélo + course + muscu), fa�
 | Étape | Contenu | État |
 |---|---|---|
 | 0 | Fondations : `charge.js` (charge, sports, fond/fatigue/forme, par sport) et `nav.js` (onglets en liste de données). Aucun changement visible ; formules strictement identiques, vérifiées par `tests/charge.mjs` | **faite** |
-| 1 | Données course : flux FIT course dans `fetch_garmin.py` ; une fois par jour dans `recovery.py` : seuil lactique, prédictions de course, tolérance course, score d'endurance, hill score, records | à faire |
+| 1 | Données course : flux FIT course dans `fetch_garmin.py` ; une fois par jour dans `recovery.py` : seuil lactique, prédictions de course, tolérance course, score d'endurance, hill score, records. Aucun changement visible. Tests : `python3 tests/test_garmin.py` | code fait, validation réelle à faire |
 | 2 | Charge course calculée à l'allure seuil (rTSS) au lieu de la FC | à faire |
 | 3 | Course visible : filtre Course, allure, records par distance, objectif km course séparé dans `config.json`, bilan de séance course sans vent ni profil Coggan | à faire |
 | 4 | Onglet Synthèse : fond/fatigue/forme sur 12 mois, variations 7 et 30 j, répartition de la charge par sport, FTP / VO2max / allure seuil / récup du jour, projection lissée vers 300 W et VO2max 65 fin 2026, détecteurs (zone grise, charge aiguë/chronique > 1,5, VFC sous la normale 3 jours, dette de sommeil 7 jours) | à faire |
