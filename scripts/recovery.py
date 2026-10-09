@@ -358,6 +358,7 @@ def _raw(o, n=1500):
 
 
 # ------------------------------------------------------------------ Profil course à pied (une fois par jour)
+RUN_V = 2                           # version du format de profile.run : un changement de lecture force un rafraîchissement
 RACE_START = date(2025, 3, 1)       # historique des prédictions de course
 LT_PACE_REF = 253                   # allure semi de février 2026 (4:13/km) : sert à départager l'échelle de la vitesse
 LT_PACE_OK = (180, 360)             # allure seuil plausible : 3:00 à 6:00 /km
@@ -488,6 +489,15 @@ def read_tol(resp):
     return [[dt, out[dt]] for dt in sorted(out)]
 
 
+def _day(v):
+    """Jour (AAAA-MM-JJ) d'une chaîne ISO ou d'un horodatage en millisecondes (Garmin donne les deux)."""
+    if isinstance(v, str) and len(v) >= 10 and v[4] == "-":
+        return v[:10]
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 1e11:
+        return datetime.fromtimestamp(v / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    return None
+
+
 def read_pr(resp):
     """Records de course : {'5k': [secondes, date, id]}, 'long' en mètres. Les records vélo etc. sont ignorés."""
     out = {}
@@ -499,7 +509,8 @@ def read_pr(resp):
         v = spec and _num(it.get("value"), spec[1], spec[2])
         if not v:
             continue
-        dt = next((str(it[k])[:10] for k in ("prStartTimeLocal", "prStartTimeGmt", "prStartTimeGmtFormatted", "startTimeLocal") if it.get(k)), None)
+        dt = next((_day(it.get(k)) for k in ("prStartTimeLocalFormatted", "prStartTimeGmtFormatted", "actStartDateTimeInGMTFormatted",
+                                              "prStartTimeGmt", "activityStartDateTimeInGMT") if _day(it.get(k))), None)
         if spec[0] not in out or (dt or "") >= (out[spec[0]][1] or ""):
             out[spec[0]] = [round(v, 1) if spec[0] == "long" else round(v), dt, it.get("activityId")]
     return out or None
@@ -520,7 +531,7 @@ def read_vo2_run(mm):
 
 def fetch_run_profile(api, start, today, mm=None):
     """Bloc profile.run + extraits bruts. None si Garmin limite les requêtes (429) : on garde l'ancien bloc."""
-    run, raw = {"d": today.isoformat()}, {}
+    run, raw = {"d": today.isoformat(), "v": RUN_V}, {}
     ds, td = start.isoformat(), today.isoformat()
     try:
         r = _run_call(api.get_lactate_threshold)
@@ -558,7 +569,9 @@ def fetch_run_profile(api, start, today, mm=None):
         if hill:
             run["hill"] = hill
         r = _run_call(api.get_personal_record)
-        raw["runPr"] = _raw(r, RUN_RAW["runPr"])
+        # réponse longue (un bloc par record) : on garde l'essentiel de chaque ligne pour pouvoir contrôler la lecture
+        raw["runPr"] = _raw([[i.get("typeId"), i.get("activityType"), i.get("value"), i.get("status")] for i in r if isinstance(i, dict)]
+                            if isinstance(r, list) else r, RUN_RAW["runPr"])
         pr = read_pr(r)
         if pr:
             run["pr"] = pr
@@ -623,7 +636,7 @@ def fetch_profile(api, start, today, prev=None):
         }
     # Course : rafraîchie une fois par jour (l'état précédent, s'il date d'aujourd'hui, est repris tel quel)
     old = prev or {}
-    if (old.get("run") or {}).get("d") == today.isoformat():
+    if (old.get("run") or {}).get("d") == today.isoformat() and (old["run"].get("v") == RUN_V):
         res = (old["run"], {k: v for k, v in (old.get("raw") or {}).items() if k in RUN_RAW})
     else:
         res = fetch_run_profile(api, start, today, mm)

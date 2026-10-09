@@ -87,17 +87,17 @@ class Series(unittest.TestCase):
 
     def test_records_course_seulement(self):
         items = [
-            {"typeId": 3, "activityType": "running", "value": 1185.4, "activityId": 11, "prStartTimeLocal": "2026-02-14T09:00:00.0"},
-            {"typeId": 3, "activityType": "running", "value": 1300.0, "activityId": 10, "prStartTimeLocal": "2025-06-01T09:00:00.0"},  # ancien record
-            {"typeId": 5, "activityType": "running", "value": 5460, "activityId": 12, "prStartTimeLocal": "2026-02-28T09:00:00.0"},
-            {"typeId": 7, "activityType": "running", "value": 32100.5, "activityId": 13, "prStartTimeLocal": "2026-03-01T09:00:00.0"},
+            {"typeId": 3, "activityType": "running", "value": 1185.4, "activityId": 11, "prStartTimeGmt": 1771059600000, "prStartTimeGmtFormatted": "2026-02-14T09:00:00.0", "prStartTimeLocal": None},
+            {"typeId": 3, "activityType": "running", "value": 1300.0, "activityId": 10, "prStartTimeGmtFormatted": "2025-06-01T09:00:00.0"},  # ancien record
+            {"typeId": 5, "activityType": "running", "value": 5460, "activityId": 12, "prStartTimeGmt": 1772289026000},          # horodatage seul : 28/02/2026
+            {"typeId": 7, "activityType": "running", "value": 32100.5, "activityId": 13, "prStartTimeLocalFormatted": "2026-03-01T09:00:00.0"},
             {"typeId": 3, "activityType": "cycling", "value": 900, "activityId": 14},      # pas de la course
             {"typeId": 3, "activityType": "running", "value": 12, "activityId": 15},        # 5 km en 12 s
             {"typeId": 99, "activityType": "running", "value": 1000}, "x", None,
         ]
         r = rc.read_pr(items)
         self.assertEqual(r["5k"], [1185, "2026-02-14", 11])
-        self.assertEqual(r["hm"][0], 5460)
+        self.assertEqual(r["hm"], [5460, "2026-02-28", 12])
         self.assertEqual(r["long"][0], 32100.5)
         self.assertEqual(sorted(r), ["5k", "hm", "long"])
         for empty in (None, [], {}, [{}], {"personalRecords": []}):
@@ -138,7 +138,7 @@ class RunProfile(unittest.TestCase):
         for api in (FakeApi(), FakeApi(get_lactate_threshold=RuntimeError("404"), get_personal_record=ValueError("x"),
                                         get_hill_score={}, get_endurance_score=[], get_running_tolerance=None)):
             run, raw = rc.fetch_run_profile(api, date(2026, 1, 1), TODAY)
-            self.assertEqual(run, {"d": "2026-10-09"})
+            self.assertEqual(run, {"d": "2026-10-09", "v": rc.RUN_V})
             self.assertTrue(set(raw) <= set(rc.RUN_RAW))
 
     def test_un_appel_en_erreur_ne_bloque_pas_les_autres(self):
@@ -165,13 +165,15 @@ class RunProfile(unittest.TestCase):
 
     def test_une_fois_par_jour(self):
         api = _ProfileApi(FakeApi())
-        old = {"run": {"d": "2026-10-09", "lt": {"pace": 250}}, "raw": {"runLt": "x"}}
+        old = {"run": {"d": "2026-10-09", "v": rc.RUN_V, "lt": {"pace": 250}}, "raw": {"runLt": "x"}}
         prof = rc.fetch_profile(api, date(2026, 1, 1), TODAY, old)
         self.assertEqual(prof["run"], old["run"])                       # repris tel quel
         self.assertFalse([c for c in api.inner.calls if c in ("get_lactate_threshold", "get_race_predictions", "get_personal_record",
                                                               "get_running_tolerance", "get_endurance_score", "get_hill_score")])
-        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-08"}})
+        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-08", "v": rc.RUN_V}})
         self.assertEqual(prof["run"]["d"], "2026-10-09")                # la veille : on rafraîchit
+        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-09", "v": 1, "lt": {"pace": 250}}})
+        self.assertNotIn("lt", prof["run"])                             # ancien format : relu même si c'est le même jour
 
 
 class _ProfileApi:
