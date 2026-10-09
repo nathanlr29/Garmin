@@ -12,7 +12,7 @@
 (() => {
 const $ = id => document.getElementById(id);
 const TABS = [
-  { id: "velo", label: "Vélo", title: () => S.cfg.titre || "Mes kilomètres", panel: "app", controls: true, open: () => { if (S.all.length) render(); } },
+  { id: "activites", label: "Activités", aliases: ["velo"], title: () => S.cfg.titre || "Mes kilomètres", panel: "app", controls: true, open: () => { if (S.all.length) render(); } },
   { id: "recup", label: "Récup", title: "Ma récupération", night: true, open: () => window.Recup?.open() },
   { id: "plan", label: "Plan", title: "Mon plan", open: () => window.Plan?.open() },
   { id: "sortie", label: "Sortie", title: "Planifier une sortie", open: () => window.Sortie?.open() },

@@ -1,6 +1,7 @@
 {
   "titre": "Breizh Watts",
   "objectif_km": 10000,
+  "objectif_km_course": null,
   "ville": "Rennes",
   "rayon_confidentialite_m": 400,
   "latitude": 48.1173,
