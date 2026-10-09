@@ -25,3 +25,17 @@
 .syind:hover,.syind:focus-visible{border-color:var(--accent);outline:none}
 .syind .v small{font-size:.5em;font-weight:600;color:var(--muted);margin-left:2px}
 @media (max-width:520px){.sy4{gap:6px}.sy4 .crvar{padding:6px 8px}.sy4 .crvar small{white-space:normal}}
+
+.syverdict{margin:2px 0 6px}
+.sydets{display:grid;gap:8px}
+.sydet{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg)}
+.sydet.on{border-color:#e8501c;background:var(--accent-soft)}
+.syd1{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px}
+.syd1 small{color:var(--muted);font-size:12.5px}
+.syd2{font-size:12px;color:var(--muted);margin-top:4px}
+.sytip{font-weight:600}
+.sydot2{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
+.syok{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:10px;background:var(--bg);color:var(--good);font-size:14px}
+.syok b{font-weight:800}
+.syreleve h2{align-items:center}
+.syreleve .btn{margin-left:auto}

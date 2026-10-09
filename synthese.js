@@ -18,6 +18,16 @@ const SPORTS = [["bike", "Vélo", "var(--accent)"], ["run", "Course", "#1c7ed6"]
 const LINE = { ctl: "var(--accent)", atl: "#c2255c", tsb: "#2f9e44" };
 const RECUP_COL = ["#3cc9b4", "#5aa9f2", "#f2a93b", "#f2708a"];   // couleurs du score de récup de l'onglet Récup (thème nuit), valables dans tous les thèmes
 const K_PERIOD = "synPeriod";
+// Objectifs de fin d'année (projection)
+const GOALS = { ftp: 300, vo2: 65, date: "2026-12-31" };
+const PROJ = { days: 120, justFrac: .6, rampFrac: .75, ftpDec: 0, vo2Dec: 1 };   // tendance sur 120 jours ; « un peu juste » si le rythme actuel couvre au moins 60 % du rythme nécessaire ; test rampe : FTP = 75 % de la meilleure minute (comme le Plan)
+// Détecteurs (« frais cachés »)
+const DET = { grayDays: 14, grayMin: 3, grayShare: .2, grayRunIF: .85, graySessionSec: 1200,   // zone grise : ≥ 3 séances non dures avec > 20 % du temps en zone 3 sur 14 jours
+  loadAcute: 7, loadChronic: 28, loadRatio: 1.5,                                                // charge des 7 derniers jours / moyenne hebdo des 28 jours d'avant
+  hrvDays: 3,                                                                                   // VFC sous la normale Garmin (hrvLo) 3 jours de suite
+  sleepNights: 7, sleepBase: 60, sleepBaseMin: 20, sleepDebtSec: 3 * 3600,                      // dette de sommeil : > 3 h sur 7 nuits par rapport à la médiane des 60 nuits d'avant
+  history: 90 };                                                                                // jours d'historique des alertes
+const K_RELEVE = "synReleve:";   // + date du lundi : relevé refermé
 
 // ------------------------------------------------------------------ Fonctions pures
 const dayStart = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d; };
@@ -82,6 +92,96 @@ function listVariation(ser, now, days, cur) {
 }
 // score de récup : couleur identique à celle de l'onglet Récup
 const recupColor = s => s >= 75 ? RECUP_COL[0] : s >= 50 ? RECUP_COL[1] : s >= 25 ? RECUP_COL[2] : RECUP_COL[3];
+
+
+// ------------------------------------------------------------------ Fonctions pures : projection (4b)
+const median = a => { const v = a.slice().sort((x, y) => x - y), n = v.length; return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null; };
+// Tendance robuste de Theil-Sen : pente = médiane des pentes de toutes les paires, ordonnée = médiane des y − pente × x.
+// Un point isolé (un test raté, un 292 → 260) ne la fait pas basculer. pts : [{ x, y }] (x en jours).
+function theilSen(pts) {
+  if (pts.length < 3) return null;
+  const sl = []; for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) if (pts[j].x !== pts[i].x) sl.push((pts[j].y - pts[i].y) / (pts[j].x - pts[i].x));
+  if (!sl.length) return null;
+  const slope = median(sl), intercept = median(pts.map(p => p.y - slope * p.x)); return { slope, intercept };
+}
+// FTP de test (test rampe, séances nommées « … Ramp Test ») : 75 % de la meilleure minute
+function rampPoints(acts, now) {
+  const byDay = {};   // plusieurs tests le même jour (un « Lite » interrompu avant le vrai) : on garde le meilleur
+  for (const a of acts) { if (!(/ramp/i.test(a.n || "") && /test/i.test(a.n || "") && a.pc && a.pc["60"] > 0 && a.dt.getTime() <= now)) continue;
+    const k = ymd(a.dt), v = Math.round(a.pc["60"] * PROJ.rampFrac); if (!byDay[k] || v > byDay[k].v) byDay[k] = { t: a.dt.getTime(), v }; }
+  return Object.values(byDay).sort((x, y) => x.t - y.t);
+}
+// Projection vers un objectif. ser : [{ t, v }] ; cur : valeur actuelle (la FTP utilisée par le Plan, la dernière VO2max) ; tendance sur les 120 derniers jours.
+// Le rythme actuel est la pente de Theil-Sen ; verdict : atteint / dans les temps / un peu juste / hors de portée au rythme actuel.
+function projection(ser, goal, dateStr, now, cur, dec = 0) {
+  const t0 = now - PROJ.days * DAY, pts = ser.filter(p => p.t >= t0 && p.t <= now).map(p => ({ x: (p.t - now) / DAY, y: p.v })), ts = theilSen(pts);
+  const end = dayMs(dateStr), daysLeft = (end - now) / DAY, weeksLeft = Math.max(daysLeft / 7, 0), base = cur != null ? cur : pts.length ? pts[pts.length - 1].y : null;
+  if (!ts || base == null) return null;
+  const rate = ts.slope * 7, projected = base + ts.slope * Math.max(daysLeft, 0), need = weeksLeft > 0 ? (goal - base) / weeksLeft : null, f = x => Math.round(x * 10 ** dec) / 10 ** dec;
+  let verdict = base >= goal ? "atteint" : weeksLeft <= 0 ? "hors de portée au rythme actuel" : projected >= goal ? "dans les temps" : rate > 0 && rate >= PROJ.justFrac * need ? "un peu juste" : "hors de portée au rythme actuel";
+  return { n: pts.length, slope: ts.slope, intercept: ts.intercept, rate, cur: base, projected, need, weeksLeft, verdict, goal, end,
+    trendAt: x => ts.intercept + ts.slope * x, text: { cur: f(base), projected: f(projected), rate: f(rate * 10) / 10, need: need == null ? null : f(need * 10) / 10 } };
+}
+
+// ------------------------------------------------------------------ Fonctions pures : détecteurs (4b)
+// ctx : { acts, loads (Charge.dayLoads), days (jours Récup), hardRide(a), tssOf(a) }. Chaque détecteur est évalué « au jour asOf » :
+// { active, status: "ok" | "actif" | "nodata", … }. Les mêmes fonctions servent à l'historique des 90 jours.
+const endOfDay = d => { const t = dayStart(d); t.setHours(23, 59, 59, 999); return t; };
+const keyOf = d => ymd(new Date(d));
+function detGray(ctx, asOf) {
+  const end = endOfDay(asOf), from = new Date(end.getTime() - DET.grayDays * DAY), hit = [];
+  for (const a of ctx.acts) {
+    if (a.dt <= from || a.dt > end || !(a.mt >= DET.graySessionSec)) continue;
+    const sp = window.Charge.sportOf(a); let share = null;
+    if (sp === "bike") { if (ctx.hardRide(a) || !a.pz || !a.pz.some(v => v > 0)) continue; share = a.pz[2] / a.pz.reduce((s, v) => s + v, 0); }
+    else if (sp === "run") { const IF = Math.sqrt(ctx.tssOf(a) / (a.mt / 3600) / 100); if (!(IF < DET.grayRunIF) || !a.hz || !a.hz.some(v => v > 0)) continue; share = a.hz[2] / a.hz.reduce((s, v) => s + v, 0); }
+    else continue;
+    if (share > DET.grayShare) hit.push({ a, share });
+  }
+  return { active: hit.length >= DET.grayMin, status: hit.length >= DET.grayMin ? "actif" : "ok", count: hit.length, hit };
+}
+function detLoad(ctx, asOf) {
+  const day = dayStart(asOf), sum = (i0, i1) => { let s = 0; for (let i = i0; i <= i1; i++) s += ctx.loads[keyOf(addDays(day, -i))] || 0; return s; };
+  const acute = sum(0, DET.loadAcute - 1), chronic = sum(DET.loadAcute, DET.loadAcute + DET.loadChronic - 1) / (DET.loadChronic / 7);
+  if (!(chronic > 0)) return { active: false, status: "nodata", acute, chronic, ratio: null };
+  const ratio = acute / chronic; return { active: ratio > DET.loadRatio, status: ratio > DET.loadRatio ? "actif" : "ok", acute, chronic, ratio };
+}
+function detHrv(ctx, asOf) {
+  const day = dayStart(asOf), vals = [];
+  for (let i = 0; i < DET.hrvDays; i++) { const k = keyOf(addDays(day, -i)), d = ctx.days.find(x => x.d === k); if (!d || typeof d.hrv !== "number" || typeof d.hrvLo !== "number") return { active: false, status: "nodata", vals }; vals.push({ d: k, hrv: d.hrv, lo: d.hrvLo }); }
+  const low = vals.every(v => v.hrv < v.lo); return { active: low, status: low ? "actif" : "ok", vals };
+}
+function detSleep(ctx, asOf) {
+  const key = keyOf(asOf), nights = ctx.days.filter(d => d.sl > 0 && d.d <= key), last = nights.slice(-DET.sleepNights), base = nights.slice(-DET.sleepNights - DET.sleepBase, -DET.sleepNights);
+  const oldest = new Date(last.length ? dayMs(last[0].d) : 0);
+  if (last.length < DET.sleepNights || base.length < DET.sleepBaseMin || (dayStart(asOf) - oldest) / DAY > DET.sleepNights + 3) return { active: false, status: "nodata", debt: null };
+  const med = median(base.map(d => d.sl)), debt = last.reduce((s, d) => s + Math.max(0, med - d.sl), 0);
+  return { active: debt > DET.sleepDebtSec, status: debt > DET.sleepDebtSec ? "actif" : "ok", debt, med, nights: last.length };
+}
+const DETECTORS = [["gray", "Zone grise", detGray], ["load", "Charge qui monte trop vite", detLoad], ["hrv", "VFC basse", detHrv], ["sleep", "Dette de sommeil", detSleep]];
+// dernière alerte et nombre de jours en alerte sur les 90 derniers jours
+function alertHistory(fn, ctx, today, n = DET.history) {
+  const day = dayStart(today); let last = null, count = 0;
+  for (let i = 0; i < n; i++) { const d = i ? addDays(day, -i) : today, r = fn(ctx, d); if (r.active) { count++; if (!last) last = addDays(day, -i).getTime(); } }
+  return { last, count, n };
+}
+const detectAll = (ctx, asOf) => Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, fn(ctx, asOf)]));
+
+// ------------------------------------------------------------------ Fonctions pures : relevé de la semaine (le lundi)
+// Le relevé de la semaine dernière est affiché le lundi et le mardi
+const showReleve = today => [1, 2].includes(today.getDay());
+function weekReport(ctx, today, plan) {
+  const m1 = mondayOf(today), m0 = addDays(m1, -7), end = addDays(m1, -1);   // semaine dernière : m0 (lundi) → end (dimanche)
+  const inWeek = ctx.acts.filter(a => a.dt >= m0 && a.dt < m1), per = { bike: { n: 0, km: 0, tss: 0 }, run: { n: 0, km: 0, tss: 0 }, strength: { n: 0, km: 0, tss: 0 }, other: { n: 0, km: 0, tss: 0 } };
+  let hours = 0, tss = 0;
+  for (const a of inWeek) { if (!(a.mt >= MIN_SESSION)) continue; const sp = window.Charge.sportOf(a), t = ctx.tssOf(a); per[sp].n++; per[sp].km += a.km; per[sp].tss += t; hours += a.mt / 3600; tss += t; }
+  const f0 = fitAt(ctx.loads, m0), f1 = fitAt(ctx.loads, m1);
+  let planned = 0, done = 0, hasPlan = false;
+  if (plan) for (let i = 0; i < 7; i++) { const d = addDays(m0, i), p = plan.plannedFor(ymd(d)); if (p) { hasPlan = true; if (plan.isKey(p.t)) planned++; } }
+  if (plan) done = inWeek.filter(a => window.Charge.sportOf(a) === "bike" && plan.hardRide(a)).length;
+  const alerts = []; for (const [k, name, fn] of DETECTORS) { let act = null; for (let i = 0; i < 7; i++) { const d = addDays(m0, i); if (fn(ctx, d).active) act = d.getTime(); } if (act != null) alerts.push({ k, name, last: act }); }
+  return { m0, end, hours, tss, per, fond: { from: f0.ctl, to: f1.ctl, delta: f1.ctl - f0.ctl }, keys: { planned, done, hasPlan }, alerts, n: inWeek.filter(a => a.mt >= MIN_SESSION).length };
+}
 
 // ------------------------------------------------------------------ Rendu : outils
 const S_ = { period: 12, box: null };
@@ -173,6 +273,75 @@ function cardWeek(D) {
     <div class="crvars sy4">${line("Heures", cur.hours, avg.hours, 1, " h")}${line("Charge", cur.tss, avg.tss, 0, " TSS")}${line("Séances", cur.n, avg.n, 0)}</div>${per ? `<div class="crvars sy4 sy4s">${per}</div>` : ""}</section>`;
 }
 
+
+// 4b : projection, détecteurs, relevé
+function projChart(box, P, ser, unit, dec, label) {
+  if (!box) return;
+  const W = Math.max(280, box.clientWidth || 400), H = 200, m = { l: 44, r: 12, t: 12, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b, now = S_.D.now;
+  const t0 = now - 150 * DAY, t1 = P.end, hist = ser.filter(p => p.t >= t0), xs = t => (t - now) / DAY;
+  const vals = [...hist.map(p => p.v), P.goal, P.trendAt(xs(t1)), P.trendAt(xs(Math.max(t0, now - PROJ.days * DAY)))], lo0 = Math.min(...vals), hi0 = Math.max(...vals), pad = (hi0 - lo0) * .12 || 1, lo = lo0 - pad, hi = hi0 + pad;
+  const x = t => m.l + (t - t0) / (t1 - t0) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih, f = v => nf(v, dec);
+  let g = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}"><g class="axis">`;
+  const st = niceTicks(hi - lo, 4)[1] || 1; for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) g += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 5}" y="${y(v) + 4}" text-anchor="end">${f(v)}</text>`;
+  const d0 = new Date(t0); for (let k = 1; k < 14; k++) { const q = new Date(d0.getFullYear(), d0.getMonth() + k, 1); if (q.getTime() > t1) break; g += `<text x="${x(q.getTime())}" y="${H - 5}" text-anchor="middle">${MONTHS[q.getMonth()]}</text>`; }
+  g += `</g><line x1="${m.l}" x2="${W - m.r}" y1="${y(P.goal)}" y2="${y(P.goal)}" stroke="var(--accent)" stroke-dasharray="5 4"/><text x="${m.l + 4}" y="${y(P.goal) - 5}" font-size="11" font-weight="700" fill="var(--accent)">objectif ${f(P.goal)} ${unit}</text>`;
+  const ta = Math.max(t0, now - PROJ.days * DAY);
+  g += `<line x1="${x(now)}" x2="${x(now)}" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" stroke-width="1" opacity=".4"/>`;
+  g += `<path d="M${x(ta).toFixed(1)},${y(P.trendAt(xs(ta))).toFixed(1)}L${x(now).toFixed(1)},${y(P.trendAt(0)).toFixed(1)}" fill="none" stroke="var(--ink)" stroke-width="2" opacity=".55"/>`;
+  g += `<path d="M${x(now).toFixed(1)},${y(P.trendAt(0)).toFixed(1)}L${x(t1).toFixed(1)},${y(P.trendAt(xs(t1))).toFixed(1)}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 5" opacity=".7"/>`;
+  g += `<text x="${W - m.r}" y="${y(P.trendAt(xs(t1))) + (P.trendAt(xs(t1)) < P.goal ? 14 : -6)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--ink)">≈ ${f(P.projected)} ${unit}</text>`;
+  hist.forEach((p, i) => g += `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3.6" fill="var(--accent)" fill-opacity=".75" stroke="var(--card)" stroke-width="1.5" data-i="${i}"/>`);
+  box.innerHTML = g + `</svg><div class="legend bm-leg"><span><i style="background:var(--accent)"></i>mesures</span><span><i style="background:var(--ink);opacity:.6"></i>tendance (Theil-Sen, 120 j)</span><span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>projection au ${dShort(P.end)}</span></div>`;
+  const svg = box.querySelector("svg"), tipf = e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = hist[+c.dataset.i]; showTip(e, `<b>${dLong(p.t)}</b><br>${f(p.v)} ${unit}`); };
+  svg.addEventListener("pointermove", tipf); svg.addEventListener("pointerdown", tipf); svg.addEventListener("pointerleave", hideTip);
+}
+const verdictCol = v => v === "atteint" || v === "dans les temps" ? "var(--good)" : v === "un peu juste" ? "#c77700" : "var(--bad)";
+function projBlock(id, title, P, unit, dec, what) {
+  if (!P) return `<div class="pg-box pg-wide" id="${id}"><h4>${title}</h4>${note("Pas assez de mesures sur les 120 derniers jours pour dégager une tendance.")}</div>`;
+  const u = unit ? " " + unit : "", t = P.text, r = (v, d) => `${v < 0 ? "−" : "+"}${nf(Math.abs(v), d)}`, endTxt = dLong(P.end);
+  const phrase = P.verdict === "atteint" ? `Objectif de ${nf(P.goal, dec)}${u} déjà atteint.` :
+    `${what} ${nf(t.cur, dec)}${u} aujourd'hui, objectif ${nf(P.goal, dec)}${u} au ${endTxt} : il faut <b>${r(t.need, dec ? 2 : 1)}${u}/semaine</b>, la tendance actuelle est de <b>${r(t.rate, dec ? 2 : 1)}${u}/semaine</b>, soit ≈ <b>${nf(t.projected, dec)}${u}</b> au ${endTxt}.`;
+  return `<div class="pg-box pg-wide" id="${id}"><h4>${title} <small>${P.n} mesures sur 120 jours</small></h4>
+    <p class="bm-p syverdict"><b style="color:${verdictCol(P.verdict)}">${P.verdict === "atteint" ? "Objectif atteint" : P.verdict === "dans les temps" ? "Dans les temps" : P.verdict === "un peu juste" ? "Un peu juste" : "Hors de portée au rythme actuel"}.</b> ${phrase}</p><div class="${id}Plot"></div></div>`;
+}
+function cardProj(D) {
+  return `<section class="card span12" id="syProj"><h2>Projection vers tes objectifs <small>${nf(GOALS.ftp)} W de FTP et VO2max ${nf(GOALS.vo2)} au ${dLong(dayMs(GOALS.date))} · tendance robuste (Theil-Sen)</small></h2><div class="pg-grid">
+    ${projBlock("syFtp", "FTP", D.proj.ftp, "W", PROJ.ftpDec, "Tu es à")}${projBlock("syVo2", "VO2max", D.proj.vo2, "", PROJ.vo2Dec, "Tu es à")}</div></section>`;
+}
+function plotProj(D) {
+  if (D.proj.ftp) projChart(document.querySelector(".syFtpPlot"), D.proj.ftp, D.proj.ftpSer, "W", PROJ.ftpDec, "Projection de la FTP");
+  if (D.proj.vo2) projChart(document.querySelector(".syVo2Plot"), D.proj.vo2, D.proj.vo2Ser, "", PROJ.vo2Dec, "Projection de la VO2max");
+}
+const DET_TXT = {
+  gray: r => ({ why: `${r.count} séances « ni faciles ni dures » en ${DET.grayDays} jours (plus de ${DET.grayShare * 100} % du temps en zone 3) : fatigantes sans apporter le stimulus d'une vraie séance dure.`, tip: "Garde les séances faciles vraiment faciles (zones 1-2) et réserve l'intensité aux séances clés." }),
+  load: r => ({ why: `Ta charge des 7 derniers jours (${nf(r.acute)} TSS) est ${nf(r.ratio, 1)}× la moyenne hebdomadaire des 28 jours d'avant (${nf(r.chronic)} TSS).`, tip: "Évite d'ajouter de l'intensité cette semaine et garde une journée vraiment facile." }),
+  hrv: r => ({ why: `VFC sous ta normale Garmin ${DET.hrvDays} jours de suite : ${r.vals.slice().reverse().map(v => `${nf(v.hrv)} ms (normale à partir de ${nf(v.lo)})`).join(", ")}.`, tip: "Regarde d'abord le sommeil et la fatigue des derniers jours ; si la récup reste basse, garde la séance du jour facile." }),
+  sleep: r => ({ why: `Il te manque ${nf(r.debt / 3600, 1)} h de sommeil sur ${r.nights} nuits par rapport à ta médiane des ${DET.sleepBase} nuits d'avant (${nf(r.med / 3600, 1)} h par nuit).`, tip: "Récupère avec environ 1 h de plus par nuit cette semaine." }),
+};
+function cardDet(D) {
+  const rows = DETECTORS.map(([k, name]) => { const r = D.det.res[k], h = D.det.hist[k];
+    const hist = h.last == null ? `aucune alerte sur ${DET.history} jours` : `dernière alerte : ${dLong(h.last)} · ${nf(h.count)} jour${h.count > 1 ? "s" : ""} en alerte sur ${DET.history}`;
+    const st = r.status === "actif" ? `<span class="sydot2" style="background:#e8501c"></span><b>${name}</b>` : r.status === "nodata" ? `<span class="sydot2" style="background:var(--ghost)"></span><b>${name}</b> <small>pas assez de données</small>` : `<span class="sydot2" style="background:var(--good)"></span><b>${name}</b> <small>rien à signaler</small>`;
+    const t = r.active ? DET_TXT[k](r) : null;
+    return `<div class="sydet${r.active ? " on" : ""}"><div class="syd1">${st}</div>${t ? `<p class="bm-p">${t.why}</p><p class="bm-p sytip">Piste : ${t.tip}</p>` : ""}<div class="syd2">${hist}</div></div>`; }).join("");
+  const any = DETECTORS.some(([k]) => D.det.res[k].active);
+  return `<section class="card span12" id="syDet"><h2>Frais cachés <small>quatre détecteurs, chacun avec son historique sur ${DET.history} jours</small></h2>
+    ${any ? "" : `<div class="syok"><b>Rien à signaler</b> · aucun détecteur n'est actif aujourd'hui.</div>`}<div class="sydets">${rows}</div></section>`;
+}
+function cardReleve(D) {
+  const R = D.report, key = K_RELEVE + ymd(mondayOf(D.today));
+  if (!R || lsGet(key) || !showReleve(D.today)) return "";
+  const km = SPORTS.filter(([k]) => R.per[k].n > 0 && (k === "bike" || k === "run")).map(([k, l, c]) => `<div class="crvar"><span><i class="sydot" style="background:${c}"></i>${l}</span><b>${nf(R.per[k].km)} km</b><small>${nf(R.per[k].n)} séance${R.per[k].n > 1 ? "s" : ""} · ${nf(R.per[k].tss)} TSS</small></div>`).join("");
+  const other = SPORTS.filter(([k]) => (k === "strength" || k === "other") && R.per[k].n > 0).map(([k, l, c]) => `<div class="crvar"><span><i class="sydot" style="background:${c}"></i>${l}</span><b>${nf(R.per[k].n)} séance${R.per[k].n > 1 ? "s" : ""}</b><small>${nf(R.per[k].tss)} TSS</small></div>`).join("");
+  const keys = R.keys.hasPlan ? `${nf(R.keys.done)} faite${R.keys.done > 1 ? "s" : ""} / ${nf(R.keys.planned)} prévue${R.keys.planned > 1 ? "s" : ""}` : "pas de plan enregistré";
+  const al = R.alerts.length ? R.alerts.map(a => `${a.name} (jusqu'au ${dShort(a.last)})`).join(" · ") : "aucune";
+  return `<section class="card span12 syreleve" id="syReleve"><h2>Relevé de la semaine dernière <small>du ${dShort(R.m0.getTime())} au ${dShort(R.end.getTime())}</small><button class="btn" data-close="${key}" aria-label="Refermer le relevé">Refermer</button></h2>
+    <div class="crvars sy4"><div class="crvar"><span>Heures</span><b>${nf(R.hours, 1)} h</b><small>${nf(R.n)} séances</small></div><div class="crvar"><span>Charge</span><b>${nf(R.tss)} TSS</b><small>tous sports</small></div>
+    <div class="crvar" style="--c:${col(R.fond.delta)}"><span>Fond</span><b>${sgn(R.fond.delta, 1)} pts</b><small>${nf(R.fond.from)} → ${nf(R.fond.to)}</small></div></div>
+    <div class="crvars sy4 sy4s">${km}${other}<div class="crvar"><span>Séances clés</span><b>${keys}</b><small>selon le Plan</small></div></div>
+    <p class="bm-p">Alertes de la semaine : ${al}.</p></section>`;
+}
+
 // ------------------------------------------------------------------ Données de la page
 function gather() {
   const today = new Date(), acts = (typeof S !== "undefined" && S.all) || [], ch = window.Charge, loads = ch.dayLoads(acts), daily = ch.dayLoadsBySport(acts);
@@ -189,7 +358,14 @@ function gather() {
   const rs = last ? window.Recup.recoScore(last) : null, prev = scores.slice(0, -1);
   const rec = { score: rs && rs.score != null ? rs.score : null, label: rs && rs.label ? rs.label : "", ser: scores, color: rs && rs.score != null ? recupColor(rs.score) : null,
     v: rs && rs.score != null && prev.length >= 5 ? { delta: rs.score - prev.reduce((s, q) => s + q.v, 0) / prev.length } : null };
-  return { today, now, acts, loads, daily, profile, fit, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
+  // 4b : projection, détecteurs, relevé
+  const planAPI = window.Plan && window.Plan.plannedFor ? window.Plan : null, recDays = (window.Recup && window.Recup.days) || [];
+  const dctx = { acts, loads, days: recDays, hardRide: a => planAPI ? planAPI.hardRide(a) : false, tssOf: a => ch.tssOf(a) };
+  const ftpTrend = ftpSer.concat(rampPoints(acts, now)).sort((a, b) => a.t - b.t);
+  const proj = { ftp: projection(ftpTrend, GOALS.ftp, GOALS.date, now, ftpNow, PROJ.ftpDec), ftpSer: ftpTrend, vo2: projection(vo2Ser, GOALS.vo2, GOALS.date, now, vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, PROJ.vo2Dec), vo2Ser };
+  const res = detectAll(dctx, today), hist = Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, alertHistory(fn, dctx, today)]));
+  const report = acts.length ? weekReport(dctx, today, planAPI) : null;
+  return { today, now, acts, loads, daily, profile, proj, det: { res, hist }, report, dctx, fit, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
     ftp: { cur: ftpNow, ser: ftpSer, v30: ftpNow ? listVariation(ftpSer, now, 30, ftpNow) : null },
     vo2: { cur: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, date: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].t : null, ser: vo2Ser, v30: listVariation(vo2Ser, now, 30) },
     thr: { pace: p.runPace, src: thrSrc }, rec };
@@ -201,11 +377,12 @@ function render() {
   const per = +lsGet(K_PERIOD); S_.period = PERIODS.some(p => p[0] === per) ? per : 12;
   if (!(typeof S !== "undefined" && S.all.length)) { box.innerHTML = `<div class="card empty"><b>Pas encore de données</b>Lance le workflow « Mise à jour Garmin » puis reviens ici.</div>`; return; }
   const D = S_.D = gather();
-  box.innerHTML = `<div class="grid">${cardForme(D)}${cardShare(D)}${cardIndic(D)}${cardWeek(D)}</div>`;
-  plotForme(D); plotWeeks(D); bind(box);
+  box.innerHTML = `<div class="grid">${cardReleve(D)}${cardForme(D)}${cardDet(D)}${cardShare(D)}${cardIndic(D)}${cardProj(D)}${cardWeek(D)}</div>`;
+  plotForme(D); plotWeeks(D); plotProj(D); bind(box);
 }
 function bind(box) {
   box.querySelectorAll("[data-per]").forEach(b => b.onclick = () => { lsSet(K_PERIOD, b.dataset.per); S_.period = +b.dataset.per; box.querySelectorAll("[data-per]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); plotForme(S_.D); });
+  box.querySelectorAll("[data-close]").forEach(b => b.onclick = () => { lsSet(b.dataset.close, "1"); const c = document.getElementById("syReleve"); if (c) c.remove(); });
   box.querySelectorAll("[data-go]").forEach(el => { const go = () => {
     if (el.dataset.go === "course") { store.set("sport", "run"); S.sport = "run"; window.Nav.setTab("activites"); } else window.Nav.setTab(el.dataset.go); };
     el.onclick = go; el.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }; });
@@ -217,7 +394,7 @@ async function open() {
   render();
 }
 
-window.Synthese = { open, render, _: { fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS } };
+window.Synthese = { open, render, _: { theilSen, rampPoints, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });
 if (window.Nav && window.Nav.curTab() === "synthese") open();
