@@ -358,6 +358,7 @@ def _raw(o, n=1500):
 
 
 # ------------------------------------------------------------------ Profil course à pied (une fois par jour)
+RUN_V = 2                           # version du format de profile.run : un changement de lecture force un rafraîchissement
 RACE_START = date(2025, 3, 1)       # historique des prédictions de course
 LT_PACE_REF = 253                   # allure semi de février 2026 (4:13/km) : sert à départager l'échelle de la vitesse
 LT_PACE_OK = (180, 360)             # allure seuil plausible : 3:00 à 6:00 /km
@@ -530,7 +531,7 @@ def read_vo2_run(mm):
 
 def fetch_run_profile(api, start, today, mm=None):
     """Bloc profile.run + extraits bruts. None si Garmin limite les requêtes (429) : on garde l'ancien bloc."""
-    run, raw = {"d": today.isoformat()}, {}
+    run, raw = {"d": today.isoformat(), "v": RUN_V}, {}
     ds, td = start.isoformat(), today.isoformat()
     try:
         r = _run_call(api.get_lactate_threshold)
@@ -635,7 +636,7 @@ def fetch_profile(api, start, today, prev=None):
         }
     # Course : rafraîchie une fois par jour (l'état précédent, s'il date d'aujourd'hui, est repris tel quel)
     old = prev or {}
-    if (old.get("run") or {}).get("d") == today.isoformat():
+    if (old.get("run") or {}).get("d") == today.isoformat() and (old["run"].get("v") == RUN_V):
         res = (old["run"], {k: v for k, v in (old.get("raw") or {}).items() if k in RUN_RAW})
     else:
         res = fetch_run_profile(api, start, today, mm)

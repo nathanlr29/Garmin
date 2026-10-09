@@ -138,7 +138,7 @@ class RunProfile(unittest.TestCase):
         for api in (FakeApi(), FakeApi(get_lactate_threshold=RuntimeError("404"), get_personal_record=ValueError("x"),
                                         get_hill_score={}, get_endurance_score=[], get_running_tolerance=None)):
             run, raw = rc.fetch_run_profile(api, date(2026, 1, 1), TODAY)
-            self.assertEqual(run, {"d": "2026-10-09"})
+            self.assertEqual(run, {"d": "2026-10-09", "v": rc.RUN_V})
             self.assertTrue(set(raw) <= set(rc.RUN_RAW))
 
     def test_un_appel_en_erreur_ne_bloque_pas_les_autres(self):
@@ -165,13 +165,15 @@ class RunProfile(unittest.TestCase):
 
     def test_une_fois_par_jour(self):
         api = _ProfileApi(FakeApi())
-        old = {"run": {"d": "2026-10-09", "lt": {"pace": 250}}, "raw": {"runLt": "x"}}
+        old = {"run": {"d": "2026-10-09", "v": rc.RUN_V, "lt": {"pace": 250}}, "raw": {"runLt": "x"}}
         prof = rc.fetch_profile(api, date(2026, 1, 1), TODAY, old)
         self.assertEqual(prof["run"], old["run"])                       # repris tel quel
         self.assertFalse([c for c in api.inner.calls if c in ("get_lactate_threshold", "get_race_predictions", "get_personal_record",
                                                               "get_running_tolerance", "get_endurance_score", "get_hill_score")])
-        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-08"}})
+        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-08", "v": rc.RUN_V}})
         self.assertEqual(prof["run"]["d"], "2026-10-09")                # la veille : on rafraîchit
+        prof = rc.fetch_profile(_ProfileApi(FakeApi()), date(2026, 1, 1), TODAY, {"run": {"d": "2026-10-09", "v": 1, "lt": {"pace": 250}}})
+        self.assertNotIn("lt", prof["run"])                             # ancien format : relu même si c'est le même jour
 
 
 class _ProfileApi:
