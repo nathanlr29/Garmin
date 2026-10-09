@@ -1,0 +1,27 @@
+/* Onglet « Synthèse ». Réutilise .card / .crvar / .crtile / .crSpark / .crchips (course.css), .bm-zbar / .bm-zleg / .legend (plan.css) */
+#synthese .card h2{margin-bottom:10px}
+.syhead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px 24px;margin-bottom:6px}
+.syctl{font-size:clamp(54px,14vw,96px);line-height:.95}
+.syfat{display:flex;gap:10px 22px;flex-wrap:wrap}
+.syfat div{display:grid;gap:1px;min-width:92px}
+.syfat span{font-size:12px;color:var(--muted)}
+.syfat b{font-size:clamp(22px,6vw,30px);font-weight:800;font-stretch:108%;letter-spacing:-.02em;line-height:1.1}
+.syfat small{font-size:12.5px;color:var(--muted)}
+.sy2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.sy4{grid-template-columns:repeat(3,minmax(0,1fr))}
+.sy4s{margin-top:8px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
+.sybar{height:20px;margin:4px 0 8px}
+.sylegend{gap:6px 18px}
+.sylegend small{color:var(--muted)}
+.syh3{font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:18px 0 8px}
+.syh3 small{text-transform:none;letter-spacing:0;font-weight:500}
+.sywks{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;align-items:end;height:120px}
+.sywk{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0;gap:3px;cursor:default}
+.sywkb{width:100%;max-width:30px;min-height:2px;border-radius:5px 5px 2px 2px;overflow:hidden;display:flex;flex-direction:column-reverse}
+.sywk span{font-size:10px;color:var(--muted);height:12px;white-space:nowrap}
+.sydot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.syinds{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.syind{cursor:pointer}
+.syind:hover,.syind:focus-visible{border-color:var(--accent);outline:none}
+.syind .v small{font-size:.5em;font-weight:600;color:var(--muted);margin-left:2px}
+@media (max-width:520px){.sy4{gap:6px}.sy4 .crvar{padding:6px 8px}.sy4 .crvar small{white-space:normal}}
