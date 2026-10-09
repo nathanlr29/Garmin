@@ -1,5 +1,5 @@
 "use strict";
-// Bilan de séance (fenêtre ouverte depuis le Plan ou les dernières sorties) et carte « Progression » de l'onglet Plan.
+// Bilan de séance (vélo et course à pied ; fenêtre ouverte depuis le Plan ou les dernières sorties) et carte « Progression » de l'onglet Plan.
 // Détail seconde par seconde : data/streams/<id>.json, produit par la mise à jour Garmin pour les 6 dernières semaines.
 (() => {
 const B = { idx: null, cache: {}, wx: {}, prog: 0 };
@@ -70,6 +70,136 @@ function analyze(a, st) {
     }
   }
   return out;
+}
+
+// ------------------------------------------------------------------ Course à pied
+// Rien de propre au vélo ici : ni vent, ni profil Coggan, ni % FTP, ni conformité au plan (la course entre dans le plan à l'étape 5).
+const isRun = a => !!(window.Charge && Charge.RUN_TYPES.has(a.t));
+const runIndoor = a => a.t === "treadmill_running" || a.t === "virtual_run";
+const RUN_MIN_KMH = 3;          // en dessous de 3 km/h on est à l'arrêt : exclu des moyennes, des zones et de l'axe d'allure
+// zones d'allure autour de l'allure seuil : bornes hautes en fraction de la VITESSE seuil (< 78 %, 78-88, 88-95, 95-102, > 102 %)
+const RUN_ZONES = [[.78, "Z1 récup", "#a5b1bd"], [.88, "Z2 endurance", "#4aa3df"], [.95, "Z3 tempo", "#2fb380"], [1.02, "Z4 seuil", "#f2b134"], [99, "Z5 VO2max", "#ef6c3a"]];
+const RUN_DEC_SKIP = 600;       // découplage allure/FC : on retire les 10 premières minutes…
+const RUN_DEC_MIN = 1200;       // …et il faut au moins 20 minutes ensuite
+const RUN_CADENCE_LOW = 160;    // pas/min : en dessous, le bilan le signale
+const paceTxt = sec => { if (!isFinite(sec) || sec <= 0) return "–"; let m = Math.floor(sec / 60), s = Math.round(sec % 60); if (s === 60) { m++; s = 0; } return `${m}:${pad(s)}`; };
+const runMoving = (st, i) => st.v != null && st.v[i] != null && st.v[i] / 10 >= RUN_MIN_KMH;
+function runZoneOf(kmh, thrPace) { const r = kmh / (3600 / thrPace); return RUN_ZONES.findIndex(z => r < z[0]); }
+// allure moyenne en mouvement d'une activité (s/km)
+const runPace = a => a.km > 0 && a.mt > 0 ? a.mt / a.km : null;
+function analyzeRun(st, thrPace) {
+  const dt = st.dt, n = st.n, mv = Array.from({ length: n }, (_, i) => runMoving(st, i)), out = { dt, n };
+  out.moving = mv.filter(Boolean).length * dt;
+  const mean = k => { if (!st[k]) return null; const v = st[k].filter((x, i) => x != null && x > 0 && mv[i]); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+  out.avgKmh = st.v ? mean("v") / 10 : null;
+  out.avgH = mean("h"); if (out.avgH != null) out.maxH = Math.max(...st.h.filter((x, i) => x > 0 && mv[i]));
+  out.cad = mean("c"); out.sl = mean("sl"); out.gct = mean("gct"); out.vo = mean("vo");
+  if (out.avgKmh && out.avgH) out.ef = out.avgKmh / 3.6 * 60 / out.avgH;   // mètres par battement
+  if (thrPace && st.v) { out.rz = RUN_ZONES.map(() => 0); st.v.forEach((x, i) => { if (mv[i]) out.rz[runZoneOf(x / 10, thrPace)] += dt; }); }
+  // découplage allure/cardio : 1re moitié vs 2de moitié de la séance, comme le découplage puissance/cardio du vélo
+  if (st.v && st.h) {
+    const idx = []; for (let i = Math.ceil(RUN_DEC_SKIP / dt); i < n; i++) if (mv[i] && st.h[i] > 0) idx.push(i);
+    if (idx.length * dt >= RUN_DEC_MIN) {
+      const half = Math.floor(idx.length / 2), ef = arr => arr.reduce((s, i) => s + st.v[i], 0) / arr.reduce((s, i) => s + st.h[i], 0);
+      const e1 = ef(idx.slice(0, half)), e2 = ef(idx.slice(half));
+      const vv = idx.map(i => st.v[i]), med = vv.slice().sort((a, b) => a - b)[Math.floor(vv.length / 2)], near = vv.filter(x => Math.abs(x - med) <= .15 * med).length / vv.length;
+      out.dec = (e1 - e2) / e1 * 100; out.steady = near >= .7;   // allure régulière, pas du fractionné
+    }
+  }
+  return out;
+}
+function runInfo(a) {  // charge, intensité par rapport à l'allure seuil
+  const tss = Charge.tssOf(a), p = Charge.params(), h = a.mt / 3600;
+  return { tss, thr: p.runPace, IF: tss > 0 && h > 0 ? Math.sqrt(tss / h / 100) : null };
+}
+function tilesRun(a, an) {
+  const t = (l, v, s) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s || "&nbsp;"}</div></div>`, L = [], ri = runInfo(a);
+  L.push(t("Durée", hms(a.mt), a.et > a.mt + 120 ? `${hms(a.et)} au total` : ""));
+  L.push(t("Distance", `${nf(a.km, 1)}<small> km</small>`, runIndoor(a) ? "tapis" : ""));
+  if (runPace(a)) L.push(t("Allure moyenne", `${paceTxt(runPace(a))}<small> /km</small>`, "en mouvement"));
+  L.push(t("Dénivelé", `${nf(a.el)}<small> m</small>`, "positif"));
+  if (ri.tss > 0) L.push(t("Charge", `${nf(ri.tss)}<small> rTSS</small>`, ri.thr ? `IF ${nf(ri.IF, 2)} · seuil ${paceTxt(ri.thr)} /km` : "estimée à la FC, sans allure seuil"));
+  const hr = an && an.avgH ? an.avgH : a.hr; if (hr > 0) L.push(t("Cardio", `${nf(hr)}<small> bpm</small>`, an && an.maxH ? `max ${nf(an.maxH)} bpm` : ""));
+  if (a.te > 0) L.push(t("Effet aérobie", nf(a.te, 1), a.tl ? `charge Garmin ${a.tl}` : ""));
+  if (an && an.cad) L.push(t("Cadence", `${nf(an.cad)}<small> pas/min</small>`, ""));
+  if (an && an.sl) L.push(t("Longueur de pas", `${nf(an.sl)}<small> cm</small>`, ""));
+  if (an && an.gct) L.push(t("Contact au sol", `${nf(an.gct)}<small> ms</small>`, ""));
+  if (an && an.vo) L.push(t("Oscillation verticale", `${nf(an.vo, 1)}<small> cm</small>`, ""));
+  if (a.w > 0) L.push(t("Puissance Garmin", `${nf(a.w)}<small> W</small>`, "à titre d'info, hors charge"));
+  return `<div class="tiles bm-tiles">${L.join("")}</div>`;
+}
+function verdictRun(a, an) {
+  const L = [], ri = runInfo(a), hr = an && an.avgH ? an.avgH : a.hr, Z = a.hz || (an && an.hz), zi = Z && Z.some(x => x > 0) ? Z.indexOf(Math.max(...Z)) : -1;
+  L.push(`${hms(a.mt)} à <b>${paceTxt(runPace(a))} /km</b> de moyenne${hr ? `, cardio moyen ${nf(hr)} bpm` : ""}${zi >= 0 ? `, surtout en ${HZL[zi]}` : ""}.`);
+  if (ri.tss > 0) L.push(ri.thr && ri.IF ? `Intensité <b>${nf(ri.IF * 100)} %</b> de ton allure seuil (${paceTxt(ri.thr)} /km) : charge <b>≈ ${nf(ri.tss)} rTSS</b>.` : `Charge <b>≈ ${nf(ri.tss)} rTSS</b>, estimée à la fréquence cardiaque (pas d'allure seuil connue).`);
+  const more = [];
+  if (an && an.dec != null && an.steady) more.push(`Découplage allure/cardio ${nf(an.dec, 1)} % sur ${hms(an.moving)} : ${an.dec < 5 ? "endurance solide (moins de 5 %)" : an.dec < 8 ? "correct, la fatigue se fait sentir en fin de séance" : "élevé : manque d'endurance de base, chaleur ou hydratation"}.`);
+  if (an && an.cad && an.cad < RUN_CADENCE_LOW) more.push(`Cadence moyenne de ${nf(an.cad)} pas/min, sous les ${RUN_CADENCE_LOW} pas/min.`);
+  L.push(...more);
+  if (an && an.rz && L.length < 4) { const tot = an.rz.reduce((s, x) => s + x, 0), easy = (an.rz[0] + an.rz[1]) / Math.max(1, tot); if (tot >= 300) L.push(`${pct(easy)} du temps sous 88 % de ta vitesse seuil (zones d'allure 1-2), ${pct((an.rz[3] + an.rz[4]) / Math.max(1, tot))} à 95 % ou plus.`); }
+  return `<div class="bm-verdict">${L.slice(0, 4).map(x => `<p>${x}</p>`).join("")}</div>`;
+}
+function zonesRunHtml(a, an) {
+  const bar = (Z, names, cols, title) => { const tot = Z.reduce((s, x) => s + x, 0) || 1;
+    return `<section class="bm-sec"><h4>${title}</h4><div class="bm-zbar">${Z.map((x, i) => x ? `<div style="width:${x / tot * 100}%;background:${cols[i]}" title="${names[i]} : ${hms(x)}"></div>` : "").join("")}</div>
+    <div class="bm-zleg">${Z.map((x, i) => x >= 30 ? `<span><i style="background:${cols[i]}"></i>${names[i]} <b>${hms(x)}</b> ${nf(x / tot * 100)} %</span>` : "").join("")}</div></section>`; };
+  let h = "";
+  if (a.hz && a.hz.some(x => x > 0)) h += bar(a.hz, HZN, HZC, "Zones cardio <small>calcul Garmin</small>");
+  else if (an && an.hz) h += bar(an.hz, HZN, HZC, "Zones cardio");
+  const thr = Charge.params().runPace;
+  if (an && an.rz && thr && an.rz.some(x => x > 0)) h += bar(an.rz, RUN_ZONES.map(z => z[1]), RUN_ZONES.map(z => z[2]), `Zones d'allure <small>autour de ton allure seuil ${paceTxt(thr)} /km · vitesse brute, sans correction du dénivelé</small>`);
+  return h;
+}
+function enduRunHtml(an) {
+  if (!an || (an.ef == null && an.dec == null)) return "";
+  return `<section class="bm-sec"><h4>Endurance</h4><p class="bm-p">${an.ef != null ? `Efficacité : <b>${nf(an.ef, 2)} m par battement</b> (vitesse moyenne ÷ cardio moyen). Plus elle monte d'une sortie facile à l'autre, plus tu avances loin au même cardio.` : ""}${an.dec != null ? ` Découplage allure/cardio : <b>${nf(an.dec, 1)} %</b>${an.steady ? "" : " (allure irrégulière : à prendre avec des pincettes)"}.` : ""}</p></section>`;
+}
+function chartRun(box, st, thrPace) {
+  if (!box) return;
+  const W = Math.max(300, box.clientWidth || 600), H = 220, m = { l: 40, r: 34, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b, n = st.n, dt = st.dt;
+  const smooth = (arr, w) => { if (!arr || w <= 1) return arr; return arr.map((v, i) => { if (v == null) return null; let s_ = 0, c = 0; for (let k = Math.max(0, i - w + 1); k <= i; k++) if (arr[k] != null) { s_ += arr[k]; c++; } return c ? s_ / c : null; }); };
+  // allure lissée sur 30 s (on moyenne la vitesse, pas l'allure) ; à l'arrêt (< 3 km/h) : pas de point
+  const sp = st.v ? smooth(st.v.map(x => x != null && x / 10 >= RUN_MIN_KMH ? x / 10 : null), Math.max(1, Math.round(30 / dt))) : null;
+  const pc = sp ? sp.map(v => v != null && v > 0 ? 3600 / v : null) : null;
+  const vals = pc ? pc.filter(v => v != null).sort((a, b) => a - b) : [];
+  let lo = vals.length ? vals[Math.floor(vals.length * .02)] : 240, hi = vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * .98))] : 360;
+  lo = Math.floor(lo / 15) * 15; hi = Math.ceil(hi / 15) * 15; if (hi - lo < 60) { hi = lo + 60; }
+  const x = i => m.l + i / Math.max(1, n - 1) * iw, y = p => m.t + (clamp(p, lo, hi) - lo) / (hi - lo) * ih;   // axe inversé : le plus rapide en haut
+  const HR = st.h ? smooth(st.h.map(v => v > 0 ? v : null), Math.round(15 / dt)) : null, H2 = HR ? HR.filter(v => v > 0) : [];
+  const hLo = H2.length ? Math.min(...H2) - 5 : 0, hHi = H2.length ? Math.max(...H2) + 5 : 1, yh = v => m.t + ih - (v - hLo) / (hHi - hLo) * ih;
+  const A = st.a ? st.a.filter(v => v != null) : [], aLo = A.length ? Math.min(...A) : 0, aHi = A.length ? Math.max(...A) : 1, ya = v => m.t + ih - (v - aLo) / Math.max(10, aHi - aLo) * ih * .3;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Déroulé de la séance"><g class="axis">`;
+  const tStep = n * dt > 3 * 3600 ? 3600 : n * dt > 3600 ? 1800 : 600;
+  for (let t = 0; t <= n * dt; t += tStep) s += `<text x="${x(t / dt)}" y="${H - 5}" text-anchor="middle">${t >= 3600 ? `${Math.floor(t / 3600)} h${t % 3600 ? pad(t % 3600 / 60) : ""}` : `${t / 60}′`}</text>`;
+  const step = hi - lo > 240 ? 60 : hi - lo > 120 ? 30 : 15;
+  for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(p)}" y2="${y(p)}"/><text x="${m.l - 5}" y="${y(p) + 4}" text-anchor="end">${paceTxt(p)}</text>`;
+  if (H2.length) [hLo + 5, (hLo + hHi) / 2, hHi - 5].forEach(v => s += `<text x="${W - m.r + 5}" y="${yh(v) + 4}" fill="#c2255c">${Math.round(v)}</text>`);
+  s += "</g>";
+  if (A.length) { let d = "", pen = false; st.a.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + ya(v).toFixed(1); pen = true; });
+    s += `<path d="M${x(0)},${m.t + ih}${d.replace(/^M/, "L").replace(/M/g, "L")}L${x(n - 1)},${m.t + ih}Z" fill="var(--muted)" opacity=".18"/>`; }
+  if (thrPace && thrPace >= lo && thrPace <= hi) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(thrPace)}" y2="${y(thrPace)}" stroke="var(--ink)" stroke-dasharray="4 3" opacity=".5"/>`;
+  if (pc) { let d = "", pen = false; pc.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" opacity=".95"/>`; }
+  if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="#c2255c" stroke-width="1.6" stroke-linejoin="round"/>`; }
+  s += `<line id="bmCur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="bmHit"/></svg>`;
+  box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>allure (min/km, plus rapide en haut)</span>${H2.length ? `<span><i style="background:#c2255c"></i>cardio (bpm)</span>` : ""}${A.length ? `<span><i style="background:var(--muted);opacity:.4"></i>altitude (${Math.round(aLo)}–${Math.round(aHi)} m)</span>` : ""}${thrPace && thrPace >= lo && thrPace <= hi ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>seuil ${paceTxt(thrPace)}</span>` : ""}</div>`;
+  const svg = box.querySelector("svg"), cur = box.querySelector("#bmCur"), hit = box.querySelector("#bmHit");
+  const mv = e => { const r = svg.getBoundingClientRect(), i = clamp(Math.round(((e.clientX - r.left) * W / r.width - m.l) / iw * (n - 1)), 0, n - 1);
+    cur.setAttribute("x1", x(i)); cur.setAttribute("x2", x(i)); cur.setAttribute("opacity", .6);
+    const t = i * dt; showTip(e, `<b>${t >= 3600 ? `${Math.floor(t / 3600)} h ${pad(Math.floor(t % 3600 / 60))}` : `${Math.floor(t / 60)} min ${pad(t % 60)}`}</b>${pc && pc[i] != null ? `<br>${paceTxt(pc[i])} /km` : ""}${st.h && st.h[i] ? `<br>${st.h[i]} bpm` : ""}${st.a && st.a[i] != null ? `<br>${st.a[i]} m` : ""}${st.c && st.c[i] ? `<br>${st.c[i]} pas/min` : ""}`); };
+  hit.addEventListener("pointermove", mv); hit.addEventListener("pointerdown", mv); hit.addEventListener("pointerleave", () => { hideTip(); cur.setAttribute("opacity", 0); });
+}
+function headerRun(a) {
+  return `<header class="bm-head"><div><div class="bm-k">Bilan de séance · course à pied</div><h3 id="bmTitle">${esc(a.n)}</h3>
+    <div class="bm-sub">${a.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} à ${pad(a.dt.getHours())} h ${pad(a.dt.getMinutes())} · ${runIndoor(a) ? "tapis" : "dehors"}</div></div>
+    <button class="bm-x" data-bmclose aria-label="Fermer">✕</button></header>`;
+}
+async function openRun(a, body) {
+  body.innerHTML = headerRun(a) + `<p class="note">Analyse en cours…</p>`;
+  const st = await stream(a.id), thr = Charge.params().runPace, an = st ? analyzeRun(st, thr) : null;
+  body.innerHTML = headerRun(a) + tilesRun(a, an) + verdictRun(a, an) + (st ? `<section class="bm-sec"><h4>Déroulé <small>allure${st.h ? ", cardio" : ""}${st.a ? " et altitude" : ""}</small></h4><div id="bmChart"></div></section>` : "")
+    + zonesRunHtml(a, an) + enduRunHtml(an) + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
+    + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
+  if (st) chartRun(document.getElementById("bmChart"), st, thr);
 }
 
 // Séance prévue vs réalisée : on cale le profil prévu sur la puissance (décalage de départ), puis on mesure chaque effort
@@ -161,6 +291,7 @@ async function open(id) {
   const a = (S.all || []).find(x => x.id === id); if (!a) return;
   const m = ensureModal(); m.hidden = false; document.documentElement.classList.add("bm-open");
   const body = document.getElementById("bmBody");
+  if (isRun(a)) return openRun(a, body);
   body.innerHTML = header(a) + `<p class="note">Analyse en cours…</p>`;
   const st = await stream(id);
   const plan = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10)) : null;
@@ -361,9 +492,9 @@ function dots(box, P, o) {
 document.addEventListener("click", e => {
   const a = e.target.closest && e.target.closest("a.ride"); if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
   const id = +String(a.getAttribute("href") || "").split("/").pop(), act = (S.all || []).find(x => x.id === id);
-  if (!act || !RIDE_TYPES.has(act.t)) return;
+  if (!act || !(RIDE_TYPES.has(act.t) || isRun(act))) return;
   e.preventDefault(); open(id);
 }, true);
 document.addEventListener("velo:loaded", () => { B.idx = null; B.cache = {}; });
-window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor };
+window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
 })();
