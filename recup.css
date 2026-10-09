@@ -2,6 +2,8 @@
 .tabs{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;align-self:center}
 .tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--accent);color:#fff}
+@media (max-width:480px){.tabs{padding:2px;gap:0}.tabs button{font-size:12.5px;padding:6px 9px}}   /* 5 onglets en 390 px */
+@media (max-width:360px){.tabs button{font-size:12px;padding:6px 7px}}
 .headrow{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;flex-wrap:wrap}
 
 /* ------------------------------------------------------------------ Thème nuit (onglet Récup) */
