@@ -87,17 +87,17 @@ class Series(unittest.TestCase):
 
     def test_records_course_seulement(self):
         items = [
-            {"typeId": 3, "activityType": "running", "value": 1185.4, "activityId": 11, "prStartTimeLocal": "2026-02-14T09:00:00.0"},
-            {"typeId": 3, "activityType": "running", "value": 1300.0, "activityId": 10, "prStartTimeLocal": "2025-06-01T09:00:00.0"},  # ancien record
-            {"typeId": 5, "activityType": "running", "value": 5460, "activityId": 12, "prStartTimeLocal": "2026-02-28T09:00:00.0"},
-            {"typeId": 7, "activityType": "running", "value": 32100.5, "activityId": 13, "prStartTimeLocal": "2026-03-01T09:00:00.0"},
+            {"typeId": 3, "activityType": "running", "value": 1185.4, "activityId": 11, "prStartTimeGmt": 1771059600000, "prStartTimeGmtFormatted": "2026-02-14T09:00:00.0", "prStartTimeLocal": None},
+            {"typeId": 3, "activityType": "running", "value": 1300.0, "activityId": 10, "prStartTimeGmtFormatted": "2025-06-01T09:00:00.0"},  # ancien record
+            {"typeId": 5, "activityType": "running", "value": 5460, "activityId": 12, "prStartTimeGmt": 1772289026000},          # horodatage seul : 28/02/2026
+            {"typeId": 7, "activityType": "running", "value": 32100.5, "activityId": 13, "prStartTimeLocalFormatted": "2026-03-01T09:00:00.0"},
             {"typeId": 3, "activityType": "cycling", "value": 900, "activityId": 14},      # pas de la course
             {"typeId": 3, "activityType": "running", "value": 12, "activityId": 15},        # 5 km en 12 s
             {"typeId": 99, "activityType": "running", "value": 1000}, "x", None,
         ]
         r = rc.read_pr(items)
         self.assertEqual(r["5k"], [1185, "2026-02-14", 11])
-        self.assertEqual(r["hm"][0], 5460)
+        self.assertEqual(r["hm"], [5460, "2026-02-28", 12])
         self.assertEqual(r["long"][0], 32100.5)
         self.assertEqual(sorted(r), ["5k", "hm", "long"])
         for empty in (None, [], {}, [{}], {"personalRecords": []}):
