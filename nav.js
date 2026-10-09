@@ -12,6 +12,7 @@
 (() => {
 const $ = id => document.getElementById(id);
 const TABS = [
+  { id: "synthese", label: "Synthèse", title: "Ma forme", open: () => window.Synthese?.open() },
   { id: "activites", label: "Activités", aliases: ["velo"], title: () => S.cfg.titre || "Mes kilomètres", panel: "app", controls: true, open: () => { if (S.all.length) render(); } },
   { id: "recup", label: "Récup", title: "Ma récupération", night: true, open: () => window.Recup?.open() },
   { id: "plan", label: "Plan", title: "Mon plan", open: () => window.Plan?.open() },
@@ -43,9 +44,10 @@ function mount() {
   header.insertBefore(nav, header.querySelector(".controls"));
   nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
   let prev = null;
+  const first = TABS.map(panelOf).find(Boolean);   // un onglet sans élément (Synthèse) se place avant le premier panneau existant
   TABS.forEach(t => {
     let el = panelOf(t);
-    if (!el) { el = document.createElement("main"); el.id = t.panel || t.id; el.hidden = true; prev.after(el); }
+    if (!el) { el = document.createElement("main"); el.id = t.panel || t.id; el.hidden = true; if (prev) prev.after(el); else first.before(el); }
     prev = el;
   });
 }
