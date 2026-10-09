@@ -84,5 +84,5 @@ function loadPart(dt, acts = all()) {
   return { ratio, km, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6), 0, 100)) };
 }
 
-window.Charge = { RUN_TYPES, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, ymd };
+window.Charge = { RUN_TYPES, RUN_CLIMB, RUN_PACE_RANGE, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, ymd };
 })();
