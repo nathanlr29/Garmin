@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="recup.css">
 <link rel="stylesheet" href="plan.css">
 <link rel="stylesheet" href="sortie.css">
+<link rel="stylesheet" href="course.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
@@ -281,7 +282,8 @@ function render(){
     <section class="span12"><div class="tiles" id="tiles"></div></section>
     <section class="card span12" id="chain"${runMode()?" hidden":""}></section>
     <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
-    <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>
+    <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>${runMode()?`
+    <section class="card span12 progc" id="progCourse"><h2>Progression course <small>chronos, efficacité, allure seuil, reprise</small></h2><div id="progCourseBody"></div></section>`:""}
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="shuffle">Autres anecdotes</button></h2><div class="facts" id="facts"></div></section>
     <section class="card span6"><h2>Par mois <span class="legend"><span><i style="background:var(--accent)"></i>${Y}</span><span><i style="background:var(--ghost)"></i>${Y-1}</span></span></h2><div id="months"></div></section>
     <section class="card span6"><h2>Habitudes</h2><div id="habits"></div></section>
@@ -302,6 +304,7 @@ function render(){
   renderRides();
   renderYears();
   if(!runMode()) window.Chain?.render();   // graissage de chaîne : propre au vélo
+  else window.Course?.render(document.getElementById("progCourseBody"));
   document.getElementById("shuffle").onclick=()=>{S.factSeed++;renderFacts(acts,Y,isCur,todayIdx)};
 }
 
@@ -526,6 +529,8 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
   if(isCur) wrap.scrollLeft=Math.max(0,30+Math.floor((todayIdx+off)/7)*pitch-wrap.clientWidth+60);
 }
 
+// Profil Garmin (profile.run…) : chargé à la demande par Recup, une seule tentative par chargement de page ; ses éventuels messages vont dans #recProbe (caché)
+function loadProfile(){if(window.Recup&&Recup.data)return Promise.resolve(true);if(!window.Recup)return Promise.resolve(false);return S.profP||(S.profP=Recup.ensure("recProbe",()=>{}).then(ok=>!!ok,()=>false))}
 function renderRunPr(){
   const box=document.getElementById("recPr"); if(!box) return;
   const pr=(window.Recup&&Recup.data&&Recup.data.profile&&Recup.data.profile.run||{}).pr;
@@ -552,7 +557,7 @@ function renderRecordsRun(acts){
   document.getElementById("records").innerHTML=acts.length?r.join(""):`<div class="empty">Aucune sortie</div>`;
   renderRunPr();
   // profil Garmin pas encore chargé : on le demande une fois, la ligne apparaît dès qu'il est là
-  if(!(window.Recup&&Recup.data)&&window.Recup&&!S.prTried){S.prTried=true;Recup.ensure("recProbe",()=>{}).then(ok=>{if(ok)renderRunPr()}).catch(()=>{})}
+  if(!(window.Recup&&Recup.data)) loadProfile().then(ok=>{if(ok)renderRunPr()});
 }
 function renderRecords(acts){
   if(runMode()) return renderRecordsRun(acts);
@@ -703,6 +708,7 @@ addEventListener("DOMContentLoaded",()=>load());   // après les scripts du bas 
 <script src="plan.js"></script>
 <script src="sync.js"></script>
 <script src="chain.js"></script>
+<script src="course.js"></script>
 <script src="fitcourse.js"></script>
 <script src="arrets.js"></script>
 <script src="sortie.js"></script>
