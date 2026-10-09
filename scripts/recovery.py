@@ -10,6 +10,7 @@ et jusqu'à BACKFILL_PER_RUN jours plus anciens sont ajoutés, pour ménager Gar
 """
 import base64
 import json
+import math
 import os
 import time
 import urllib.parse
@@ -356,7 +357,221 @@ def _raw(o, n=1500):
         return None
 
 
-def fetch_profile(api, start, today):
+# ------------------------------------------------------------------ Profil course à pied (une fois par jour)
+RACE_START = date(2025, 3, 1)       # historique des prédictions de course
+LT_PACE_REF = 253                   # allure semi de février 2026 (4:13/km) : sert à départager l'échelle de la vitesse
+LT_PACE_OK = (180, 360)             # allure seuil plausible : 3:00 à 6:00 /km
+RACE_KEYS = (("5k", "time5k", 600, 3600), ("10k", "time10k", 1300, 7500),
+             ("hm", "timehalfmarathon", 2800, 15000), ("m", "timemarathon", 5800, 30000))
+PR_TYPES = {1: ("1k", 120, 900), 2: ("1mi", 200, 1500), 3: ("5k", 600, 3600), 4: ("10k", 1300, 7500),
+            5: ("hm", 2800, 15000), 6: ("m", 5800, 30000), 7: ("long", 1000, 300000)}  # 7 : plus longue sortie, en mètres
+RUN_RAW = {"runLt": 2500, "runRaces": 1500, "runRacesHist": 1200, "runTol": 2500, "runEndu": 2500,
+           "runHill": 2500, "runPr": 2500}
+
+
+class Throttled(Exception):
+    """Garmin limite les requêtes (429) : on arrête les appels course, on réessaiera au prochain passage."""
+
+
+def _run_call(fn, *a, **kw):
+    """Appel indépendant : en cas d'échec le champ est absent (None), sauf 429 qui interrompt la série."""
+    try:
+        return fn(*a, **kw)
+    except Exception as e:
+        if "429" in str(e) or "TooManyRequests" in type(e).__name__:
+            raise Throttled() from e
+        print(f"    {getattr(fn, '__name__', '?')} indisponible : {type(e).__name__}")
+        return None
+
+
+def _dated(o):
+    """(date, dict) pour chaque dict daté, y compris ceux rangés sous une clé « AAAA-MM-JJ »."""
+    for d in _walk(o):
+        dt = _date(d)
+        if dt:
+            yield dt, d
+        for k, v in d.items():
+            if isinstance(k, str) and len(k) >= 10 and k[4] == "-" and k[7] == "-" and isinstance(v, dict):
+                yield k[:10], v
+
+
+def pace_from_speed(v):
+    """Vitesse du seuil lactique -> allure en s/km. Garmin la rend parfois à une autre échelle
+    (ex. m/s ÷ 10, ou km/h) : on garde l'échelle qui donne une allure plausible, la plus proche de l'allure semi."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool) or v <= 0:
+        return None
+    best = None
+    for k in (1, 10, 1 / 3.6):
+        pace = 1000 / (v * k)
+        if LT_PACE_OK[0] <= pace <= LT_PACE_OK[1]:
+            gap = abs(math.log(pace / LT_PACE_REF))
+            if best is None or gap < best[0]:
+                best = (gap, round(pace))
+    return best[1] if best else None
+
+
+def read_lt(resp):
+    """Seuil lactique : {'pace': s/km, 'hr': bpm, 'd': date}. Absent si la vitesse n'est pas plausible."""
+    for d in _walk(resp):
+        pace = pace_from_speed(d.get("speed"))
+        if pace:
+            out = {"pace": pace}
+            hr = _num(d.get("heartRate") if d.get("heartRate") is not None else d.get("hearRate"), 100, 220)
+            if hr:
+                out["hr"] = round(hr)
+            dt = _date(d)
+            if dt:
+                out["d"] = dt
+            return out
+    return None
+
+
+def _race_times(d):
+    low = {str(k).lower().replace("_", ""): v for k, v in d.items()}
+    t = {}
+    for key, name, lo, hi in RACE_KEYS:
+        v = _num(low.get(name), lo, hi)
+        if v:
+            t[key] = round(v)
+    return t
+
+
+def read_races(latest, hist_resps):
+    """Prédictions du jour (secondes) + historique quotidien [date, 5k, 10k, semi, marathon] sans répéter les jours identiques."""
+    out = {}
+    for d in _walk(latest):
+        t = _race_times(d)
+        if t:
+            out.update(t)
+            dt = _date(d)
+            if dt:
+                out["d"] = dt
+            break
+    pts = {}
+    for resp in hist_resps:
+        for dt, d in _dated(resp):
+            t = _race_times(d)
+            if t:
+                pts[dt] = [t.get(k) for k, *_ in RACE_KEYS]
+    hist, last = [], None
+    for dt, v in sorted(pts.items()):
+        if v != last:
+            hist.append([dt, *v])
+            last = v
+    if hist:
+        out["hist"] = hist
+    return out or None
+
+
+def read_series(resp, keys, lo, hi, nd=0):
+    """[[date, valeur]] : première clé numérique plausible de chaque ligne datée, un point par semaine (le dernier)."""
+    pts = {}
+    for dt, d in _dated(resp):
+        v = next((_num(d.get(k), lo, hi) for k in keys if _num(d.get(k), lo, hi) is not None), None)
+        if v is not None:
+            pts[dt] = round(v, nd) if nd else round(v)
+    weeks = {}
+    for dt in sorted(pts):
+        y, w, _ = date.fromisoformat(dt).isocalendar()
+        weeks[(y, w)] = dt
+    return [[dt, pts[dt]] for dt in sorted(weeks.values())]
+
+
+def read_tol(resp):
+    """Tolérance à la course (hebdo) : [[date, {champ: valeur}]] avec les champs de charge / ratio rendus par Garmin."""
+    out = {}
+    for dt, d in _dated(resp):
+        f = {k: round(v, 2) for k, v in d.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
+             and any(w in k.lower() for w in ("load", "acwr", "ratio", "tolerance"))}
+        if f:
+            out[dt] = f
+    return [[dt, out[dt]] for dt in sorted(out)]
+
+
+def read_pr(resp):
+    """Records de course : {'5k': [secondes, date, id]}, 'long' en mètres. Les records vélo etc. sont ignorés."""
+    out = {}
+    items = resp if isinstance(resp, list) else [d for d in _walk(resp) if "typeId" in d]
+    for it in items:
+        if not isinstance(it, dict) or str(it.get("activityType", "")).lower() != "running":
+            continue
+        spec = PR_TYPES.get(it.get("typeId"))
+        v = spec and _num(it.get("value"), spec[1], spec[2])
+        if not v:
+            continue
+        dt = next((str(it[k])[:10] for k in ("prStartTimeLocal", "prStartTimeGmt", "prStartTimeGmtFormatted", "startTimeLocal") if it.get(k)), None)
+        if spec[0] not in out or (dt or "") >= (out[spec[0]][1] or ""):
+            out[spec[0]] = [round(v, 1) if spec[0] == "long" else round(v), dt, it.get("activityId")]
+    return out or None
+
+
+def read_vo2_run(mm):
+    """VO2max course : partie « generic » seulement (profile.vo2 reste celui du vélo, utilisé par le Plan)."""
+    vo = {}
+    for d in _walk(mm):
+        sub = d.get("generic")
+        if isinstance(sub, dict):
+            v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
+            dt = _date(sub) or _date(d)
+            if v and dt:
+                vo[dt] = round(v, 1)
+    return sorted(vo.items())
+
+
+def fetch_run_profile(api, start, today, mm=None):
+    """Bloc profile.run + extraits bruts. None si Garmin limite les requêtes (429) : on garde l'ancien bloc."""
+    run, raw = {"d": today.isoformat()}, {}
+    ds, td = start.isoformat(), today.isoformat()
+    try:
+        r = _run_call(api.get_lactate_threshold)
+        raw["runLt"] = _raw(r, RUN_RAW["runLt"])
+        lt = read_lt(r)
+        if lt:
+            run["lt"] = lt
+        latest = _run_call(api.get_race_predictions)
+        raw["runRaces"] = _raw(latest, RUN_RAW["runRaces"])
+        hist, a = [], RACE_START
+        while a <= today:  # l'API limite chaque demande à un an
+            b = min(a + timedelta(days=365), today)
+            h = _run_call(api.get_race_predictions, a.isoformat(), b.isoformat(), "daily")
+            if h is not None:
+                hist.append(h)
+            a = b + timedelta(days=1)
+            time.sleep(0.4)
+        raw["runRacesHist"] = _raw(hist[-1] if hist else None, RUN_RAW["runRacesHist"])
+        races = read_races(latest, hist)
+        if races:
+            run["races"] = races
+        r = _run_call(api.get_running_tolerance, ds, td)
+        raw["runTol"] = _raw(r, RUN_RAW["runTol"])
+        tol = read_tol(r)
+        if tol:
+            run["tol"] = tol
+        r = _run_call(api.get_endurance_score, ds, td)
+        raw["runEndu"] = _raw(r, RUN_RAW["runEndu"])
+        endu = read_series(r, ("overallScore", "groupAverage", "enduranceScore", "avg", "value"), 0, 30000)
+        if endu:
+            run["endu"] = endu
+        r = _run_call(api.get_hill_score, ds, td)
+        raw["runHill"] = _raw(r, RUN_RAW["runHill"])
+        hill = read_series(r, ("overallScore", "hillScore", "score", "value"), 0, 200)
+        if hill:
+            run["hill"] = hill
+        r = _run_call(api.get_personal_record)
+        raw["runPr"] = _raw(r, RUN_RAW["runPr"])
+        pr = read_pr(r)
+        if pr:
+            run["pr"] = pr
+    except Throttled:
+        print("    profil course : Garmin limite les requêtes (429), on réessaiera au prochain passage.")
+        return None
+    vo = read_vo2_run(mm)
+    if vo:
+        run["vo2"] = vo
+    return run, raw
+
+
+def fetch_profile(api, start, today, prev=None):
     p, raw = {}, {}
     # FTP actuelle
     ftp = safe(api.get_cycling_ftp)
@@ -406,6 +621,17 @@ def fetch_profile(api, start, today):
             "rest": _num(pick.get("restingHeartRateUsed"), 30, 100),
             "sport": pick.get("sport"), "method": pick.get("trainingMethod"),
         }
+    # Course : rafraîchie une fois par jour (l'état précédent, s'il date d'aujourd'hui, est repris tel quel)
+    old = prev or {}
+    if (old.get("run") or {}).get("d") == today.isoformat():
+        res = (old["run"], {k: v for k, v in (old.get("raw") or {}).items() if k in RUN_RAW})
+    else:
+        res = fetch_run_profile(api, start, today, mm)
+        if res is None and old.get("run"):  # 429 : on garde les anciennes valeurs
+            res = (old["run"], {k: v for k, v in (old.get("raw") or {}).items() if k in RUN_RAW})
+    if res:
+        p["run"] = res[0]
+        raw.update(res[1])
     p["raw"] = raw
     return p
 
@@ -472,7 +698,7 @@ def run(api):
         "bbDate": today.isoformat(),
         "wx_cache": {k: {"aqi": v["wx"].get("aqi"), "pollen": v["wx"].get("pollen")} for k, v in days.items() if v.get("wx")},
         "pending": len([d for d in all_dates if not days.get(d.isoformat(), {}).get("f")]),
-        "profile": fetch_profile(api, START, today),
+        "profile": fetch_profile(api, START, today, state.get("profile")),
     }
     strip = lambda x: {k: v for k, v in x.items() if k != "updated_at"}
     if JSON_FILE.exists() and strip(state) == new:
