@@ -19,12 +19,12 @@ Langue de l'interface et des échanges : **français**.
 
 | Fichier | Rôle |
 |---|---|
-| `index.html` | Coquille + onglet **Vélo** (stats, dernières sorties). Charge **charge.js → nav.js → recup.js** → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js (l'ordre compte : recup.js appelle `Nav.apply()` à la fin, plan.js et sortie.js lisent `Nav` et `Charge`) |
+| `index.html` | Coquille + onglet **Activités** (stats, dernières sorties ; filtres Vélo / Extérieur / Home trainer / Course / Tout ; `load()` part au `DOMContentLoaded`, une fois tous les scripts chargés). Charge **charge.js → nav.js → recup.js** → bilan.js → plan.js → sync.js → chain.js → fitcourse.js → arrets.js → sortie.js (l'ordre compte : recup.js appelle `Nav.apply()` à la fin, plan.js et sortie.js lisent `Nav` et `Charge`) |
 | `charge.js` | `window.Charge` : classement des sports (vélo = `RIDE_TYPES`, course, muscu, autre), `tssOf`, charge par jour et par sport, série fond/fatigue/forme (CTL 42 j / ATL 7 j / TSB), `loadPart` (charge récente de la récup). Seuils lus au moment du calcul (`params()`) : FTP = `planFtp` (localStorage), sinon `profile.ftp`, sinon 250 ; LTHR vélo = `profile.hrZones.lthr`, sinon 165 ; course : `profile.run.lt` ou `runThrPace` (voir « Charge de course »). Test : `node tests/charge.mjs` |
-| `nav.js` | `window.Nav` : onglets décrits par une liste de données `TABS` (id, libellé, titre, `open`, alias de hash, thème sombre…). `Nav.curTab()`, `Nav.setTab()`, `Nav.apply()`. Ajouter ou renommer un onglet = une ligne dans `TABS` |
+| `nav.js` | `window.Nav` : onglets décrits par une liste de données `TABS` (id, libellé, titre, `open`, alias de hash, thème sombre…). Onglet Activités : id `activites`, alias `velo` (les anciens liens `#velo` et la clé `tab` = `velo` y mènent). `Nav.curTab()`, `Nav.setTab()`, `Nav.apply()`. Ajouter ou renommer un onglet = une ligne dans `TABS` |
 | `recup.js/.css` | Onglet **Récup** (readiness, HRV, sommeil). Expose `Recup.open` à `Nav` ; lance le premier `Nav.apply()` |
 | `plan.js/.css` | Onglet **Plan** : moteur de plan vélo + placement des 4 séances muscu, ajustements auto avec Annuler, export .zwo, carte Progression |
-| `bilan.js` | Bilan de séance (modal) : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP |
+| `bilan.js` | Bilan de séance (modal), **vélo** : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP ; **course** : voir « Onglet Activités et bilan de course ». Tests : `node tests/bilan-course.mjs` |
 | `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
 | `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : Overpass, horaires, arrêts conseillés. Utilisé par sortie.js |
 | `fitcourse.js` | Encodeur de parcours FIT (course + course_point typés) pour les alertes « À venir » des Garmin |
@@ -136,6 +136,27 @@ Langue de l'interface et des échanges : **français**.
 - Effet mesuré le 09/10/2026 (seuil 232 s/km) : TSS course total 16 060 → 11 272 ; IF médian 0,88 (FC / 165) → 0,76 (allure, 0,71 sans le D+) ; CTL/ATL/TSB 67,4 / 53,6 / 13,8 → 67,0 / 52,6 / 14,4 ; `loadPart` du jour 0,447 → 0,449 (score 100 inchangé).
 - Tests : `tests/charge.ref0.json` (référence de l'étape 0, ancien code : sans profil course, `Charge` la retrouve au bit près ; avec profil course, le non-course et les jours sans course restent identiques), `tests/charge.ref.json` (instantané de l'étape 2, à régénérer **en connaissance de cause** avec `node tests/charge.mjs --regen`) et des cas factices de formule.
 
+## Onglet Activités et bilan de course (étape 3a)
+- **Onglet Activités** (ex-Vélo, id `activites`, alias `velo`). Filtres, dans l'ordre : Vélo · Extérieur · Home trainer · **Course** · Tout. Course = `Charge.RUN_TYPES` (lu au moment du filtre) ; la puce n'apparaît que s'il y a des courses. La clé localStorage `sport` garde ses valeurs (`bike`, `out`, `in`, `all`) et accepte `run`. Le rendu des filtres Vélo / Extérieur / Home trainer / Tout est **identique** à l'ancien (comparé avant/après, 1280 et 390 px, clair et sombre) ; seule la puce Course s'ajoute.
+- **Course « en intérieur »** = `treadmill_running` ou `virtual_run` (`isRunIndoor`) : badge TAPIS, pas de tracé. `isIndoor` reste celui du vélo.
+- **Sous le filtre Course** (`runMode()`), carte par carte :
+  - hero « en course à pied » ; objectif = `config.json` → `objectif_km_course` (`null` ou 0 : pas de barre d'objectif, projection seulement). Le vélo garde `objectif_km` ;
+  - tuiles : sorties, temps de course, D+, allure moyenne (`m:ss /km`, sorties dehors), plus longue sortie, sorties ≥ 10 km, FC moyenne, charge rTSS (`Charge.tssOf`) ;
+  - records de l'année : plus longue, plus de D+, plus longue durée, meilleure allure moyenne ≥ 5 / 10 / 21,1 km (dehors), plus grosse semaine, puis « Records Garmin (tous temps) » depuis `profile.run.pr` (1 km, 1 mile, 5 km, 10 km, semi, marathon ; lien Garmin Connect par `activityId`). Si `Recup.data` n'est pas encore chargé, il est demandé une fois (`Recup.ensure("recProbe")`, élément caché) et la ligne apparaît dès qu'il l'est ;
+  - anecdotes propres à la course (`factsRun` : marathons, tours de piste, villes à pied, heures…), sans Ventoux, Tour de France, home trainer ni vitesse de pointe ;
+  - habitudes : pas de part home trainer ; la part « Dehors / tapis » n'apparaît que s'il y a des séances sur tapis ;
+  - calendrier : seuils de couleur à pied (5 / 10 / 15 / 21,1 km par jour), « jours courus » ;
+  - dernières sorties : km, D+, durée, allure, FC ; la carte « Graissage de chaîne » est masquée.
+  Sous « Tout », rien ne change (une course y reste affichée comme avant), mais son clic ouvre le bilan.
+- **Bilan de séance course** (`bilan.js`, `openRun`) : le clic sur une course dans « Dernières sorties » ouvre le bilan (vélo : `RIDE_TYPES`, course : `Charge.RUN_TYPES`). Rien de propre au vélo (ni vent, ni Coggan, ni % FTP, ni conformité au plan : la course entre dans le plan à l'étape 5).
+  - Tuiles : durée, distance, allure moyenne en mouvement, D+, charge = `Charge.tssOf` (rTSS) avec IF par rapport à l'allure seuil (`Charge.params().runPace`), FC moyenne et max, effet aérobie ; si le flux les a : cadence (pas/min), longueur de pas, contact au sol, oscillation verticale ; puissance de course seulement comme info (« puissance Garmin »).
+  - Graphique : allure (axe inversé, plus rapide en haut, lissée sur 30 s, arrêts < `RUN_MIN_KMH` = 3 km/h filtrés), FC, altitude, repère de l'allure seuil.
+  - Zones : FC (`hz` de l'activité) et allure en 5 zones autour de la vitesse seuil (`RUN_ZONES` : < 78 %, 78-88, 88-95, 95-102, > 102 %), calculées sur la vitesse brute (sans correction de dénivelé).
+  - Endurance : découplage allure/FC (1re moitié vs 2de moitié, comme le découplage puissance/FC du vélo ; `RUN_DEC_SKIP` = 10 min retirées, `RUN_DEC_MIN` = 20 min minimum ensuite, donc une course d'au moins 30 min) et efficacité en m par battement.
+  - Verdict de 2 à 4 phrases, toutes calculées : allure/FC/zone cardio dominante, intensité et rTSS, découplage (séance régulière seulement), cadence si < `RUN_CADENCE_LOW` = 160 pas/min, sinon part du temps en zones d'allure 1-2.
+  - Sans flux (course de plus de 6 semaines) : résumé seul, avec le message existant. Les entrées de `data/streams/index.json` sans `s` sont du vélo : une course sans `s` n'existe pas.
+- Tests : `node tests/bilan-course.mjs` (allure, zones d'allure, découplage, tuiles et verdict ; deux vrais flux de course dans `tests/fixtures/`, sans GPS, plus des flux synthétiques).
+
 ## Moteur du Plan (plan.js)
 - **La charge (TSS, fond/fatigue/forme) vient de `charge.js`** : plan.js n'a plus de copie de `tssOf`/`dayLoads`. Il garde ce qui lui est propre (dernière séance dure, km et heures de la semaine…) dans `fitness()`, qui complète `Charge.fitness()`.
 - Semaine générée par recherche exhaustive (combinaisons de jours clés × permutations muscu) avec un score.
@@ -162,7 +183,7 @@ Langue de l'interface et des échanges : **français**.
 ## Feuille de route multisport
 Breizh Watts devient un outil d'analyse multisport (vélo + course + muscu), façon « Finary du sport ». On avance par étapes.
 - **Pas de version beta ni d'interrupteur** : chaque étape est poussée en ligne, donc complète et testée.
-- **Navigation cible : 5 onglets** : Synthèse · Activités (filtres Vélo / Extérieur / Home trainer / Course / Tout) · Récup · Plan · Sortie. Les anciens liens `#velo` mènent à Activités (alias de hash dans `Nav.TABS`).
+- **Navigation cible : 5 onglets** : Synthèse · Activités (filtres Vélo / Extérieur / Home trainer / Course / Tout) · Récup · Plan · Sortie. Les anciens liens `#velo` mènent à Activités (alias de hash dans `Nav.TABS`, fait à l'étape 3a ; il reste 4 onglets jusqu'à la Synthèse de l'étape 4).
 - **Compatibilité** : le localStorage existant, les liens `#plan=` et `#sync=` et l'onglet mémorisé (clé `tab`) continuent de marcher ; tout nouveau réglage a une valeur par défaut qui reproduit le comportement actuel.
 
 | Étape | Contenu | État |
@@ -170,7 +191,8 @@ Breizh Watts devient un outil d'analyse multisport (vélo + course + muscu), fa�
 | 0 | Fondations : `charge.js` (charge, sports, fond/fatigue/forme, par sport) et `nav.js` (onglets en liste de données). Aucun changement visible ; formules strictement identiques, vérifiées par `tests/charge.mjs` | **faite** |
 | 1 | Données course : flux FIT course dans `fetch_garmin.py` ; une fois par jour dans `recovery.py` : seuil lactique, prédictions de course, tolérance course, score d'endurance, hill score, records. Aucun changement visible. Tests : `python3 tests/test_garmin.py`. Validé sur données réelles le 09/10/2026 | **faite** |
 | 2 | Charge course calculée à l'allure seuil (rTSS) au lieu de la FC (voir « Charge de course »). Seuls certains chiffres bougent (Forme du Plan, charge récente de Récup) | **faite** |
-| 3 | Course visible : filtre Course, allure, records par distance, objectif km course séparé dans `config.json`, bilan de séance course sans vent ni profil Coggan | à faire |
+| 3a | Course visible : onglet Activités, filtre Course (allure, records, objectif km course séparé dans `config.json`), bilan de séance course sans vent ni profil Coggan (voir « Onglet Activités et bilan de course ») | **faite** |
+| 3b | Carte Progression course : prédictions, efficacité, seuil perso + réglage `runThrPace`, jauge de reprise | à faire |
 | 4 | Onglet Synthèse : fond/fatigue/forme sur 12 mois, variations 7 et 30 j, répartition de la charge par sport, FTP / VO2max / allure seuil / récup du jour, projection lissée vers 300 W et VO2max 65 fin 2026, détecteurs (zone grise, charge aiguë/chronique > 1,5, VFC sous la normale 3 jours, dette de sommeil 7 jours) | à faire |
 | 5 | Plan multisport : jours de course dans `planCfg` ; sans jour coché, plan identique ; appliqué à partir du lundi suivant, semaine en cours jamais modifiée | à faire |
 | 6 | Ressenti 1-10 après séance (collection sync `rpe`) et boucles à pied (profil piéton BRouter) | à faire |
