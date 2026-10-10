@@ -271,6 +271,7 @@ const RUN_PACE0 = 300;       // allure seuil de repli (s/km) si le profil n'en d
 const RUN_V = { foot: 1 / RUN_EASY, warm: .74, trot: .7, long: .76, strides: 1.05, tempo: .92, thr: .99, vo2: 1.06 };
 const RUN_IF = { rfoot: .65, rstrides: .68, rlong: .7, rtempo: .88, rthr: .97, rvo2: 1.08 };   // intensité par type : charge = h × IF² × 100
 const RUN_MIN = 20, RUN_GROW = 1.1, RUN_DELOAD = .7, RUN_LONG = 1.25;   // durée mini d'une course (min) ; +10 % sur la semaine d'avant ; semaine allégée ; sortie longue = 1,25 footing
+const RUN_COOL = 30;         // jour coché mais dur (clé, longue, jambes) : footing court et très facile, en plus de la séance du jour
 const RUN_STRIDES_FROM = 3;  // lignes droites à partir de la 3e semaine de reprise
 const RUN_HARDMIN = { rthr: 40, rvo2: 35 };                           // durée minimale d'une séance dure (échauffement + efforts + retour au calme)
 const RUN_ALT_ONLY = new Set(["rlong", "rtempo", "rthr", "rvo2"]);    // jamais sur un jour « en plus » (footing seulement)
@@ -322,7 +323,9 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   const hardAt = d => d >= 0 && d <= 6 && !!(items[d].muscu === "legs" || (items[d].bike && (TYPES[items[d].bike.t].hard || isLong(items[d].bike.t))) || (items[d].run && TYPES[items[d].run.t].hard));
   const have = items.filter(it => it.run), haveHard = have.some(it => TYPES[it.run.t].hard), E = [];
   for (let d = upto; d < 7; d++) { const x = rc.days[d], it = items[d], b = it.bike;
-    if (x.r === "none" || it.run || it.muscu === "legs" || (b && (TYPES[b.t].hard || isLong(b.t)))) continue;
+    if (x.r === "none" || it.run) continue;
+    // tu as demandé une course ce jour-là : on la garde, mais courte et très facile (jamais le jour d'un test FTP : il fausserait la mesure)
+    if (it.muscu === "legs" || (b && (TYPES[b.t].hard || isLong(b.t)))) { if (!(b && b.t.startsWith("test"))) E.push({ d, alt: false, max: Math.min(x.dur, RUN_COOL), rep: null, cool: true }); continue; }
     E.push({ d, alt: x.r === "alt", max: x.dur, rep: x.r === "alt" && b ? b : null }); }
   const nVol = Math.max(1, Math.floor(T / RUN_MIN)), want = Math.max(0, rc.n - have.length), nWant = Math.min(want, nVol, E.length);
   const hardType = Math.round(mon.getTime() / (7 * 864e5)) % 2 ? "rvo2" : "rthr", wantHard = mode === "progression" && !ph.deload && !haveHard;
@@ -331,6 +334,8 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   const fit = kinds => { let best = null;
     combos(E, kinds.length).forEach(ds => perms(kinds).forEach(p => { let sc = 0, ok = true;
       ds.forEach((e, i) => { const t = p[i], hard = TYPES[t].hard;
+        if (e.cool && t !== "rfoot") ok = false;                                     // jour dur : footing seulement
+        if (e.cool) sc -= 20;                                                        // les jours libres d'abord, toujours
         if ((RUN_ALT_ONLY.has(t) && !e.alt) || (hard && (e.max < RUN_HARDMIN[t] || hardAt(e.d - 1) || hardAt(e.d + 1)))) ok = false;   // dure : jamais collée à un jour dur
         if (t === "rlong") sc += (e.d >= 5 ? 6 : 0) + e.max / 30;                    // sortie longue : le week-end, sur le jour le plus long
         if (e.rep) sc -= 3; else if (!e.alt && items[e.d].bike) sc -= 1;             // on évite de remplacer du vélo, ou de faire deux séances dans la journée
@@ -362,9 +367,11 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   // pourquoi il manque quelque chose (cas normal : les règles de placement priment)
   if (wantHard && !(got && got.kinds.includes(hardType)) && nWant >= 2) info.notes.push("Pas de séance dure de course cette semaine : aucun jour possible n'a un jour de repos de chaque côté (séance clé ou sortie longue du vélo, jambes) ou une durée assez longue.");
   if (full && full.includes("rlong") && got && !got.kinds.includes("rlong")) info.notes.push("Pas de sortie longue en course : elle ne va que sur un jour « à la place du vélo » libre.");
-  if (!E.length && want) info.notes.push("Aucune course cette semaine : aucun jour de course n'est libre (pas de course le jour de la sortie longue ni des jambes, ni sur une séance clé du vélo).");
+  if (!E.length && want) info.notes.push("Aucune course cette semaine : aucun jour de course n'est possible (jamais le jour d'un test FTP).");
   else if (S0.length < want && E.length) info.notes.push(`${S0.length} course${S0.length > 1 ? "s" : ""} au lieu de ${rc.n} : ${E.length < Math.min(want, nVol) ? `seulement ${E.length} jour${E.length > 1 ? "s" : ""} possible${E.length > 1 ? "s" : ""}` : nVol < want ? `volume trop bas pour des séances de ${RUN_MIN} min minimum` : "les règles de placement le demandent"}.`);
-  S0.forEach(x => { if (x.e.rep) items[x.d].bike = null; items[x.d].run = { t: x.t, dur: x.dur, slot: x.e.alt ? "alt" : "add", ...(x.e.rep ? { rep: { t: x.e.rep.t, dur: x.e.rep.dur } } : {}) }; });
+  S0.forEach(x => { if (x.e.rep) items[x.d].bike = null; items[x.d].run = { t: x.t, dur: x.dur, slot: x.e.alt ? "alt" : "add", ...(x.e.rep ? { rep: { t: x.e.rep.t, dur: x.e.rep.dur } } : {}), ...(x.e.cool ? { cool: 1 } : {}) };
+    if (x.e.cool) { const it = items[x.d], why = it.muscu === "legs" ? "la muscu jambes" : isLong(it.bike.t) ? "la sortie longue vélo" : "la séance clé vélo";
+      info.notes.push(`${DAYN[x.d]} : footing de ${x.dur} min très facile, en plus de ${why} (allure où tu parles sans effort).`); } });
   info.n = items.filter(it => it.run).length; info.min = items.reduce((s, it) => s + (it.run ? it.run.dur : 0), 0);
   return info;
 }
@@ -727,7 +734,7 @@ function renderDay(W, ready) {
   if (W.td < 0 || W.td > 6) return "";
   const it = W.items[W.td], b = it.bike, r = ready.today;
   const morning = it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : `<span class="dnone">Pas de muscu</span>`;
-  const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
+  const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)}${rn.cool ? " · très facile" : ""} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
   const evening = b ? `<button class="dbk" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}"><span class="badge">${TYPES[b.t].l}</span><span class="dbt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>`
     : rn && rn.slot === "alt" ? runBtn : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
   const undoN = (store2.get("planUndo:" + ymd(W.mon)) || []).length;
@@ -764,7 +771,7 @@ function weekRow(W, it, prof) {
   const bikeH = b ? `<button class="wsess" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}" aria-expanded="${open}"><span class="badge">${TYPES[b.t].l}</span><span class="wt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>` : "";
   const extra = it.extra.map(a => `<button class="wextra" data-bilan="${a.id}"><span>+ ${esc(a.n)}</span><small>${Charge.RUN_TYPES.has(a.t) ? runDone([a]) : doneSummary([a])} · bilan →</small></button>`).join("");
   const rn = it.run, openR = !!PS.open[ymd(it.date) + ":r"];
-  const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"} · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
+  const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"}${rn.cool ? " · très facile" : ""} · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
   return `<div class="wrow${now ? " now" : ""}${past ? " past" : ""}"><div class="wday"><b>${DAYN[it.day].slice(0, 3)}</b><span>${it.date.getDate()} ${it.date.toLocaleDateString("fr-FR", { month: "short" })}</span></div>
     <div class="wmus">${it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
     <div class="wbike">${bikeH}${runH}${extra}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(it) : ""}`;
@@ -791,7 +798,7 @@ function renderWeek(W, prof) {
 function runAutoText(c) {
   const R = runCtx(mondayOf(new Date())), G = R.chronic, lim = window.Course && Course._ && Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
   const says = G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
-  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Pas de course le jour de la sortie longue vélo ni des jambes ; une séance dure n'est jamais collée à un jour dur.`;
+  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Un jour coché qui tombe sur une séance clé, la sortie longue vélo ou les jambes garde sa course, mais en footing court et très facile (30 min au plus), en plus de la séance du jour ; jamais le jour d'un test FTP. Une séance dure n'est jamais collée à un jour dur.`;
 }
 function renderAvail(c) {
   const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;

@@ -150,28 +150,36 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   const items = week([[null], [E60, "push"], [KEY], [E60, "pull"], [null, "legs"], [{ ...KEY, t: "thr" }, "upper"], [LONG]]);
   const info = place(items, rcOf({ 1: ["add"], 3: ["alt"], 6: ["alt"] }, 3), { run: { prevMin: 200 } });
   assert.equal(info.mode, "entretien"); assert.equal(info.auto, true);
-  assert.equal(info.n, 2, "dimanche (sortie longue) est exclu : 2 courses sur 3");
-  assert.ok(!items[6].run, "jamais de course le jour de la sortie longue");
+  assert.equal(info.n, 3, "dimanche (sortie longue) coché : 3 courses sur 3");
+  assert.ok(items[6].run && items[6].run.cool && items[6].run.t === "rfoot" && items[6].run.dur <= 30 && items[6].run.slot === "add", "jour de la sortie longue : footing court et très facile");
+  assert.equal(items[6].bike.t, "long", "la sortie longue reste");
+  assert.ok(info.notes.some(n => /^Dimanche : footing de \d+ min très facile, en plus de la sortie longue vélo/.test(n)), "une ligne le dit : " + info.notes.join(" | "));
   assert.ok(items[1].run && items[1].run.slot === "add" && items[1].run.t === "rfoot", "mardi « en plus » : footing");
   assert.equal(items[1].bike.t, "end", "« en plus » ne remplace rien");
   assert.ok(items[3].run && items[3].run.slot === "alt" && items[3].run.t === "rlong", "la sortie longue ne va que sur un jour « à la place »");
   assert.equal(items[3].bike, null, "jeudi : la séance facile du vélo est remplacée"); assert.equal(items[3].run.rep.t, "end");
-  assert.ok(info.notes.some(n => /2 courses au lieu de 3/.test(n) && /2 jours possibles/.test(n)), "une ligne dit pourquoi : " + info.notes.join(" | "));
 }
 // ---- 3.2 règles de placement
 {
   // alt : clé -> pas de course ; facile -> remplacée ; rien -> la course s'y place sans rien remplacer
   const items = week([[KEY], [E60], [null], [LONG], [null], [null], [null]]);
-  place(items, rcOf({ 0: ["alt"], 1: ["alt"], 2: ["alt"] }, 3, "reprise"));
-  assert.ok(!items[0].run && items[0].bike.t === "vo2", "alt sur une clé : pas de course");
+  place(items, rcOf({ 0: ["alt"], 1: ["alt"], 2: ["alt"] }, 3, "reprise"), { run: { prevMin: 200 } });
+  assert.ok(items[0].run && items[0].run.cool && items[0].run.t === "rfoot" && items[0].run.slot === "add" && items[0].bike.t === "vo2", "alt sur une clé : footing très facile en plus, la clé reste");
   assert.ok(items[1].run && items[1].bike === null && items[1].run.rep, "alt sur du facile : remplacé");
   assert.ok(items[2].run && !items[2].run.rep && items[2].bike === null, "alt sans vélo : rien à remplacer");
-  // add : pas sur une clé ni sur la sortie longue ; jamais le jour de Legs (même pour alt)
+  // clé, longue, jambes cochées : footing très facile en plus ; un jour libre passe d'abord
   const b = week([[KEY], [LONG], [E60, "legs"], [E60], [null], [null], [null]]);
-  place(b, rcOf({ 0: ["add"], 1: ["add"], 2: ["add"], 3: ["add"] }, 4, "reprise"));
-  assert.deepEqual(b.map(i => !!i.run), [false, false, false, true, false, false, false], "add : ni clé, ni longue, ni jambes");
+  place(b, rcOf({ 0: ["add"], 1: ["add"], 2: ["add"], 3: ["add"] }, 4, "reprise"), { run: { prevMin: 200 } });
+  assert.deepEqual(b.map(i => !!i.run), [true, true, true, true, false, false, false], "les 4 jours cochés ont une course");
+  assert.ok([0, 1, 2].every(d => b[d].run.cool && b[d].run.t === "rfoot" && b[d].run.dur <= 30), "jours durs : footing court");
+  assert.ok(!b[3].run.cool, "jour libre : course normale");
+  const b2 = week([[KEY], [null], [null], [null], [null], [null], [null]]);
+  place(b2, rcOf({ 0: ["add"], 1: ["add"] }, 1));
+  assert.ok(!b2[0].run && b2[1].run, "1 course demandée : le jour libre avant le jour de la clé");
   const c = week([[null], [E60, "legs"], [null], [null], [null], [null], [null]]);
-  place(c, rcOf({ 1: ["alt"] }, 2)); assert.ok(!c[1].run, "alt le jour de Legs : non");
+  place(c, rcOf({ 1: ["alt"] }, 2)); assert.ok(c[1].run && c[1].run.cool && c[1].bike.t === "end", "alt le jour de Legs : footing très facile, le vélo reste");
+  const t = week([[{ ...KEY, t: "test" }], [null], [null], [null], [null], [null], [null]]);
+  place(t, rcOf({ 0: ["add"] }, 1)); assert.ok(!t[0].run, "jamais le jour d'un test FTP");
 }
 {
   // course dure (progression) : jamais un jour dur, ni la veille/le lendemain d'un jour dur, ni le lendemain de Legs
@@ -288,8 +296,10 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
       nRuns++;
       const x = rcfg.days[d];
       assert.notEqual(x.r, "none", "course seulement un jour réglé");
-      assert.ok(!(b0 && (TY[b0.t].hard || b0.t === "long" || b0.t === "longplus")), "jamais sur une clé, une longue ni un test");
-      assert.notEqual(it.muscu, "legs", "jamais le jour de Legs");
+      const dur = (b0 && (TY[b0.t].hard || b0.t === "long" || b0.t === "longplus")) || it.muscu === "legs";
+      assert.ok(!(b0 && b0.t.startsWith("test")), "jamais le jour d'un test");
+      if (dur) { assert.ok(r.cool && r.t === "rfoot" && r.dur <= 30 && r.slot === "add", "jour dur : footing court et très facile"); assert.equal(JSON.stringify(it.bike), JSON.stringify(b0), "jour dur : le vélo reste"); return; }
+      assert.ok(!r.cool, "jour libre : pas de footing forcé");
       assert.ok(r.dur >= 20 && r.dur <= x.dur, `durée de ${r.t} : ${r.dur} / ${x.dur}`);
       if (x.r === "add") { assert.ok(["rfoot", "rstrides"].includes(r.t), "« en plus » : footing seulement (lignes droites comprises)"); assert.equal(JSON.stringify(it.bike), JSON.stringify(b0), "« en plus » ne remplace rien"); assert.equal(r.slot, "add"); }
       else { assert.equal(it.bike, null, "« à la place » : le vélo du jour est parti"); if (b0) assert.equal(r.rep.t, b0.t); else assert.ok(!r.rep); }
