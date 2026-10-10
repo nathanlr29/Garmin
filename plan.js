@@ -354,10 +354,10 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
     // vélo + course dans la fourchette de charge du Plan (7 jours de la fourchette quotidienne) : sinon on réduit d'abord la course
     const hi = ctx.form ? 7 * todayLoad(ctx.form, null).hi : Infinity;
     if (hi < Infinity) { const bikeT = items.reduce((s, it) => it.bike && !S0.some(x => x.d === it.day && x.e.rep) ? s + build(it.bike.t, it.bike.dur, ph).tss : s, 0), runT = () => S0.reduce((s, x) => s + runTss(x.t, x.dur), 0);
-      let cut = false;
-      while (S0.length && bikeT + runT() > hi) { cut = true; const c = S0.filter(x => x.dur > floor(x)).sort((a, b) => (b.t === "rlong") - (a.t === "rlong") || b.dur - a.dur)[0];
-        if (c) c.dur = Math.max(floor(c), c.dur - 5); else { const h = S0.findIndex(x => TYPES[x.t].hard); S0.splice(h >= 0 ? h : S0.length - 1, 1); } }
-      if (cut) info.notes.push("Volume de course réduit : vélo + course dépassaient la charge conseillée de la semaine."); }
+      const t0 = runT();
+      while (bikeT + runT() > hi) { const c = S0.filter(x => x.dur > floor(x)).sort((a, b) => (b.t === "rlong") - (a.t === "rlong") || b.dur - a.dur)[0]; if (!c) break; c.dur = Math.max(floor(c), c.dur - 5); }
+      if (runT() < t0) info.notes.push("Volume de course réduit : vélo + course dépassaient la charge conseillée de la semaine.");
+      if (bikeT + runT() > hi) info.notes.push("Même avec des courses au minimum, vélo + course dépassent la charge conseillée de la semaine : le vélo y est déjà presque seul."); }
   }
   // pourquoi il manque quelque chose (cas normal : les règles de placement priment)
   if (wantHard && !(got && got.kinds.includes(hardType)) && nWant >= 2) info.notes.push("Pas de séance dure de course cette semaine : aucun jour possible n'a un jour de repos de chaque côté (séance clé ou sortie longue du vélo, jambes) ou une durée assez longue.");
@@ -772,7 +772,7 @@ function weekRow(W, it, prof) {
 function renderWeek(W, prof) {
   const thisMon = mondayOf(new Date()), ph = W.ph;
   const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0) + (it.run && it.run.st !== "missed" ? it.run.w.tss : 0), 0);
-  const RI = W.runInfo, runNote = RI ? `<p class="pnote">${RI.n ? `Course : ${RI.n} séance${RI.n > 1 ? "s" : ""}, ${fmtMin(RI.min)} au total (cible ${fmtMin(RI.T)}), mode ${RI.mode}${RI.auto ? " choisi automatiquement" : ""}.` : "Course : aucune séance cette semaine."}${RI.notes.map(x => " " + esc(x)).join("")}</p>` : "";
+  const RI = W.runInfo, runNote = RI ? `<p class="pnote runnote">${RI.n ? `Course : ${RI.n} séance${RI.n > 1 ? "s" : ""}, ${fmtMin(RI.min)} au total (cible ${fmtMin(RI.T)}), mode ${RI.mode}${RI.auto ? " choisi automatiquement" : ""}.` : "Course : aucune séance cette semaine."}${RI.notes.map(x => " " + esc(x)).join("")}</p>` : "";
   const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
@@ -975,7 +975,7 @@ async function open() {
   render();
 }
 window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
-  _run: { cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
+  _run: { place: placeRuns, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
 let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) render(); }, 200); });

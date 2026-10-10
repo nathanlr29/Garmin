@@ -111,6 +111,13 @@
 #plan .mtog{display:flex;gap:6px;align-items:center;font-size:13.5px;white-space:nowrap}
 #plan .mtog input{width:18px;height:18px;accent-color:var(--accent)}
 @media (max-width:620px){#plan .avrow{grid-template-columns:1fr 1fr;padding-bottom:8px;border-bottom:1px solid var(--line)}#plan .avrow b{grid-column:1/-1}#plan .avrow .mtog{grid-column:1/-1}}
+#plan .avsp{display:block}
+#plan .avrun{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+#plan .avrun>b{flex:0 0 100%;font-size:15px}
+#plan .avrun label{display:flex;gap:8px;align-items:center;font-size:13.5px;min-width:0}
+#plan .avrun select{width:auto}
+#plan .pnote.runnote{margin:10px 0 0}
+@media (max-width:620px){#plan .avsp{display:none}#plan .avrun label{flex:1 1 100%;justify-content:space-between}}
 #plan .shareout{width:100%;margin-top:10px;font:inherit;font-size:12.5px;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-md);padding:8px}
 
 #plan select{font:inherit;font-size:15px;color:var(--ink);background:var(--raised);border:1px solid var(--line);border-radius:var(--r-md);padding:8px 10px;min-width:0;width:100%}
