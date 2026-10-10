@@ -36,13 +36,12 @@ jobs:
           python-version: "3.12"
 
       - name: Installer la bibliothèque Garmin
-        run: pip install --quiet "garminconnect>=0.3.17,<0.4" cryptography fit-tool fitdecode requests
+        run: pip install --quiet "garminconnect>=0.3.17,<0.4" fit-tool fitdecode requests
 
       - name: Récupérer les activités Garmin
         env:
           GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
           GARMIN_KEY: ${{ secrets.GARMIN_KEY }}
-          RECUP_CODE: ${{ secrets.RECUP_CODE }}             # code de l'onglet Récup
           MYWHOOSH_EMAIL: ${{ secrets.MYWHOOSH_EMAIL }}     # facultatif : envoi des séances MyWhoosh vers Garmin
           MYWHOOSH_PASSWORD: ${{ secrets.MYWHOOSH_PASSWORD }}
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}         # facultatif (plan B)
@@ -72,21 +71,22 @@ jobs:
             exit 1
           fi
 
+      # le site se déploie même si Garmin a échoué (429, jetons) : seule la sauvegarde des données doit avoir réussi
       - name: Préparer le site
-        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        if: ${{ !cancelled() && steps.save.outcome == 'success' && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule') }}
         run: |
           mkdir -p _site
           cp -r index.html *.js *.css config.json manifest.webmanifest icon-180.png icon-512.png data _site/
 
       - uses: actions/configure-pages@v5
-        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        if: ${{ !cancelled() && steps.save.outcome == 'success' && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule') }}
 
       - uses: actions/upload-pages-artifact@v3
-        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        if: ${{ !cancelled() && steps.save.outcome == 'success' && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule') }}
         with:
           path: _site
 
       - name: Publier le site
         id: deploy
-        if: success() && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule')
+        if: ${{ !cancelled() && steps.save.outcome == 'success' && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule') }}
         uses: actions/deploy-pages@v4

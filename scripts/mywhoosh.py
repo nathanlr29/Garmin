@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from garminconnect import GarminConnectTooManyRequestsError
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "data" / "mywhoosh_sync.json"
@@ -348,6 +349,10 @@ def run(api):
                     msgs.append(f"« {name} » refusée par Garmin (doublon)")
             done.append(key)
             fails.pop(key, None)
+        except (GarminConnectTooManyRequestsError, requests.ConnectionError, requests.Timeout) as e:
+            # limite Garmin ou coupure réseau : pas la faute du fichier, on ne compte pas l'essai et on arrête là
+            msgs.append(f"« {name} » non envoyée ({type(e).__name__}), nouvel essai au prochain passage")
+            break
         except Exception as e:
             fails[key] = fails.get(key, 0) + 1
             if fails[key] >= 3:  # on n'insiste pas indéfiniment sur un fichier qui pose problème

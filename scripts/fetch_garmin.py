@@ -143,7 +143,7 @@ def fetch_trace(api, act_id, radius, max_points=MAX_POINTS):
         raise
     except Exception as e:  # une trace manquante n'empêche pas le reste
         print(f"  trace {act_id} indisponible : {e}")
-        return None
+        return False  # erreur : à ne pas mémoriser (None = Garmin n'a pas de GPS), on réessaiera
     poly = ((det or {}).get("geoPolylineDTO") or {}).get("polyline") or []
     return private_trace([(p.get("lat"), p.get("lon")) for p in poly], radius, max_points)
 
@@ -160,7 +160,10 @@ def update_routes(api, acts, radius):
         if i in routes:
             out[i] = routes[i]
         elif fetched < ROUTES_PER_RUN:
-            out[i] = fetch_trace(api, i, radius, ROUTE_POINTS)  # None = pas de GPS, mémorisé
+            t = fetch_trace(api, i, radius, ROUTE_POINTS)  # None = pas de GPS, mémorisé ; False = erreur, réessayée
+            if t is not False:
+                out[i] = t
+            # shortcut: une sortie qui échoue toujours reprend une des 10 places à chaque passage, à surveiller si ça dure
             fetched += 1
             time.sleep(0.5)
     if out != routes:
@@ -232,6 +235,7 @@ STREAM_DAYS = 42      # on analyse les sorties des 6 dernières semaines
 STREAM_KEEP = 120     # et on garde 4 mois d'historique
 STREAM_PER_RUN = 6    # téléchargements maximum par passage, pour ménager Garmin
 STREAM_BINS = 1200    # au plus 1 200 points par séance
+STREAM_TRIES = 3      # essais avant d'abandonner une séance dont le fichier ne vient pas
 
 
 def fit_records(blob):
@@ -359,7 +363,7 @@ def update_streams(api, acts, radius):
             index.pop(k)
     todo = [a for a in reversed(acts)
             if sport_of(a) and a["mt"] >= 600 and age(a["d"]) <= STREAM_DAYS
-            and str(a["id"]) not in index][:STREAM_PER_RUN]
+            and index.get(str(a["id"]), {"n": 0}).get("n", STREAM_TRIES) < STREAM_TRIES][:STREAM_PER_RUN]  # absent ou en cours d'essais
     done = 0
     for a in todo:
         try:
@@ -368,15 +372,18 @@ def update_streams(api, acts, radius):
         except GarminConnectTooManyRequestsError:
             print("Bilan : Garmin limite les requêtes (429), on reprendra au prochain passage.")
             break
-        except Exception as e:  # séance sans fichier (saisie manuelle…) : on ne redemandera pas
+        except Exception as e:  # erreur passagère ou séance sans fichier (saisie manuelle…) : STREAM_TRIES essais, puis on abandonne
             print(f"Bilan : détail de {a['id']} indisponible ({type(e).__name__})")
             st = None
+            err = index.get(str(a["id"]), {}).get("n", 0) + 1
+        else:
+            err = 0
         if st and a["t"] in NO_GPS_TYPES:
             st.pop("g", None)  # position virtuelle (ou tapis) : sans intérêt, et rien à publier
         if st:
             (STREAMS / f"{a['id']}.json").write_text(json.dumps(st, separators=(",", ":")), encoding="utf-8")
             done += 1
-        index[str(a["id"])] = {"d": a["d"][:10], "ok": 1 if st else 0, "s": sport_of(a)}
+        index[str(a["id"])] = {"d": a["d"][:10], "ok": 1 if st else 0, "s": sport_of(a), **({"n": err} if 0 < err < STREAM_TRIES else {})}
         time.sleep(0.5)
     STREAM_INDEX.write_text(json.dumps(index, separators=(",", ":"), sort_keys=True), encoding="utf-8")
     if todo:
@@ -428,6 +435,9 @@ def main():
         except Exception as e:
             print(f"MyWhoosh : erreur {type(e).__name__} : {e}")
         raw = fetch_all(api, only_recent=not full)
+        if full and len(raw) < len(known) * 0.8:  # réponse vide ou coupée : on ne remplace pas l'historique
+            print(f"Garmin n'a renvoyé que {len(raw)} activités pour {len(known)} connues : on garde l'existant, nouvel essai au prochain passage.")
+            full = False
         if full:
             known = {}
         sample = next((a for a in raw if a.get("avgPower")), None)
@@ -445,8 +455,10 @@ def main():
             if i in traces:
                 new_traces[i] = traces[i]
             else:
-                # None = pas de GPS : mémorisé pour ne pas redemander à chaque passage
-                new_traces[i] = fetch_trace(api, i, radius)
+                # None = pas de GPS : mémorisé pour ne pas redemander à chaque passage ; False = erreur, réessayée
+                t = fetch_trace(api, i, radius)
+                if t is not False:
+                    new_traces[i] = t
                 time.sleep(0.3)
         # Bilan de séance : détail seconde par seconde des sorties récentes (une erreur ici ne bloque rien)
         try:
