@@ -138,7 +138,7 @@ function render(){
     <section class="card hud hero span12" id="hero"></section>
     <section class="span12"><div class="tiles" id="tiles"></div></section>
     <section class="card span12" id="chain"${runMode()?" hidden":""}></section>
-    <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
+    <section class="card span8"><h2>Kilomètres cumulés</h2><div id="cum"></div></section>
     <section class="card span4"><h2>Records ${Y}</h2><div class="records" id="records"></div></section>${runMode()?`
     <section class="card span12 progc" id="progCourse"><h2>Progression course <small>chronos, efficacité, allure seuil, reprise</small></h2><div id="progCourseBody"></div></section>`:""}
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="shuffle">Autres anecdotes</button></h2><div class="facts" id="facts"></div></section>
@@ -232,6 +232,8 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
       ${prev.length?`<div class="delta${diff<0?" down":""}"><b>${diff>=0?"↑ +":"↓ −"}${nf(Math.abs(diff))} km</b> par rapport à ${Y-1}${isCur?" à la même date":""}</div>`:""}
     </div>${goalHtml}`;
   countUp(document.getElementById("bigkm"),km);
+  const last=[...acts].reverse().find(a=>!(runMode()?isRunIndoor(a):isIndoor(a))&&(S.traces[a.id]||[]).length>=10);   // filigrane : ta dernière sortie dehors
+  if(last) document.getElementById("hero").insertAdjacentHTML("afterbegin",`<div class="herotrace" aria-hidden="true">${traceSvg(S.traces[last.id])}</div>`);
 }
 
 function renderTilesRun(acts){
@@ -308,11 +310,12 @@ function renderCum(cur,prev,todayIdx,isCur,Y){
   const cp=path(cur,curEnd);
   s+=`<path d="${cp}L${x(curEnd)},${y(0)}L${x(0)},${y(0)}Z" fill="var(--accent)" fill-opacity=".09"/><path d="${cp}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
   s+=`<circle cx="${x(curEnd)}" cy="${y(cur[curEnd])}" r="5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
-  const lx=x(curEnd), anchor=lx>W-90?"end":"start";
-  s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="15" font-style="italic" font-family="Barlow Condensed,Barlow,sans-serif" fill="var(--ink)">${nf(cur[curEnd])} km</text>`;
+  if(prev.length) s+=`<text x="${W-m.r}" y="${y(prev[prev.length-1])-7}" text-anchor="end" font-size="12" font-weight="600" fill="var(--muted)">${Y-1} : ${nf(prev[prev.length-1])} km</text>`;
+  if(showGoal) s+=`<text x="${W-m.r}" y="${y(goal)-7}" text-anchor="end" font-size="12" font-weight="600" fill="var(--muted)">objectif ${nf(goal)} km</text>`;
+  const lx=x(curEnd), anchor=lx>W-140?"end":"start";
+  s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="15" font-style="italic" font-family="Barlow Condensed,Barlow,sans-serif" fill="var(--ink)">${Y} : ${nf(cur[curEnd])} km</text>`;
   s+=`<line id="cumCursor" y1="${m.t}" y2="${m.t+ih}" stroke="var(--muted)" stroke-width="1" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="cumHit"/></svg>`;
   box.innerHTML=s;
-  document.getElementById("cumLegend").innerHTML=`<span><i style="background:var(--accent)"></i>${Y}</span><span><i style="background:var(--ghost)"></i>${Y-1}</span>${showGoal?`<span><i style="background:repeating-linear-gradient(90deg,var(--muted) 0 3px,transparent 3px 6px)"></i>objectif</span>`:""}`;
   const hit=document.getElementById("cumHit"), cursor=document.getElementById("cumCursor"), svg=box.querySelector("svg");
   const move=e=>{const r=svg.getBoundingClientRect();const px=(e.clientX-r.left)*W/r.width;const i=Math.max(0,Math.min(364,Math.round((px-m.l)/iw*365)));
     cursor.setAttribute("x1",x(i));cursor.setAttribute("x2",x(i));cursor.setAttribute("opacity",.6);
@@ -349,7 +352,7 @@ function renderHabits(acts){
   const rm=runMode(), ind=acts.filter(rm?isRunIndoor:isIndoor),indKm=sum(ind,a=>a.km),tot=sum(acts,a=>a.km);
   const hrs=[0,0,0,0];acts.forEach(a=>{const h=a.dt.getHours();hrs[h<9?0:h<13?1:h<18?2:3]++});
   const hl=["avant 9 h","9 h–13 h","13 h–18 h","après 18 h"];const hi=hrs.indexOf(Math.max(...hrs));
-  box.innerHTML=d.map((v,i)=>`<div class="hbar"><span>${DAYS[i]}</span><div class="tr"><div style="width:${v/mx*100}%;${v===mx?"":"opacity:.55"}"></div></div><span class="num">${nf(v)} km</span></div>`).join("")+
+  box.innerHTML=d.map((v,i)=>`<div class="hbar"><span>${DAYS[i]}</span><div class="tr"><div style="width:${v/mx*100}%;${v===mx?"":"background:var(--ghost)"}"></div></div><span class="num">${nf(v)} km</span></div>`).join("")+
    (rm&&!ind.length?"":`<div style="margin-top:14px;font-size:13px;color:var(--muted)">${rm?"Dehors / tapis":"Extérieur / home trainer"}</div>
     <div class="split"><div style="width:${(1-indKm/Math.max(tot,1))*100}%"></div><div style="width:${indKm/Math.max(tot,1)*100}%"></div></div>
     <div class="goalrow"><span><b>${nf(100-indKm/Math.max(tot,1)*100)} %</b> dehors</span><span><b>${nf(ind.length)}</b> séances ${rm?"sur tapis":"indoor"} · ${hfmt(sum(ind,a=>a.mt))}</span></div>`)+
@@ -539,7 +542,8 @@ function rideHtml(a){
   if(run){ if(pace) st.push(["Allure",`${paceTxt(pace)} /km`]); st.push(["Temps",hfmt(a.mt)]); if(a.el&&!indoor) st.push(["Dénivelé",`${nf(a.el)} m`]); else if(a.hr>0) st.push(["FC",`${nf(a.hr)} bpm`]); }
   else { if(a.el) st.push(["Dénivelé",`${nf(a.el)} m`]); st.push(["Temps",hfmt(a.mt)]);
     if(a.mt&&!indoor) st.push(["Vitesse",`${nf(a.km/a.mt*3600,1)} km/h`]); else if(a.w) st.push(["Puissance",`${a.w} W`]); }
-  const thumb=!indoor?`<div class="map">${traceSvg(S.traces[a.id])}</div>`
+  const thumb=!indoor&&a.km>=3?`<div class="map">${traceSvg(S.traces[a.id])}</div>`   // sous 3 km, la coupure de 400 m aux deux bouts ne laisse presque rien
+    :!indoor?`<div class="map sh"><b>${hfmt(a.mt)}</b><small>durée</small></div>`
     :run?`<div class="map in"><b>${pace?paceTxt(pace):hfmt(a.mt)}</b><small>${pace?"min/km":"durée"}</small></div>`
     :`<div class="map in"><b>${a.w?a.w:hfmt(a.mt)}</b><small>${a.w?"W moy.":"durée"}</small></div>`;
   const where=indoor?(run?"Tapis":"Home trainer"):"";

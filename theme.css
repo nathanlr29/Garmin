@@ -129,6 +129,11 @@ h1{font:italic 800 clamp(30px,6vw,40px)/1 var(--font-num);letter-spacing:-.01em;
 @media (max-width:600px){.grid>.hud::before{left:0;right:0;border-radius:0}}
 
 /* ------------------------------------------------------------------ Héros (onglet Activités) */
+.hero{isolation:isolate}
+.herotrace{position:absolute;z-index:-1;right:2%;top:6%;bottom:6%;aspect-ratio:1;opacity:.11;pointer-events:none}
+@media (max-width:700px){.herotrace{top:2%;bottom:auto;right:0;width:56%}}
+.herotrace svg{width:100%;height:100%;display:block}
+.herotrace path{stroke-width:1.3}
 .hero{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px 36px;align-items:end}
 @media (max-width:700px){.hero{grid-template-columns:1fr}}
 .kick{font-size:14px;color:var(--muted);margin-bottom:4px}
@@ -173,7 +178,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 @media (max-width:860px){.facts{grid-template-columns:1fr 1fr}}
 @media (max-width:520px){.facts{grid-template-columns:1fr}}
 .fact{padding:14px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:baseline}
-.fact .n{font:italic 800 30px/1 var(--font-num);color:var(--accent);min-width:64px;letter-spacing:-.01em}
+.fact .n{font:italic 800 30px/1 var(--font-num);color:var(--ink);min-width:64px;letter-spacing:-.01em}
 .fact .t{font-size:14.5px;line-height:1.35}
 .fact .t small{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
 
@@ -222,6 +227,9 @@ a.rec:hover .rn{text-decoration:underline}
 .ride .map svg{width:76px;height:76px}
 .ride .map.in{background:#0c0c0d;color:#fff;align-content:center;justify-items:center;gap:0;text-align:center}
 .ride .map.in b{font:italic 800 26px/1 var(--font-num);color:#fff}
+.ride .map.sh{align-content:center;justify-items:center;text-align:center}
+.ride .map.sh b{font:italic 800 26px/1 var(--font-num);color:var(--ink)}
+.ride .map.sh small{font-size:10.5px;color:var(--muted);margin-top:3px;font-weight:600}
 .ride .map.in small{font-size:10.5px;color:#a3a3ad;margin-top:3px;font-weight:600}
 .indoor{font-size:12px;font-weight:600;color:var(--muted)}
 @media (max-width:420px){.ride{grid-template-columns:minmax(0,1fr) 72px}.ride .map{width:72px;height:72px}.ride .map svg{width:62px;height:62px}.ride .st div{padding:0 10px}.ride .st b{font-size:17px}}
