@@ -35,8 +35,15 @@ const TYPES = {
   rec: { l: "Récupération", c: "#8e8e93" },
   test: { l: "Test FTP", c: "#a855f7", hard: 1 },
   testc: { l: "Test court", c: "#a855f7", hard: 1 },
+  // course à pied (sport "run") : teintes propres, hors des zones vélo ; durs = rthr, rvo2 ; aucune n'est une séance clé vélo
+  rfoot: { l: "Footing", c: "#17a2a2", sport: "run" },
+  rstrides: { l: "Footing + lignes droites", c: "#2bb5c9", sport: "run" },
+  rlong: { l: "Sortie longue course", c: "#0f7f86", sport: "run" },
+  rtempo: { l: "Tempo course", c: "#e0609e", sport: "run" },
+  rthr: { l: "Seuil course", c: "#cf2f86", hard: 1, sport: "run" },
+  rvo2: { l: "VO2max course", c: "#a3195b", hard: 1, sport: "run" },
 };
-const isKey = t => !!(t && TYPES[t] && TYPES[t].hard && t !== "longplus");
+const isKey = t => !!(t && TYPES[t] && TYPES[t].hard && !TYPES[t].sport && t !== "longplus");
 const isLong = t => t === "long" || t === "longplus";
 // séances clés selon le bloc (0 = dernier bloc avant l'objectif … 3 = base)
 const POOLS = [["vo2", "thr", "vo2r"], ["vo2r", "ss", "vo2"], ["thr", "vo2r", "ss"], ["ss", "thr", "tempo"]];
@@ -124,7 +131,8 @@ function getCfg() {
   return c;
 }
 const saveCfg = c => store2.set("planCfg", c);
-const cfgSig = c => JSON.stringify([c.days, c.goal.date, c.start]);
+// les réglages course ne comptent pas dans la signature : ils sont figés par semaine (rcFor) et jamais appliqués à une semaine déjà générée
+const cfgSig = c => JSON.stringify([c.days.map(d => d.run === undefined && d.runDur === undefined ? d : { bike: d.bike, dur: d.dur, muscu: d.muscu }), c.goal.date, c.start]);
 
 // Périodisation : blocs de 4 semaines (3 de charge + 1 allégée) jusqu'à la semaine de l'objectif
 function phase(mon, c) {
@@ -223,7 +231,7 @@ function genWeek(mon, c, ctx, fixed) {
   let best = null;
   for (const ko of kOpts) { const bs = bikeScore(ko, K, longS, ph, ctx.prev);
     for (const mo of mOpts) { const sc = bs + muscuScore(mo, ko, longS, bikeDays, ph, ctx.prev); if (!best || sc > best.sc + 1e-9) best = { sc, ko, mo }; } }
-  const items = Array.from({ length: 7 }, (_, d) => isFixed(d) ? { day: d, bike: fixed.items[d].bike ? { ...fixed.items[d].bike } : null, muscu: fixed.items[d].muscu || null } : { day: d, bike: null, muscu: null });
+  const items = Array.from({ length: 7 }, (_, d) => isFixed(d) ? { day: d, bike: fixed.items[d].bike ? { ...fixed.items[d].bike } : null, muscu: fixed.items[d].muscu || null, ...(fixed.items[d].run ? { run: { ...fixed.items[d].run } } : {}) } : { day: d, bike: null, muscu: null });
   slots.forEach(s => { if (!s.fixed) items[s.day].bike = { dur: s.dur, place: s.place, t: null }; });
   const rest = pool.slice(); fixedKeys.forEach(f => { const k = rest.indexOf(f.t); if (k >= 0) rest.splice(k, 1); });
   best.ko.keys.filter(s => !s.fixed).sort((a, b) => a.day - b.day).forEach((s, i) => items[s.day].bike.t = (rest.length ? rest : pool)[i % (rest.length || pool.length)]);
@@ -232,7 +240,9 @@ function genWeek(mon, c, ctx, fixed) {
     if (ph.deload) L.dur = DURS.reduce((a, x) => Math.abs(x - L.dur * .7) < Math.abs(a - L.dur * .7) ? x : a, 150); }  // semaine allégée : sortie longue raccourcie
   best.mo.forEach(x => { if (!isFixed(x.day)) items[x.day].muscu = x.s; });
   fillEasy(items, ph, tired, best.ko.keys.length, upto);
-  return { items, K: best.ko.keys.length, tired, ph };
+  // 2e passe : la course, seulement si des jours de course sont réglés (sinon rien ne change, voir tests/plan.mjs)
+  const rc = ctx.rc !== undefined ? ctx.rc : runCfg(c), run = rc ? placeRuns(items, rc, ph, ctx, mon, upto) : null;
+  return run ? { items, K: best.ko.keys.length, tired, ph, run } : { items, K: best.ko.keys.length, tired, ph };
 }
 function fillEasy(items, ph, tired, nKeys, from = 0) {
   const hardAt = d => { const b = items[d] && items[d].bike; return !!(b && b.t && TYPES[b.t].hard); };
@@ -252,11 +262,136 @@ function prevCtx(mon) {
   return { legsSun: musSun === "legs", musSun, hardSun: acts.some(a => hardRide(a, ftp) || (RIDE_TYPES.has(a.t) && a.mt >= 150 * 60)) || !!(pw && pw.items && pw.items[6] && pw.items[6].bike && TYPES[pw.items[6].bike.t] && TYPES[pw.items[6].bike.t].hard && mon > new Date()) };
 }
 
+// ------------------------------------------------------------------ Course : réglages, volumes et placement (étape 5a)
+// Le vélo et la muscu sont choisis comme avant ; la course vient ensuite dans les jours restants (2e passe, placeRuns).
+// Sans aucun jour de course réglé, rien de tout cela ne s'exécute : la semaine est identique à celle d'avant (tests/plan.mjs).
+const RUN_EASY = 1.28;       // allure de footing = RUN_EASY × allure au seuil (78 % de la vitesse seuil : bas de la zone 2 de bilan.js)
+const RUN_PACE0 = 300;       // allure seuil de repli (s/km) si le profil n'en donne pas
+// vitesse visée en fraction de la vitesse au seuil, cohérente avec RUN_ZONES (bilan.js) : < .78 récup, .78-.88 endurance, .88-.95 tempo, .95-1.02 seuil, > 1.02 VO2max
+const RUN_V = { foot: 1 / RUN_EASY, warm: .74, trot: .7, long: .76, strides: 1.05, tempo: .92, thr: .99, vo2: 1.06 };
+const RUN_IF = { rfoot: .65, rstrides: .68, rlong: .7, rtempo: .88, rthr: .97, rvo2: 1.08 };   // intensité par type : charge = h × IF² × 100
+const RUN_MIN = 20, RUN_GROW = 1.1, RUN_DELOAD = .7, RUN_LONG = 1.25;   // durée mini d'une course (min) ; +10 % sur la semaine d'avant ; semaine allégée ; sortie longue = 1,25 footing
+const RUN_STRIDES_FROM = 3;  // lignes droites à partir de la 3e semaine de reprise
+const RUN_HARDMIN = { rthr: 40, rvo2: 35 };                           // durée minimale d'une séance dure (échauffement + efforts + retour au calme)
+const RUN_ALT_ONLY = new Set(["rlong", "rtempo", "rthr", "rvo2"]);    // jamais sur un jour « en plus » (footing seulement)
+const RUN_MODES = ["auto", "reprise", "entretien", "progression"], RUN_SLOTS = ["none", "alt", "add"], RUN_DURS = [20, 30, 40, 45, 50, 60, 75, 90, 105, 120];
+const RPE_RUN = { trot: "2/10, très facile", easy: "3-4/10, tu peux parler", long: "3-4/10, très régulier", tempo: "6/10, soutenu", thr: "7-8/10, dur mais tenable", vo2: "9/10, très dur", strides: "7/10, vite mais relâché" };
+const RZ = [[.78, "#8e8e93"], [.88, "#2e8bff"], [.95, "#3fbf5f"], [1.02, "#ffc21a"], [99, "#ff6a2a"]];   // couleurs des zones d'allure (comme RUN_ZONES de bilan.js)
+const runMinTotal = n => RUN_MIN * (n >= 2 ? 2 : 1);
+const runTss = (t, dur) => Math.round(dur / 60 * RUN_IF[t] ** 2 * 100);
+const fmtPace = s => { const r = Math.round(s); return `${Math.floor(r / 60)}:${pad(r % 60)}`; };
+
+// réglages course d'une config (planCfg) : champ absent = aucune course ; null si aucun jour n'est coché
+function runCfg(c) {
+  const days = c.days.map(d => ({ r: RUN_SLOTS.includes(d.run) ? d.run : "none", dur: d.runDur >= RUN_MIN && d.runDur <= 120 ? Math.round(d.runDur) : 60 }));
+  if (!days.some(d => d.r !== "none")) return null;
+  const n = Math.round(+c.runN); return { days, n: n >= 1 && n <= 4 ? n : 2, mode: RUN_MODES.includes(c.runMode) ? c.runMode : "auto" };
+}
+// Réglages course appliqués à une semaine : historique `planRc` [{ from: lundi, rc }]. Un changement ne vaut qu'à partir du lundi suivant.
+function rcFor(mon) { const h = store2.get("planRc"); let rc = null; if (Array.isArray(h)) h.forEach(e => { if (e && e.from <= ymd(mon)) rc = e.rc || null; }); return rc; }
+function setRc(c) {
+  const h = store2.get("planRc"), from = ymd(addDays(mondayOf(new Date()), 7)), hist = Array.isArray(h) ? h.filter(e => e && e.from < from) : [], rc = runCfg(c);
+  if (JSON.stringify(rc) !== JSON.stringify(hist.length ? hist[hist.length - 1].rc : null)) hist.push({ from, rc });
+  store2.set("planRc", hist);
+}
+// ce que la jauge de reprise (course.js) et la semaine d'avant donnent pour le volume
+function runCtx(mon) {
+  const acts = S.all || [], pm = addDays(mon, -7), isRunA = a => Charge.RUN_TYPES.has(a.t);
+  const prevMin = acts.filter(isRunA).reduce((s, a) => { const k = dayIndex(a.dt, pm); return k >= 0 && k <= 6 ? s + (a.mt || 0) / 60 : s; }, 0);
+  let G = null; try { G = window.Course && Course._ && Course._.gauge ? Course._.gauge(acts, Date.now()) : null; } catch (e) {}
+  const lim = G && window.Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
+  let under = 0; if (G) { const W = G.weeks.filter(w => w.t < mon.getTime()); for (let i = W.length - 1; i >= 0 && W[i].km < lim; i--) under++; }
+  return { pace: Charge.params().runPace || RUN_PACE0, prevMin, resume: !!(G && G.resume), chronic: G ? G.chronic : null, advice: G ? G.advice : null, under };
+}
+// séances de la semaine selon le mode : reprise = footings (+ lignes droites), entretien = footings + 1 sortie longue, progression = + au plus 1 séance dure
+function runKinds(mode, n, hard, strides) {
+  const K = Array(n).fill("rfoot");
+  if (mode !== "reprise" && n >= 2) K[0] = "rlong";
+  if (mode === "progression" && hard && n >= 2) K[n - 1] = hard;
+  if (mode === "reprise" && strides) K[0] = "rstrides";
+  return K;
+}
+function placeRuns(items, rc, ph, ctx, mon, upto) {
+  const R = ctx.run || {}, pace = R.pace || RUN_PACE0, mode = rc.mode === "auto" ? (R.resume ? "reprise" : "entretien") : rc.mode;
+  const info = { mode, auto: rc.mode === "auto", notes: [] };
+  // volume cible : +10 % sur la semaine d'avant, plafonné par le haut de la fourchette de la jauge, jamais sous le minimum
+  const cap = R.advice ? R.advice[1] * RUN_EASY * pace / 60 : Infinity;
+  let T = Math.max(runMinTotal(rc.n), Math.min(RUN_GROW * (R.prevMin || 0), cap));
+  if (ph.deload) { T *= RUN_DELOAD; info.notes.push("Semaine allégée : volume de course × 0,7, pas de séance dure."); }
+  info.T = Math.round(T);
+  const hardAt = d => d >= 0 && d <= 6 && !!(items[d].muscu === "legs" || (items[d].bike && (TYPES[items[d].bike.t].hard || isLong(items[d].bike.t))) || (items[d].run && TYPES[items[d].run.t].hard));
+  const have = items.filter(it => it.run), haveHard = have.some(it => TYPES[it.run.t].hard), E = [];
+  for (let d = upto; d < 7; d++) { const x = rc.days[d], it = items[d], b = it.bike;
+    if (x.r === "none" || it.run || it.muscu === "legs" || (b && (TYPES[b.t].hard || isLong(b.t)))) continue;
+    E.push({ d, alt: x.r === "alt", max: x.dur, rep: x.r === "alt" && b ? b : null }); }
+  const nVol = Math.max(1, Math.floor(T / RUN_MIN)), want = Math.max(0, rc.n - have.length), nWant = Math.min(want, nVol, E.length);
+  const hardType = Math.round(mon.getTime() / (7 * 864e5)) % 2 ? "rvo2" : "rthr", wantHard = mode === "progression" && !ph.deload && !haveHard;
+  const strides = mode === "reprise" && (R.under || 0) + 1 >= RUN_STRIDES_FROM;
+  // meilleure affectation des séances aux jours possibles (recherche exhaustive : 4 courses au plus sur 7 jours)
+  const fit = kinds => { let best = null;
+    combos(E, kinds.length).forEach(ds => perms(kinds).forEach(p => { let sc = 0, ok = true;
+      ds.forEach((e, i) => { const t = p[i], hard = TYPES[t].hard;
+        if ((RUN_ALT_ONLY.has(t) && !e.alt) || (hard && (e.max < RUN_HARDMIN[t] || hardAt(e.d - 1) || hardAt(e.d + 1)))) ok = false;   // dure : jamais collée à un jour dur
+        if (t === "rlong") sc += (e.d >= 5 ? 6 : 0) + e.max / 30;                    // sortie longue : le week-end, sur le jour le plus long
+        if (e.rep) sc -= 3; else if (!e.alt && items[e.d].bike) sc -= 1;             // on évite de remplacer du vélo, ou de faire deux séances dans la journée
+        if (hardAt(e.d + 1)) sc -= 2;                                                // la veille d'un jour dur
+        if (i && e.d - ds[i - 1].d === 1) sc -= 4; });                               // deux jours de suite
+      if (ok && (!best || sc > best.sc + 1e-9)) best = { sc, p, ds }; }));
+    return best; };
+  let got = null, full = null;
+  for (let n = nWant; n >= 1 && !got; n--) {
+    full = runKinds(mode, n, wantHard ? hardType : null, strides);
+    const noHard = full.map(t => t === hardType ? "rfoot" : t), noLong = full.map(t => t === "rlong" ? "rfoot" : t), none = noHard.map(t => t === "rlong" ? "rfoot" : t);
+    for (const kinds of [full, noHard, noLong, none]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
+  }
+  const S0 = got ? got.a.ds.map((e, i) => ({ d: e.d, t: got.a.p[i], e, dur: 0 })) : [];
+  const floor = x => Math.max(RUN_MIN, RUN_HARDMIN[x.t] || 0), wt = x => x.t === "rlong" ? RUN_LONG : 1, tot = () => S0.reduce((a, x) => a + x.dur, 0);
+  if (S0.length) {
+    const f = T / S0.reduce((a, x) => a + wt(x), 0);
+    S0.forEach(x => { x.dur = Math.min(Math.max(W5(wt(x) * f), floor(x)), x.e.max); });
+    // le total dépasse la cible : on rogne d'abord la sortie longue, puis la plus longue
+    for (let g = 0; g < 200 && tot() > T + 1e-9; g++) { const c = S0.filter(x => x.dur > floor(x)).sort((a, b) => (b.t === "rlong") - (a.t === "rlong") || b.dur - a.dur)[0]; if (!c) break; c.dur = Math.max(floor(c), c.dur - 5); }
+    // vélo + course dans la fourchette de charge du Plan (7 jours de la fourchette quotidienne) : sinon on réduit d'abord la course
+    const hi = ctx.form ? 7 * todayLoad(ctx.form, null).hi : Infinity;
+    if (hi < Infinity) { const bikeT = items.reduce((s, it) => it.bike && !S0.some(x => x.d === it.day && x.e.rep) ? s + build(it.bike.t, it.bike.dur, ph).tss : s, 0), runT = () => S0.reduce((s, x) => s + runTss(x.t, x.dur), 0);
+      const t0 = runT();
+      while (bikeT + runT() > hi) { const c = S0.filter(x => x.dur > floor(x)).sort((a, b) => (b.t === "rlong") - (a.t === "rlong") || b.dur - a.dur)[0]; if (!c) break; c.dur = Math.max(floor(c), c.dur - 5); }
+      if (runT() < t0) info.notes.push("Volume de course réduit : vélo + course dépassaient la charge conseillée de la semaine.");
+      if (bikeT + runT() > hi) info.notes.push("Même avec des courses au minimum, vélo + course dépassent la charge conseillée de la semaine : le vélo y est déjà presque seul."); }
+  }
+  // pourquoi il manque quelque chose (cas normal : les règles de placement priment)
+  if (wantHard && !(got && got.kinds.includes(hardType)) && nWant >= 2) info.notes.push("Pas de séance dure de course cette semaine : aucun jour possible n'a un jour de repos de chaque côté (séance clé ou sortie longue du vélo, jambes) ou une durée assez longue.");
+  if (full && full.includes("rlong") && got && !got.kinds.includes("rlong")) info.notes.push("Pas de sortie longue en course : elle ne va que sur un jour « à la place du vélo » libre.");
+  if (!E.length && want) info.notes.push("Aucune course cette semaine : aucun jour de course n'est libre (pas de course le jour de la sortie longue ni des jambes, ni sur une séance clé du vélo).");
+  else if (S0.length < want && E.length) info.notes.push(`${S0.length} course${S0.length > 1 ? "s" : ""} au lieu de ${rc.n} : ${E.length < Math.min(want, nVol) ? `seulement ${E.length} jour${E.length > 1 ? "s" : ""} possible${E.length > 1 ? "s" : ""}` : nVol < want ? `volume trop bas pour des séances de ${RUN_MIN} min minimum` : "les règles de placement le demandent"}.`);
+  S0.forEach(x => { if (x.e.rep) items[x.d].bike = null; items[x.d].run = { t: x.t, dur: x.dur, slot: x.e.alt ? "alt" : "add", ...(x.e.rep ? { rep: { t: x.e.rep.t, dur: x.e.rep.dur } } : {}) }; });
+  info.n = items.filter(it => it.run).length; info.min = items.reduce((s, it) => s + (it.run ? it.run.dur : 0), 0);
+  return info;
+}
+// Contenu d'une séance course : lignes { d (s), label, sub, v (part de la vitesse seuil), pace (s/km), rpe, km, n?, on? }
+function buildRun(type, durMin, thr) {
+  thr = thr || RUN_PACE0;
+  const T = durMin * 60, S = [], M = m => m * 60, km = (d, v) => d * v / thr;
+  const one = (d, label, v, rpe) => S.push({ d, label, v, pace: thr / v, rpe, km: km(d, v) });
+  const warm = m => one(M(m), "Échauffement", RUN_V.warm, RPE_RUN.easy), cool = m => one(M(m), "Retour au calme", RUN_V.warm, RPE_RUN.easy);
+  const reps = (n, on, v, rpe, off, label, sub) => S.push({ d: n * on + (n - 1) * off, n, on, label, sub, v, pace: thr / v, rpe, km: km(n * on, v) + km((n - 1) * off, RUN_V.trot) });
+  const used = () => S.reduce((a, s) => a + s.d, 0), rest = end => { const r = T - end - used(); if (r >= 180) one(r, "Footing", RUN_V.foot, RPE_RUN.easy); };
+  const wu = durMin >= 35 ? 5 : 3, body = (m, label, v, rpe) => { const d = T - 2 * M(m); if (d > 0) one(d, label, v, rpe); };
+  let title = TYPES[type].l, goal = "";
+  if (type === "rfoot") { warm(wu); body(wu, "Footing", RUN_V.foot, RPE_RUN.easy); cool(wu); title = `Footing ${fmtMin(durMin)}`; goal = "Footing facile : une allure où tu peux parler. Il construit l'endurance sans fatiguer ; mieux vaut trop lent que trop vite."; }
+  else if (type === "rstrides") { warm(wu); const d = T - 2 * M(wu) - 420; if (d > 0) one(d, "Footing", RUN_V.foot, RPE_RUN.easy); reps(6, 20, RUN_V.strides, RPE_RUN.strides, 60, "6 lignes droites de 20 s", "trot de 1 min entre chaque"); cool(wu); title = `Footing ${fmtMin(durMin)} + 6 lignes droites`; goal = "Un footing facile terminé par 6 lignes droites de 20 s : on réveille la foulée sans fatigue. Vite mais relâché, pas un sprint."; }
+  else if (type === "rlong") { warm(10); one(T - M(15), "Sortie longue", RUN_V.long, RPE_RUN.long); cool(5); title = `Sortie longue ${fmtMin(durMin)}`; goal = "La plus longue sortie de la semaine, à allure très facile : endurance, tendons, habitude de durer. Emporte à boire au-delà de 90 min."; }
+  else if (type === "rtempo") { warm(10); const m = T - M(15), n = clamp(Math.floor((m + 120) / 720), 1, 3); reps(n, 600, RUN_V.tempo, RPE_RUN.tempo, 120, `${n} × 10 min tempo`, "trot de 2 min entre chaque"); rest(M(5)); cool(5); title = `Tempo ${n} × 10'`; goal = "Des blocs à allure soutenue mais maîtrisée, juste sous le seuil : élargir le moteur aérobie."; }
+  else if (type === "rthr") { warm(10); const m = T - M(15), n = clamp(Math.floor((m + 180) / 660), 2, 4); reps(n, 480, RUN_V.thr, RPE_RUN.thr, 180, `${n} × 8 min au seuil`, "trot de 3 min entre chaque"); rest(M(5)); cool(5); title = `Seuil ${n} × 8'`; goal = `Repousser le seuil : ${n} blocs de 8 min à ton allure seuil, réguliers, sans partir trop fort.`; }
+  else if (type === "rvo2") { warm(10); const m = T - M(15), n = clamp(Math.floor((m + 120) / 300), 4, 8); reps(n, 180, RUN_V.vo2, RPE_RUN.vo2, 120, `${n} × 3 min vite`, "trot de 2 min entre chaque"); rest(M(5)); cool(5); title = `VO2max ${n} × 3'`; goal = `Le travail de VO2max : ${n} efforts de 3 min, durs mais tenables jusqu'au dernier. Récupère vraiment pendant les trots.`; }
+  return { title, goal, steps: S, tss: runTss(type, durMin), km: S.reduce((a, s) => a + s.km, 0), thr };
+}
+
 // ------------------------------------------------------------------ Semaine réelle : ce qui a été fait, et les réajustements
 function weekFacts(mon) {
-  const f = Array.from({ length: 7 }, () => ({ rides: [], muscu: [] }));
+  const f = Array.from({ length: 7 }, () => ({ rides: [], muscu: [], runs: [] }));
   (S.all || []).forEach(a => { const k = dayIndex(a.dt, mon); if (k < 0 || k > 6) return;
-    if (RIDE_TYPES.has(a.t) && isTraining(a)) f[k].rides.push(a); else if (isMuscu(a)) f[k].muscu.push(a); });
+    if (RIDE_TYPES.has(a.t) && isTraining(a)) f[k].rides.push(a); else if (isMuscu(a)) f[k].muscu.push(a); else if (Charge.RUN_TYPES.has(a.t) && isTraining(a)) f[k].runs.push(a); });
   return f;
 }
 function baseWeek(mon, c, ctx) {
@@ -266,21 +401,23 @@ function baseWeek(mon, c, ctx) {
     const td = (new Date().getDay() + 6) % 7;  // disponibilités changées en cours de semaine : les jours passés restent tels quels
     const fixed = +mon === +cur && base && base.v === 2 && Array.isArray(base.items) && td > 0 ? { upto: td, items: base.items } : null;
     const g = genWeek(mon, c, ctx, fixed);
-    base = { v: 2, sig: cfgSig(c), K: g.K, tired: g.tired, items: g.items, at: new Date().toISOString() };
-    if (+mon <= +cur) store2.set(key, base);  // la semaine en cours est figée ; la suivante reste un aperçu
+    base = { v: 2, sig: cfgSig(c), K: g.K, tired: g.tired, items: g.items, at: new Date().toISOString(), ...(g.run ? { run: g.run } : {}) };
+    if (+mon <= +cur && (S.all || []).length) store2.set(key, base);  // la semaine en cours est figée (une fois les activités chargées : sinon forme et volume de course seraient calculés à vide) ; la suivante reste un aperçu
   }
   return base;
 }
 // créneau pour une séance clé déplacée : pas collée à un jour dur, pas le jour ni le lendemain des jambes
 function keySlot(items, from, F, ftp, opt = {}) {
   // withLong : une sortie longue compte comme jour dur la veille de la séance (pas le lendemain : vendredi clé + samedi long, c'est classique)
+  const runHard = d => d >= 0 && d <= 6 && !!(items[d].run && items[d].run.st !== "missed" && TYPES[items[d].run.t].hard);   // course dure prévue (sans course, toujours faux)
   const hardDay = (d, withLong) => { if (d < 0 || d > 6 || d === opt.ignore) return false; const it = items[d];
     if (F[d].rides.some(a => hardRide(a, ftp) || (withLong && a.mt >= 150 * 60))) return true;
-    return !!(it.bike && it.bike.st !== "missed" && TYPES[it.bike.t] && (isKey(it.bike.t) || (withLong && isLong(it.bike.t)))); };
+    return runHard(d) || !!(it.bike && it.bike.st !== "missed" && TYPES[it.bike.t] && (isKey(it.bike.t) || (withLong && isLong(it.bike.t)))); };
   const legs = d => d >= 0 && d <= 6 && items[d].muscu && items[d].muscu.s === "legs" && items[d].muscu.st !== "missed";
   let best = null;
   for (let d = from; d < 7; d++) { const b = items[d].bike;
     if (!b || b.st !== "plan" || TYPES[b.t].hard || isLong(b.t) || b.dur < 45 || d === opt.ignore) continue;
+    if (items[d].run && items[d].run.st !== "missed") continue;   // pas de séance clé le jour d'une course prévue (les ajustements course sont l'étape 5b)
     if (hardDay(d - 1, true) || hardDay(d + 1, false) || legs(d) || legs(d - 1)) continue;
     const sc = (b.place === "mw" ? 10 : 0) - d;
     if (!best || sc > best.sc) best = { d, sc }; }
@@ -305,8 +442,8 @@ function effective(mon, c, ctx) {
   const base = baseWeek(mon, c, ctx), ph = phase(mon, c), key = ymd(mon), ov = store2.get("planOv:" + key) || {};
   const items = base.items.map((it, d) => { const o = ov[d] || {}; let bike = it.bike ? { ...it.bike, st: "plan" } : null;
     if (bike && o.t && TYPES[o.t]) { bike.t = o.t; bike.own = true; } if (bike && o.dur) { bike.dur = o.dur; bike.own = true; } if (bike && o.place) { bike.place = o.place; bike.own = true; }
-    return { day: d, date: addDays(mon, d), bike, muscu: it.muscu ? { s: it.muscu, st: "plan" } : null, extra: [] }; });
-  const out = { mon, ph, items, changes: [], K: base.K, tired: base.tired, isCur, td: isCur ? (now.getDay() + 6) % 7 : mon < cur ? 7 : -1 };
+    return { day: d, date: addDays(mon, d), bike, muscu: it.muscu ? { s: it.muscu, st: "plan" } : null, extra: [], ...(it.run ? { run: { ...it.run, st: "plan" } } : {}) }; });
+  const out = { mon, ph, items, changes: [], K: base.K, tired: base.tired, isCur, td: isCur ? (now.getDay() + 6) % 7 : mon < cur ? 7 : -1, ...(base.run ? { runInfo: base.run } : {}) };
   if (out.td < 0) return out;  // semaine à venir : simple aperçu
   const td = out.td, F = weekFacts(mon), ftp = profile().ftp, undo = new Set(store2.get("planUndo:" + key) || []), lbl = store2.get("muscuLbl") || {};
   const ready = ctx.ready, morningOver = now.getHours() >= 12, eveningOver = now.getHours() >= 22;
@@ -317,7 +454,11 @@ function effective(mon, c, ctx) {
   for (let d = 0; d < 7 && d <= td; d++) { const it = items[d], R = F[d].rides;
     if (R.some(a => hardRide(a, ftp))) hardDays++;
     if (R.length) { if (it.bike) { it.bike.st = "done"; it.bike.acts = R; } else it.extra = R; }
-    else if (it.bike && (d < td || (d === td && eveningOver))) it.bike.st = "missed"; }
+    else if (it.bike && (d < td || (d === td && eveningOver))) it.bike.st = "missed";
+    // course : faite (rattachée au jour, bilan), non prévue = « extra » comme le vélo, ou ratée ; aucun ajustement course ici (étape 5b)
+    const RN = F[d].runs;
+    if (RN.length) { if (it.run) { it.run.st = "done"; it.run.acts = RN; } else it.extra = it.extra.concat(RN); }
+    else if (it.run && (d < td || (d === td && eveningOver))) it.run.st = "missed"; }
   const plannedKeys = items.filter(it => it.bike && isKey(it.bike.t)).length;
   // --- muscu : ce qui a été fait (étiquette choisie, sinon séance prévue ce jour-là, sinon la prochaine de la semaine)
   const doneS = new Set(), planM = items.filter(it => it.muscu).map(it => it.muscu.s);
@@ -564,6 +705,18 @@ function bikeStatus(b) {
   return "";
 }
 function doneSummary(acts) { const a = acts[0], km = acts.reduce((s, x) => s + x.km, 0), mt = acts.reduce((s, x) => s + x.mt, 0); return `${isIndoor(a) ? (a.w ? `${a.w} W · ` : "") : `${nf(km)} km · `}${fmtMin(Math.round(mt / 60))}`; }
+function runStatus(r) { return r.st === "done" ? `<span class="stg ok">faite ✓</span>` : r.st === "missed" ? `<span class="stg ko">non faite</span>` : ""; }
+function runDone(acts) { const km = acts.reduce((s, x) => s + x.km, 0), mt = acts.reduce((s, x) => s + x.mt, 0); return `${nf(km, 1)} km · ${fmtMin(Math.round(mt / 60))}${km > 0 ? ` · ${fmtPace(mt / km)} /km` : ""}`; }
+function runTable(w) {
+  const col = v => RZ[RZ.findIndex(z => v < z[0])][1];
+  return `<table class="steps"><tbody>${w.steps.map(s => `<tr><td><i style="background:${col(s.v)}"></i>${s.n ? `${s.n} × ${cleanDur(s.on)}` : cleanDur(s.d)}</td><td>${esc(s.label)}${s.sub ? `<small>${esc(s.sub)}</small>` : ""}</td><td class="tg">${fmtPace(s.pace)} /km<small>${esc(s.rpe)}</small></td></tr>`).join("")}</tbody></table>`;
+}
+function runDetail(it) {
+  const r = it.run;
+  let h = `<p class="sg">${esc(r.w.goal)}</p>${runTable(r.w)}<p class="note">≈ ${nf(r.w.km, 1)} km, charge ≈ ${r.w.tss} TSS. Allures calculées sur ton allure seuil (${fmtPace(r.w.thr)} /km) ; footing = ${String(RUN_EASY).replace(".", ",")} × cette allure.${r.rep ? ` Remplace : ${TYPES[r.rep.t].l.toLowerCase()} de ${fmtMin(r.rep.dur)} au vélo.` : ""}</p>`;
+  if (r.st === "done" && r.acts) h += `<div class="ddone">${r.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
+  return `<div class="wdet" data-d="${it.day}" data-r="1">${h}</div>`;
+}
 function muscuChip(it) {
   const m = it.muscu, M = MUSCU[m.s];
   if (m.st === "done" && m.act) return `<label class="mchip done" title="Séance faite (Garmin). Change l'étiquette si ce n'était pas celle-ci."><b>✓</b><select data-mlbl="${m.act.id}" aria-label="Séance de muscu faite">${MORDER.map(s => `<option value="${s}" ${s === m.s ? "selected" : ""}>${MUSCU[s].l}</option>`).join("")}</select></label>`;
@@ -574,12 +727,14 @@ function renderDay(W, ready) {
   if (W.td < 0 || W.td > 6) return "";
   const it = W.items[W.td], b = it.bike, r = ready.today;
   const morning = it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : `<span class="dnone">Pas de muscu</span>`;
+  const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
   const evening = b ? `<button class="dbk" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}"><span class="badge">${TYPES[b.t].l}</span><span class="dbt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>`
-    : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
+    : rn && rn.slot === "alt" ? runBtn : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
   const undoN = (store2.get("planUndo:" + ymd(W.mon)) || []).length;
   const last = rides().filter(isTraining).slice(-1)[0];
   return `<section class="card span6 dayc"><h2>Aujourd'hui <small>${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}${r != null ? ` · récup ${r}/100` : ""}</small></h2>
     <div class="drow"><span class="dk">Matin</span><div>${morning}</div></div>
+    ${rn && rn.slot === "add" ? `<div class="drow"><span class="dk">Midi</span><div>${runBtn}</div></div>` : ""}
     <div class="drow"><span class="dk">${b && isLong(b.t) ? "Sortie" : "Soir"}</span><div>${evening}</div></div>
     ${W.changes.length ? `<div class="chgh">Ajustements de la semaine</div><ul class="chg">${W.changes.map(x => `<li>${esc(x.text)}${x.id ? ` <button class="lnk" data-undo="${esc(x.id)}">Annuler</button>` : ""}</li>`).join("")}</ul>` : ""}
     ${undoN ? `<button class="lnk small" id="pRedo">Rétablir ${undoN > 1 ? `les ${undoN} ajustements annulés` : "l'ajustement annulé"}</button>` : ""}
@@ -598,7 +753,7 @@ function detailHtml(W, it, prof) {
   }
   if (b.st === "plan" && (W.td < 0 || it.day >= W.td)) {
     const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
-    h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
+    h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).filter(([, t]) => !t.sport).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
       <select data-ov="dur" aria-label="Durée">${DURS.map(d => opt(d, b.dur, fmtMin(d))).join("")}</select><select data-ov="place" aria-label="Lieu">${opt("mw", b.place, "MyWhoosh")}${opt("out", b.place, "Dehors")}</select>
       ${b.own ? `<button class="lnk" data-ovreset="1">Revenir au plan</button>` : ""}</div>`;
   }
@@ -607,20 +762,23 @@ function detailHtml(W, it, prof) {
 function weekRow(W, it, prof) {
   const now = W.isCur && it.day === W.td, past = W.td > it.day, b = it.bike, open = !!PS.open[ymd(it.date)];
   const bikeH = b ? `<button class="wsess" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}" aria-expanded="${open}"><span class="badge">${TYPES[b.t].l}</span><span class="wt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>` : "";
-  const extra = it.extra.map(a => `<button class="wextra" data-bilan="${a.id}"><span>+ ${esc(a.n)}</span><small>${doneSummary([a])} · bilan →</small></button>`).join("");
+  const extra = it.extra.map(a => `<button class="wextra" data-bilan="${a.id}"><span>+ ${esc(a.n)}</span><small>${Charge.RUN_TYPES.has(a.t) ? runDone([a]) : doneSummary([a])} · bilan →</small></button>`).join("");
+  const rn = it.run, openR = !!PS.open[ymd(it.date) + ":r"];
+  const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"} · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
   return `<div class="wrow${now ? " now" : ""}${past ? " past" : ""}"><div class="wday"><b>${DAYN[it.day].slice(0, 3)}</b><span>${it.date.getDate()} ${it.date.toLocaleDateString("fr-FR", { month: "short" })}</span></div>
     <div class="wmus">${it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
-    <div class="wbike">${bikeH}${extra}${!b && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}`;
+    <div class="wbike">${bikeH}${runH}${extra}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(it) : ""}`;
 }
 function renderWeek(W, prof) {
   const thisMon = mondayOf(new Date()), ph = W.ph;
-  const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0), 0);
+  const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0) + (it.run && it.run.st !== "missed" ? it.run.w.tss : 0), 0);
+  const RI = W.runInfo, runNote = RI ? `<p class="pnote runnote">${RI.n ? `Course : ${RI.n} séance${RI.n > 1 ? "s" : ""}, ${fmtMin(RI.min)} au total (cible ${fmtMin(RI.T)}), mode ${RI.mode}${RI.auto ? " choisi automatiquement" : ""}.` : RI.notes.length ? "" : "Course : aucune séance cette semaine."}${RI.notes.map(x => " " + esc(x)).join("")}</p>` : "";
   const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
   return `<section class="card span12 wkc"><h2>La semaine <small>${cyc} · ≈ ${plannedT} TSS prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
     <p class="pnote">${esc(ph.focus)}.${W.tired ? " Version allégée : fatigue détectée." : ""}${W.td < 0 ? " Aperçu : la semaine se fige lundi, puis s'ajuste chaque jour." : ""} Muscu le matin, vélo le soir ; jamais les jambes le jour ou la veille d'une séance clé.</p>
-    <div class="wk">${W.items.map(it => weekRow(W, it, prof)).join("")}</div>
+    <div class="wk">${W.items.map(it => weekRow(W, it, prof)).join("")}</div>${runNote}
     ${mw.length ? `<div class="factions">${mw.length > 1 ? `<button class="btn2 primary" id="pZip">Télécharger les ${mw.length} séances MyWhoosh (.zip)</button>` : ""}</div>
     <details class="howto"><summary>Importer dans MyWhoosh</summary><ol>
       <li>Va sur <a href="https://workout.mywhoosh.com" target="_blank" rel="noopener">workout.mywhoosh.com</a> et connecte-toi.</li>
@@ -629,14 +787,26 @@ function renderWeek(W, prof) {
       <li>Les puissances sont en % de FTP : règle ta FTP MyWhoosh sur <b>${prof.ftp} W</b> pour retrouver les watts indiqués ici.</li></ol></details>` : ""}
   </section>`;
 }
+// une phrase qui dit ce qu'« auto » a choisi, avec le chiffre de la jauge de reprise (km courus par semaine sur les 4 semaines d'avant)
+function runAutoText(c) {
+  const R = runCtx(mondayOf(new Date())), G = R.chronic, lim = window.Course && Course._ && Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
+  const says = G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
+  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Pas de course le jour de la sortie longue vélo ni des jambes ; une séance dure n'est jamais collée à un jour dur.`;
+}
 function renderAvail(c) {
   const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
-  const nb = c.days.filter(d => d.bike !== "none").length, nm = c.days.filter(d => d.muscu).length;
-  return `<section class="card span12 avail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles</small></summary>
+  const nb = c.days.filter(d => d.bike !== "none").length, nm = c.days.filter(d => d.muscu).length, nr = c.days.filter(d => d.run === "alt" || d.run === "add").length;
+  return `<section class="card span12 avail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles${nr ? ` · ${nr} jour${nr > 1 ? "s" : ""} de course` : ""}</small></summary>
     <div class="avg">${c.days.map((d, i) => `<div class="avrow" data-i="${i}"><b>${DAYN[i]}</b>
       <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("any", d.bike, "Au choix")}</select>
       <select data-k="dur" aria-label="Durée max ${DAYN[i]}" ${d.bike === "none" ? "disabled" : ""}>${DURS.map(v => opt(v, d.dur, "jusqu'à " + fmtMin(v))).join("")}</select>
-      <label class="mtog"><input type="checkbox" data-k="muscu" ${d.muscu ? "checked" : ""}> muscu le matin</label></div>`).join("")}</div>
+      <label class="mtog"><input type="checkbox" data-k="muscu" ${d.muscu ? "checked" : ""}> muscu le matin</label>
+      <i class="avsp"></i><select data-k="run" aria-label="Course ${DAYN[i]}">${opt("none", d.run || "none", "Pas de course")}${opt("alt", d.run, "Course à la place")}${opt("add", d.run, "Course en plus")}</select>
+      <select data-k="runDur" aria-label="Durée max de la course ${DAYN[i]}" ${!d.run || d.run === "none" ? "disabled" : ""}>${RUN_DURS.map(v => opt(v, d.runDur || 60, "jusqu'à " + fmtMin(v))).join("")}</select></div>`).join("")}</div>
+    <div class="avrun"><b>Course à pied</b>
+      <label>Courses par semaine, au plus <select data-g="runN" aria-label="Nombre de courses par semaine">${[1, 2, 3, 4].map(v => opt(v, c.runN || 2, v)).join("")}</select></label>
+      <label>Programme <select data-g="runMode" aria-label="Mode de course">${opt("auto", c.runMode || "auto", "Auto")}${opt("reprise", c.runMode, "Reprise")}${opt("entretien", c.runMode, "Entretien")}${opt("progression", c.runMode, "Progression")}</select></label></div>
+    <p class="note">${runAutoText(c)} S'applique à partir du lundi suivant ; la semaine en cours n'est jamais régénérée.</p>
     <p class="note">Le plan choisit les jours des séances clés et place Push, Pull, Legs et Upper sur 4 de tes matins de muscu : jamais les jambes le matin d'une séance clé, ni la veille d'une séance clé ou de la sortie longue. Avec moins de 4 matins, Upper saute en premier. Une sortie « dehors » de 2 h 30 ou plus devient la sortie longue.</p>
     <div class="factions"><button class="btn2" id="pShare">Copier le lien pour mon autre appareil</button><button class="btn2 ghost" id="pHabits">Vélo selon mes habitudes</button></div><div id="pShareOut"></div>
   </details></section>`;
@@ -652,7 +822,8 @@ function todayLoad(form, r) {
 function renderToday(form, ready, W) {
   const L = todayLoad(form, ready.today ?? ready.last), today = ymd(new Date());
   const done = Math.round((S.all || []).filter(a => a.d.slice(0, 10) === today).reduce((s, a) => s + Charge.tssOf(a), 0));
-  const it = W.td >= 0 && W.td < 7 ? W.items[W.td] : null, ps = it && it.bike && it.bike.st === "plan" ? it.bike : null, planned = ps ? ps.w.tss : 0;
+  const it = W.td >= 0 && W.td < 7 ? W.items[W.td] : null, pb = it && it.bike && it.bike.st === "plan" ? it.bike : null, pr = it && it.run && it.run.st === "plan" ? it.run : null;
+  const ps = pb || pr, planned = (pb ? pb.w.tss : 0) + (pr ? pr.w.tss : 0);   // séance du soir (ou course) : la phrase parle de la première
   const max = Math.max(L.hi * 1.4, done + planned + 10, 60), X = v => Math.min(100, v / max * 100);
   let msg;
   if (L.r != null && L.r < 35) msg = "Récupération très basse : repos, ou 30 à 45 min très faciles.";
@@ -691,8 +862,11 @@ function renderRank(prof, c) {
 }
 
 // ------------------------------------------------------------------ Logique de page
-function ctxFor(mon, form, ready) { return { form, ready, prev: prevCtx(mon) }; }
-function withWorkouts(W) { W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, W.ph); }); return W; }
+function ctxFor(mon, form, ready) { const rc = rcFor(mon); return { form, ready, prev: prevCtx(mon), rc, ...(rc ? { run: runCtx(mon) } : {}) }; }
+function withWorkouts(W) {
+  const thr = W.items.some(it => it.run) ? Charge.params().runPace : null;
+  W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, W.ph); if (it.run) it.run.w = buildRun(it.run.t, it.run.dur, thr); }); return W;
+}
 function render() {
   const box = $("plan"); if (!box) return;
   if (!store2.get("planSince")) store2.set("planSince", ymd(new Date()));
@@ -717,11 +891,11 @@ function bind(c, prof) {
   if ($("pGoalF")) $("pGoalF").onsubmit = e => { e.preventDefault(); const f = +$("gFtp").value, v = +$("gVo2").value, d = $("gDate").value;
     if (f >= 100 && f <= 600 && d) { c.goal = { ftp: Math.round(f), vo2: v >= 30 && v <= 90 ? v : c.goal.vo2, date: d }; saveCfg(c); PS.goalEdit = false; render(); } };
   box.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { PS.mon = addDays(mondayOf(new Date()), +b.dataset.w); render(); });
-  box.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const k = b.dataset.open, d = parseYmd(k), mon = mondayOf(d);
+  box.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const k = b.dataset.open, d = parseYmd(k.slice(0, 10)), mon = mondayOf(d), isR = k.endsWith(":r");
     const inDay = !!b.closest(".dayc");
     if (+mon !== +PS.mon) { PS.mon = mon; PS.open = {}; }
     PS.open[k] = inDay ? true : !PS.open[k]; render();
-    if (inDay) setTimeout(() => document.querySelector(`.wdet[data-d="${dayIndex(d, mon)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 30); });
+    if (inDay) setTimeout(() => document.querySelector(`.wdet[data-d="${dayIndex(d, mon)}"]${isR ? "[data-r]" : ":not([data-r])"}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 30); });
   box.querySelectorAll("[data-undo]").forEach(b => b.onclick = () => { const k = "planUndo:" + ymd(PS.Wc.mon), u = store2.get(k) || []; u.push(b.dataset.undo); store2.set(k, u); render(); });
   if ($("pRedo")) $("pRedo").onclick = () => { store2.del("planUndo:" + ymd(PS.Wc.mon)); render(); };
   box.querySelectorAll("[data-bilan]").forEach(b => b.onclick = () => window.Bilan ? Bilan.open(+b.dataset.bilan) : window.open(`https://connect.garmin.com/modern/activity/${b.dataset.bilan}`, "_blank", "noopener"));
@@ -734,9 +908,11 @@ function bind(c, prof) {
   box.querySelectorAll("[data-ovreset]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {}; delete ov[d]; store2.set(k, ov); render(); });
   const ad = $("pAvailD"); if (ad) ad.ontoggle = () => { PS.avail = ad.open; };
   box.querySelectorAll(".avrow").forEach(r => r.onchange = e => { const i = +r.dataset.i, k = e.target.dataset.k; if (!k) return;
-    c.days[i][k] = k === "muscu" ? e.target.checked : k === "dur" ? +e.target.value : e.target.value;
+    c.days[i][k] = k === "muscu" ? e.target.checked : k === "dur" || k === "runDur" ? +e.target.value : e.target.value;
     if (k === "bike" && e.target.value === "any" && c.days[i].dur < 60) c.days[i].dur = 60;
-    saveCfg(c); PS.avail = true; render(); });
+    if (k === "run" && e.target.value !== "none" && !c.days[i].runDur) c.days[i].runDur = 60;
+    saveCfg(c); setRc(c); PS.avail = true; render(); });
+  box.querySelectorAll("[data-g]").forEach(s => s.onchange = () => { c[s.dataset.g] = s.dataset.g === "runN" ? +s.value : s.value; saveCfg(c); setRc(c); PS.avail = true; render(); });
   if ($("pHabits")) $("pHabits").onclick = () => { const sets = habitSets(); c.days.forEach((d, i) => { const s = sets.find(x => x.day === i); d.bike = s ? s.place : "none"; if (s) d.dur = s.dur; }); saveCfg(c); PS.avail = true; render(); };
   if ($("pShare")) $("pShare").onclick = () => {
     const data = { c, kg: store2.get("bwWeight"), age: store2.get("bwAge"), ftp: store2.get("planFtp") };
@@ -746,23 +922,50 @@ function bind(c, prof) {
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast("Lien copié : ouvre-le sur ton autre appareil."), show); else show();
   };
 }
+// Un lien #plan= vient de l'extérieur : tout est validé (type, liste, bornes) et le reste est ignoré ; rien d'autre n'est jamais enregistré
+const isNum = v => typeof v === "number" && isFinite(v);
+const isYmd = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && ymd(parseYmd(s)) === s;
+function cleanCfg(c) {
+  if (!c || typeof c !== "object" || !Array.isArray(c.days) || c.days.length !== 7) return null;
+  const days = c.days.map(d => { d = d && typeof d === "object" ? d : {};
+    const o = { bike: ["none", "mw", "out", "any"].includes(d.bike) ? d.bike : "none", dur: isNum(d.dur) ? clamp(Math.round(d.dur), 30, 300) : 60, muscu: d.muscu === true };
+    if (RUN_SLOTS.includes(d.run)) o.run = d.run;
+    if (isNum(d.runDur)) o.runDur = clamp(Math.round(d.runDur), RUN_MIN, 120);
+    return o; });
+  const g = c.goal && typeof c.goal === "object" ? c.goal : {}, goal = {};
+  if (isNum(g.ftp)) goal.ftp = clamp(Math.round(g.ftp), 100, 600);
+  if (isNum(g.vo2)) goal.vo2 = clamp(g.vo2, 30, 90);
+  if (isYmd(g.date)) goal.date = g.date;
+  const out = { v: 2, goal, start: isYmd(c.start) ? c.start : START0, days };
+  if (isNum(c.runN)) out.runN = clamp(Math.round(c.runN), 1, 4);
+  if (RUN_MODES.includes(c.runMode)) out.runMode = c.runMode;
+  return out;
+}
 function importLink() {
   const h = location.hash; if (!h.startsWith("#plan=")) return false;
   try {
-    const raw = h.slice(6).replace(/-/g, "+").replace(/_/g, "/"), o = JSON.parse(decodeURIComponent(escape(atob(raw + "===".slice((raw.length + 3) % 4)))));
-    if (o.c && Array.isArray(o.c.days) && o.c.days.length === 7) saveCfg(o.c);
-    if (o.kg) store2.set("bwWeight", o.kg); if (o.age) store2.set("bwAge", o.age); if (o.ftp) store2.set("planFtp", o.ftp);
+    const raw = h.slice(6).replace(/-/g, "+").replace(/_/g, "/"), o = JSON.parse(decodeURIComponent(escape(atob(raw + "===".slice((raw.length + 3) % 4))))), cfg = cleanCfg(o.c);
+    if (cfg) { saveCfg(cfg); setRc(cfg); }
+    if (isNum(o.kg) && o.kg >= 35 && o.kg <= 150) store2.set("bwWeight", o.kg);
+    if (typeof o.age === "string" && Object.prototype.hasOwnProperty.call(AFY, o.age)) store2.set("bwAge", o.age);
+    if (isNum(o.ftp) && o.ftp >= 80 && o.ftp <= 600) store2.set("planFtp", o.ftp);
     toast("Réglages du plan importés sur cet appareil.");
   } catch (e) { toast("Lien de réglages illisible."); }
   history.replaceState(null, "", "#plan");
   return true;
 }
-// séance prévue un jour donné (pour le bilan) : rien avant la mise en route de ce plan
-function plannedFor(key) {
+// séance prévue un jour donné (pour le bilan) : rien avant la mise en route de ce plan.
+// sport "bike" : la séance vélo ou null ; "run" : la séance course ou null ; sans argument : la séance vélo (avec `run` si une course est prévue le même jour),
+// sinon la course seule (`sport: "run"`), sinon null
+function plannedFor(key, sport) {
   const since = store2.get("planSince"); if (!since || key < since) return null;
   const d = parseYmd(key), mon = mondayOf(d), form = fitness(), ready = readiness();
   const W = withWorkouts(effective(mon, getCfg(), ctxFor(mon, form, ready))), it = W.items[dayIndex(d, mon)];
-  return it && it.bike ? { day: it.day, date: it.date, t: it.bike.t, dur: it.bike.dur, place: it.bike.place, w: it.bike.w, label: TYPES[it.bike.t].l, ftp: profile().ftp } : null;
+  if (!it) return null;
+  const run = it.run ? { day: it.day, date: it.date, t: it.run.t, dur: it.run.dur, slot: it.run.slot, w: it.run.w, label: TYPES[it.run.t].l, sport: "run" } : null;
+  const bike = it.bike ? { day: it.day, date: it.date, t: it.bike.t, dur: it.bike.dur, place: it.bike.place, w: it.bike.w, label: TYPES[it.bike.t].l, ftp: profile().ftp } : null;
+  if (sport === "run") return run; if (sport === "bike") return bike;
+  return bike ? (run ? { ...bike, run } : bike) : run;
 }
 
 async function open() {
@@ -771,7 +974,8 @@ async function open() {
   if (!ok) return;
   render();
 }
-window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase };
+window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+  _run: { place: placeRuns, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
 let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) render(); }, 200); });
