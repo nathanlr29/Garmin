@@ -107,7 +107,8 @@
 #plan .avail details[open] .avt::after{transform:rotate(-135deg) translateY(-1px)}
 #plan .avail summary small{font-size:13px;color:var(--muted)}
 #plan .avg{display:grid;gap:8px;margin-top:14px}
-#plan .avrow{display:grid;grid-template-columns:90px 1fr 1fr auto;gap:8px;align-items:center}
+#plan .avrow{display:grid;grid-template-columns:90px 1fr 1fr auto;gap:8px;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--line)}
+#plan .avg .avrow:last-child{border-bottom:0}
 #plan .mtog{display:flex;gap:6px;align-items:center;font-size:13.5px;white-space:nowrap}
 #plan .mtog input{width:18px;height:18px;accent-color:var(--accent)}
 @media (max-width:620px){#plan .avrow{grid-template-columns:1fr 1fr;padding-bottom:8px;border-bottom:1px solid var(--line)}#plan .avrow b{grid-column:1/-1}#plan .avrow .mtog{grid-column:1/-1}}

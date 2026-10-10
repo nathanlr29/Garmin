@@ -306,7 +306,7 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
 }
 // ---- 3.8 réglages : appliqués à partir du lundi suivant, semaine en cours jamais modifiée
 {
-  const h = load({ acts: [], course: COURSE }), RUN = h.Plan._run; h.store.set("planCfg", JSON.stringify(CFGS.cinq));   // RUN : celui de CE chargement (son localStorage, son horloge)
+  const h = load({ acts: [{ id: 1, n: "Footing", t: "running", dt: new Date(2026, 9, 1, 18), d: "2026-10-01T18:00:00", mt: 1800, km: 5 }], course: COURSE }), RUN = h.Plan._run; h.store.set("planCfg", JSON.stringify(CFGS.cinq));   // RUN : celui de CE chargement (son localStorage, son horloge)
   h.clock.t = new Date(2026, 10, 4, 10, 0, 0).getTime();   // mercredi 4 novembre
   const cur = new Date(2026, 10, 2), next = new Date(2026, 10, 9), ctx = { ...SIT.frais, prev: PREV[0] }, E = (mon, c, o = {}) => h.Plan._eff(mon, c, { ...ctx, rc: RUN.rcFor(mon), ...o });
   const before = sha(E(cur, h.Plan._cfg()));
@@ -319,9 +319,12 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   RUN.setRc(cfgRun(CFGS.cinq, {}, 3, "auto")); assert.equal(RUN.rcFor(next), null);
   RUN.setRc(c); RUN.setRc(c); assert.equal(JSON.parse(h.store.get("planRc")).length, 1, "pas de doublon dans l'historique");
   // une semaine déjà figée n'est pas régénérée par un changement de réglages course
-  h.store.delete("planWk:2026-11-02"); E(cur, c); const frozen = h.store.get("planWk:2026-11-02"), c2 = cfgRun(CFGS.cinq, { 2: ["alt"] }, 1, "reprise"); RUN.setRc(c2);
+  h.store.delete("planWk:2026-11-02"); E(cur, c); const frozen = h.store.get("planWk:2026-11-02"); assert.ok(frozen, "la semaine en cours est figée"); const c2 = cfgRun(CFGS.cinq, { 2: ["alt"] }, 1, "reprise"); RUN.setRc(c2);
   E(cur, c2); assert.equal(h.store.get("planWk:2026-11-02"), frozen, "planWk figé : jamais régénéré par un changement de réglages course");
   assert.equal(RUN.cfg(CFGS.cinq), null, "champ course absent = aucune course");
+  // activités pas encore chargées (au démarrage sur l'onglet Plan) : la semaine en cours n'est pas figée avec une forme et un volume calculés à vide
+  const e = load({ acts: [], course: COURSE }); e.clock.t = new Date(2026, 10, 4, 10, 0, 0).getTime(); e.Plan._eff(cur, CFGS.cinq, { ...ctx, rc: null });
+  assert.equal(e.store.has("planWk:2026-11-02"), false, "rien n'est figé tant que les activités ne sont pas là");
 }
 // ---- 3.9 courses faites : rattachées au jour, « extra » sinon
 {

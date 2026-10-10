@@ -402,7 +402,7 @@ function baseWeek(mon, c, ctx) {
     const fixed = +mon === +cur && base && base.v === 2 && Array.isArray(base.items) && td > 0 ? { upto: td, items: base.items } : null;
     const g = genWeek(mon, c, ctx, fixed);
     base = { v: 2, sig: cfgSig(c), K: g.K, tired: g.tired, items: g.items, at: new Date().toISOString(), ...(g.run ? { run: g.run } : {}) };
-    if (+mon <= +cur) store2.set(key, base);  // la semaine en cours est figée ; la suivante reste un aperçu
+    if (+mon <= +cur && (S.all || []).length) store2.set(key, base);  // la semaine en cours est figée (une fois les activités chargées : sinon forme et volume de course seraient calculés à vide) ; la suivante reste un aperçu
   }
   return base;
 }
@@ -713,7 +713,7 @@ function runTable(w) {
 }
 function runDetail(it) {
   const r = it.run;
-  let h = `<p class="sg">${esc(r.w.goal)}</p>${runTable(r.w)}<p class="note">≈ ${nf(r.w.km, 1)} km, charge ≈ ${r.w.tss} TSS. Allures calculées sur ton allure seuil (${fmtPace(r.w.thr)} /km) ; footing = ${RUN_EASY} × cette allure.${r.rep ? ` Remplace : ${TYPES[r.rep.t].l.toLowerCase()} de ${fmtMin(r.rep.dur)} au vélo.` : ""}</p>`;
+  let h = `<p class="sg">${esc(r.w.goal)}</p>${runTable(r.w)}<p class="note">≈ ${nf(r.w.km, 1)} km, charge ≈ ${r.w.tss} TSS. Allures calculées sur ton allure seuil (${fmtPace(r.w.thr)} /km) ; footing = ${String(RUN_EASY).replace(".", ",")} × cette allure.${r.rep ? ` Remplace : ${TYPES[r.rep.t].l.toLowerCase()} de ${fmtMin(r.rep.dur)} au vélo.` : ""}</p>`;
   if (r.st === "done" && r.acts) h += `<div class="ddone">${r.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
   return `<div class="wdet" data-d="${it.day}" data-r="1">${h}</div>`;
 }
@@ -772,7 +772,7 @@ function weekRow(W, it, prof) {
 function renderWeek(W, prof) {
   const thisMon = mondayOf(new Date()), ph = W.ph;
   const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0) + (it.run && it.run.st !== "missed" ? it.run.w.tss : 0), 0);
-  const RI = W.runInfo, runNote = RI ? `<p class="pnote runnote">${RI.n ? `Course : ${RI.n} séance${RI.n > 1 ? "s" : ""}, ${fmtMin(RI.min)} au total (cible ${fmtMin(RI.T)}), mode ${RI.mode}${RI.auto ? " choisi automatiquement" : ""}.` : "Course : aucune séance cette semaine."}${RI.notes.map(x => " " + esc(x)).join("")}</p>` : "";
+  const RI = W.runInfo, runNote = RI ? `<p class="pnote runnote">${RI.n ? `Course : ${RI.n} séance${RI.n > 1 ? "s" : ""}, ${fmtMin(RI.min)} au total (cible ${fmtMin(RI.T)}), mode ${RI.mode}${RI.auto ? " choisi automatiquement" : ""}.` : RI.notes.length ? "" : "Course : aucune séance cette semaine."}${RI.notes.map(x => " " + esc(x)).join("")}</p>` : "";
   const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
@@ -791,7 +791,7 @@ function renderWeek(W, prof) {
 function runAutoText(c) {
   const R = runCtx(mondayOf(new Date())), G = R.chronic, lim = window.Course && Course._ && Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
   const says = G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
-  return `Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Pas de course le jour de la sortie longue vélo ni des jambes ; une séance dure n'est jamais collée à un jour dur.`;
+  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Pas de course le jour de la sortie longue vélo ni des jambes ; une séance dure n'est jamais collée à un jour dur.`;
 }
 function renderAvail(c) {
   const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
@@ -801,7 +801,7 @@ function renderAvail(c) {
       <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("any", d.bike, "Au choix")}</select>
       <select data-k="dur" aria-label="Durée max ${DAYN[i]}" ${d.bike === "none" ? "disabled" : ""}>${DURS.map(v => opt(v, d.dur, "jusqu'à " + fmtMin(v))).join("")}</select>
       <label class="mtog"><input type="checkbox" data-k="muscu" ${d.muscu ? "checked" : ""}> muscu le matin</label>
-      <i class="avsp"></i><select data-k="run" aria-label="Course ${DAYN[i]}">${opt("none", d.run || "none", "Pas de course")}${opt("alt", d.run, "Course à la place du vélo")}${opt("add", d.run, "Course en plus, le midi")}</select>
+      <i class="avsp"></i><select data-k="run" aria-label="Course ${DAYN[i]}">${opt("none", d.run || "none", "Pas de course")}${opt("alt", d.run, "Course à la place")}${opt("add", d.run, "Course en plus")}</select>
       <select data-k="runDur" aria-label="Durée max de la course ${DAYN[i]}" ${!d.run || d.run === "none" ? "disabled" : ""}>${RUN_DURS.map(v => opt(v, d.runDur || 60, "jusqu'à " + fmtMin(v))).join("")}</select></div>`).join("")}</div>
     <div class="avrun"><b>Course à pied</b>
       <label>Courses par semaine, au plus <select data-g="runN" aria-label="Nombre de courses par semaine">${[1, 2, 3, 4].map(v => opt(v, c.runN || 2, v)).join("")}</select></label>
