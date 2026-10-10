@@ -29,6 +29,13 @@ except ImportError:
     fitdecode = None
 
 
+# ---------------------------------------------------------------- Extraits bruts publiés
+class RawScrub(unittest.TestCase):
+    def test_pas_d_identifiant_de_compte_ni_d_appareil(self):
+        r = rc._raw([{"userProfilePK": 1, "pace": 250, "x": {"userId": 2, "deviceId": 3, "primaryTrainingDevice": 4, "ok": 5}}])
+        self.assertEqual(r, '[{"pace": 250, "x": {"ok": 5}}]')
+
+
 # ---------------------------------------------------------------- Seuil lactique
 class LactateThreshold(unittest.TestCase):
     def test_echelles_de_vitesse(self):

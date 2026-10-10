@@ -1,9 +1,7 @@
 "use strict";
 // Onglet « Récup » : sommeil, VFC, fréquence cardiaque, Body Battery, lune et facteurs externes.
-// Les données (data/recovery.enc) sont chiffrées ; le code est demandé une fois par appareil.
 (() => {
 const RC = { env: null, data: null, days: [], nights: [], period: 30, night: -1, factSeed: 0, sig: null };
-const CODE_KEY = "recupCode";
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
 const hm = mins => `${Math.floor(mins / 60)} h ${pad(Math.round(mins % 60))}`;
@@ -36,47 +34,21 @@ function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars /
   return d.getDate() > 24 ? (m === 2 ? "Passage à l'heure d'été (1 h de sommeil en moins)" : "Passage à l'heure d'hiver (1 h de plus)") : null;
 }
 
-// ------------------------------------------------------------------ Données chiffrées
-async function decryptEnv(env, code) {
-  if (env.plain) return env.plain;
-  const b = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(code), "PBKDF2", false, ["deriveKey"]);
-  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b(env.salt), iterations: env.iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(env.iv) }, key, b(env.data));
-  return JSON.parse(new TextDecoder().decode(pt));
-}
-async function fetchEnv() {  // accès libre : recovery.json ; ancien format chiffré en secours
+// ------------------------------------------------------------------ Données
+async function fetchEnv() {
   try { const r = await fetch("data/recovery.json?v=" + Date.now(), { cache: "no-store" }); if (r.ok) { const plain = await r.json(); return { plain, data: plain.updated_at || "" }; } } catch (e) {}
-  try { const r = await fetch("data/recovery.enc?v=" + Date.now(), { cache: "no-store" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; }
+  return null;
 }
 async function openRecup(refresh) {
   const box = $("recup");
   if (!RC.env || refresh) {
     const env = await fetchEnv();
-    if (!env) { if (!RC.env) box.innerHTML = `<div class="card empty"><b>Pas encore de données de récupération</b>Ajoute le secret <code>RECUP_CODE</code> dans GitHub, puis lance « Mise à jour Garmin ». Le premier remplissage prend quelques heures.</div>`; return; }
+    if (!env) { if (!RC.env) box.innerHTML = `<div class="card empty"><b>Pas encore de données de récupération</b>Lance « Mise à jour Garmin » dans l'onglet Actions de GitHub. Le premier remplissage prend quelques heures.</div>`; return; }
     if (RC.env && env.data === RC.env.data) return;
     RC.env = env; RC.data = null;
   }
-  if (!RC.data) {
-    const code = store.get(CODE_KEY);
-    if (!code && !RC.env.plain) return showLock();
-    try { RC.data = await decryptEnv(RC.env, code); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} return showLock("Le code a changé, saisis-le à nouveau."); }
-    prep();
-  }
+  if (!RC.data) { RC.data = RC.env.plain; prep(); }
   renderRecup();
-}
-function showLock(msg, target = "recup", after = renderRecup) {
-  const m = moon(new Date());
-  $(target).innerHTML = `<div class="card lock"><div class="moon">${moonSvg(m, 64)}</div><h2>Récupération</h2>
-    <p>Tes données de sommeil sont chiffrées. Saisis ton code une fois : cet appareil s'en souviendra.</p>
-    <form id="lockForm" autocomplete="off"><input id="lockCode" type="password" inputmode="text" placeholder="Code d'accès" aria-label="Code d'accès" autofocus><button type="submit">Ouvrir</button></form>
-    <div class="err" id="lockErr">${esc(msg || "")}</div></div>`;
-  $("lockForm").onsubmit = async e => {
-    e.preventDefault(); const code = $("lockCode").value.trim(); if (!code) return;
-    $("lockErr").textContent = "Déchiffrement…";
-    try { RC.data = await decryptEnv(RC.env, code); store.set(CODE_KEY, code); prep(); after(); }
-    catch (err) { $("lockErr").textContent = "Code incorrect."; }
-  };
 }
 function prep() {
   const days = Object.values(RC.data.days || {}).filter(d => d.f).sort((a, b) => a.d < b.d ? -1 : 1);
@@ -514,12 +486,8 @@ function minBy(arr, f) { let b = null, bv = Infinity; for (const a of arr) { con
 // ------------------------------------------------------------------ Accès pour l'onglet Plan
 async function ensure(target, after) {
   if (!RC.env) RC.env = await fetchEnv();
-  if (!RC.env) { $(target).innerHTML = `<div class="card empty"><b>Pas encore de données</b>Le plan a besoin des données de l'onglet Récup (secret <code>RECUP_CODE</code>).</div>`; return false; }
-  if (!RC.data) {
-    const code = store.get(CODE_KEY);
-    if (code || RC.env.plain) { try { RC.data = await decryptEnv(RC.env, code); prep(); } catch (e) { try { localStorage.removeItem(CODE_KEY); } catch (_) {} } }
-    if (!RC.data) { showLock("", target, after); return false; }
-  }
+  if (!RC.env) { $(target).innerHTML = `<div class="card empty"><b>Pas encore de données</b>Le plan a besoin des données de l'onglet Récup : lance « Mise à jour Garmin » dans l'onglet Actions de GitHub.</div>`; return false; }
+  if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
 window.Recup = { ensure, recoScore, scoreColor, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };

@@ -2,16 +2,12 @@
 
 Appelé par fetch_garmin.py avec la session Garmin déjà ouverte.
 Résultat : data/recovery.json, en accès libre (plus de code depuis octobre 2026).
-L'ancien fichier chiffré data/recovery.enc est relu une dernière fois avec RECUP_CODE
-pour ne rien perdre, puis supprimé.
 
 Rattrapage progressif : à chaque passage, les 3 derniers jours sont rafraîchis
 et jusqu'à BACKFILL_PER_RUN jours plus anciens sont ajoutés, pour ménager Garmin.
 """
-import base64
 import json
 import math
-import os
 import time
 import urllib.parse
 import urllib.request
@@ -20,7 +16,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
-ENC_FILE = ROOT / "data" / "recovery.enc"   # ancien format chiffré
 JSON_FILE = ROOT / "data" / "recovery.json"
 CONFIG_FILE = ROOT / "config.json"
 
@@ -28,31 +23,7 @@ START = date(2026, 1, 1)
 REFRESH_DAYS = 3
 BACKFILL_PER_RUN = 30
 HYPNO_NIGHTS = 21          # nuits gardées avec le détail des phases
-PBKDF2_ITER = 250_000
 TZ = ZoneInfo("Europe/Paris")
-
-
-# ------------------------------------------------------------------ Chiffrement
-def _key(code, salt):
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    return PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
-                      iterations=PBKDF2_ITER).derive(code.encode())
-
-
-def encrypt(obj, code):
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    salt, iv = os.urandom(16), os.urandom(12)
-    ct = AESGCM(_key(code, salt)).encrypt(iv, json.dumps(obj, separators=(",", ":")).encode(), None)
-    b = lambda x: base64.b64encode(x).decode()
-    return {"v": 1, "kdf": "PBKDF2-SHA256", "iter": PBKDF2_ITER, "salt": b(salt), "iv": b(iv), "data": b(ct)}
-
-
-def decrypt(env, code):
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    d = lambda k: base64.b64decode(env[k])
-    raw = AESGCM(_key(code, d("salt"))).decrypt(d("iv"), d("data"), None)
-    return json.loads(raw)
 
 
 # ------------------------------------------------------------------ Helpers
@@ -350,9 +321,18 @@ def _date(d):
     return None
 
 
+ID_KEYS = {"userProfilePK", "userId", "deviceId", "primaryTrainingDevice"}  # compte et appareil Garmin : jamais publiés
+
+
+def _scrub(o):
+    if isinstance(o, dict):
+        return {k: _scrub(v) for k, v in o.items() if k not in ID_KEYS}
+    return [_scrub(v) for v in o] if isinstance(o, list) else o
+
+
 def _raw(o, n=1500):
     try:
-        return json.dumps(o, ensure_ascii=False)[:n]
+        return json.dumps(_scrub(o), ensure_ascii=False)[:n]
     except Exception:
         return None
 
@@ -650,7 +630,6 @@ def fetch_profile(api, start, today, prev=None):
 
 # ------------------------------------------------------------------ Point d'entrée
 def run(api):
-    code = os.environ.get("RECUP_CODE", "").strip()
     cfg = {}
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -664,12 +643,6 @@ def run(api):
             state = json.loads(JSON_FILE.read_text(encoding="utf-8"))
         except Exception:
             print("Récup : fichier illisible, on repart de zéro.")
-    elif ENC_FILE.exists() and code:
-        try:
-            state = decrypt(json.loads(ENC_FILE.read_text()), code)
-            print("Récup : migration de l'ancien fichier chiffré vers recovery.json.")
-        except Exception:
-            print("Récup : ancien fichier chiffré illisible, on repart de zéro.")
     days = state.get("days", {})
 
     today = datetime.now(TZ).date()
@@ -719,7 +692,5 @@ def run(api):
         return True
     new["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     JSON_FILE.write_text(json.dumps(new, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    if ENC_FILE.exists():
-        ENC_FILE.unlink()
     print(f"Récup : {len(recent) + len(missing)} jours mis à jour, {len(days)} jours au total.")
     return True
