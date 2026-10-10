@@ -294,7 +294,7 @@ async function open(id) {
   if (isRun(a)) return openRun(a, body);
   body.innerHTML = header(a) + `<p class="note">Analyse en cours…</p>`;
   const st = await stream(id);
-  const plan = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10)) : null;
+  const plan = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10), "bike") : null;
   const an = st ? analyze(a, st) : null;
   const co = st && plan && st.p && plan.place === "mw" && isIndoor(a) ? compliance(st, plan) : null;
   body.innerHTML = header(a) + tiles(a, an) + verdict(a, an, co, plan) + (st ? `<section class="bm-sec"><h4>Déroulé <small>${st.p ? "puissance" : "vitesse"}${st.h ? " et cardio" : ""}${co ? " · en pointillés : le prévu" : ""}</small></h4><div id="bmChart"></div></section>` : "")
@@ -309,7 +309,7 @@ function noStreamWhy(a) {
   return days > 42 ? "Le détail seconde par seconde n'est gardé que pour les sorties des 6 dernières semaines : bilan limité au résumé Garmin." : "Le détail de cette séance arrive au prochain passage de la mise à jour Garmin (toutes les heures).";
 }
 function header(a) {
-  const T = window.Plan && Plan.TYPES, pl = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10)) : null;
+  const T = window.Plan && Plan.TYPES, pl = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10), "bike") : null;
   return `<header class="bm-head"><div><div class="bm-k">Bilan de séance${pl ? ` · prévu : <span class="bm-badge" style="--tc:${T[pl.t].c}">${T[pl.t].l}</span>` : ""}</div><h3 id="bmTitle">${esc(a.n)}</h3>
     <div class="bm-sub">${a.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} à ${pad(a.dt.getHours())} h ${pad(a.dt.getMinutes())} · ${isIndoor(a) ? "home trainer" : "dehors"}</div></div>
     <button class="bm-x" data-bmclose aria-label="Fermer">✕</button></header>`;

@@ -25,8 +25,8 @@ function load({ hash = "", acts = [], course = null, extra = {} } = {}) {
     document: { addEventListener() {}, getElementById: () => null, createElement: () => ({ style: {}, remove() {} }), body: { appendChild() {} } },
     location: { hash, origin: "https://exemple.test", pathname: "/" }, history: { replaceState: (a, b, u) => calls.replace.push(u) },
     Nav: { curTab: () => "velo" }, atob, btoa, isIndoor: a => a.t === "VirtualRide" || a.tr === 1, nf: n => String(n), esc: s => String(s), ...extra };
-  vm.createContext(ctx); vm.runInContext(read("../charge.js"), ctx);
-  if (course) win.Course = course;
+  vm.createContext(ctx); vm.runInContext(read("../charge.js"), ctx); ctx.Charge = win.Charge;   // dans le navigateur window est l'objet global
+  if (course) { win.Course = course; ctx.Course = course; }
   vm.runInContext(read("../plan.js"), ctx);
   return { Plan: win.Plan, ctx, store, clock, calls, win };
 }
