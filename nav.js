@@ -8,17 +8,23 @@
 //   night    thème sombre de la page (et theme-color) tant que l'onglet est ouvert
 //   controls true = affiche la barre de choix de l'année / du sport et « mis à jour »
 //   aliases  anciens hash qui mènent à cet onglet
+//   icon     tracés SVG (24 × 24, trait) de l'icône, affichée dans la barre d'onglets du bas sur mobile
 // Ajouter ou renommer un onglet = une ligne dans TABS. Chargé avant recup.js (qui lance le premier Nav.apply).
 (() => {
 const $ = id => document.getElementById(id);
 const TABS = [
-  { id: "synthese", label: "Synthèse", title: "Ma forme", open: () => window.Synthese?.open() },
-  { id: "activites", label: "Activités", aliases: ["velo"], title: () => S.cfg.titre || "Mes kilomètres", panel: "app", controls: true, open: () => { if (S.all.length) render(); } },
-  { id: "recup", label: "Récup", title: "Ma récupération", night: true, open: () => window.Recup?.open() },
-  { id: "plan", label: "Plan", title: "Mon plan", open: () => window.Plan?.open() },
-  { id: "sortie", label: "Sortie", title: "Planifier une sortie", open: () => window.Sortie?.open() },
+  { id: "synthese", label: "Synthèse", title: "Ma forme", open: () => window.Synthese?.open(),
+    icon: '<path d="M3.8 17A9 9 0 1 1 20.2 17"/><path d="M12 13.3l4.3-4.6"/><circle cx="12" cy="13.3" r="1.3"/>' },
+  { id: "activites", label: "Activités", aliases: ["velo"], title: "Mes activités", panel: "app", controls: true, open: () => { if (S.all.length) render(); },
+    icon: '<path d="M5 19v-6M10 19V6M15 19v-9M20 19v-4"/>' },
+  { id: "recup", label: "Récup", title: "Ma récupération", night: true, open: () => window.Recup?.open(),
+    icon: '<path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/>' },
+  { id: "plan", label: "Plan", title: "Mon plan", open: () => window.Plan?.open(),
+    icon: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
+  { id: "sortie", label: "Sortie", title: "Planifier une sortie", open: () => window.Sortie?.open(),
+    icon: '<circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8.2 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.8"/>' },
 ];
-const COLOR = { day: "#f6f3ee", night: "#0c0f1d" };
+const COLOR = { day: "#ffffff", night: "#141416" };   // barre d'état (theme-color) = fond de la barre du haut : blanc le jour, gris nuit sur l'onglet Récup
 const find = h => TABS.find(t => t.id === h || (t.aliases || []).includes(h));
 const panelOf = t => $(t.panel || t.id);
 
@@ -37,11 +43,10 @@ function apply() {
   t.open();
 }
 function mount() {
-  const header = document.querySelector("header");
   const nav = document.createElement("nav");
-  nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist");
-  nav.innerHTML = TABS.map(t => `<button role="tab" data-tab="${t.id}">${t.label}</button>`).join("");
-  header.insertBefore(nav, header.querySelector(".controls"));
+  nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist"); nav.setAttribute("aria-label", "Onglets");
+  nav.innerHTML = TABS.map(t => `<button role="tab" data-tab="${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${t.icon || ""}</svg><span>${t.label}</span></button>`).join("");
+  document.querySelector(".appbar-in").appendChild(nav);   // ordinateur : dans la barre du haut ; mobile : fixée en bas (theme.css)
   nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
   let prev = null;
   const first = TABS.map(panelOf).find(Boolean);   // un onglet sans élément (Synthèse) se place avant le premier panneau existant

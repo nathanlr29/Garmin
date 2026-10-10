@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Breizh Watts</title>
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141416" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,6 +14,7 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="recup.css">
 <link rel="stylesheet" href="plan.css">
 <link rel="stylesheet" href="sortie.css">
@@ -21,169 +22,25 @@
 <link rel="stylesheet" href="synthese.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap" rel="stylesheet">
-<style>
-:root{
-  --bg:#f6f3ee; --card:#fffdf9; --ink:#1b1a18; --muted:#77716a; --line:#e7e1d8;
-  --accent:#e8501c; --accent-2:#f39a3d; --accent-soft:#fbe3d6; --ghost:#cfc7bb;
-  --good:#2f8f5b; --bad:#c2410c;
-  --h0:#ece7df; --h1:#f9cfb6; --h2:#f4a274; --h3:#ec7238; --h4:#d2460f; --h5:#8f2a05;
-  --shadow:0 1px 0 rgba(0,0,0,.03),0 8px 24px -16px rgba(60,40,20,.25);
-  --radius:20px;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#121110; --card:#1c1a18; --ink:#f3efe9; --muted:#9a938a; --line:#2c2926;
-  --accent:#ff6a2b; --accent-2:#ffab52; --accent-soft:#3a2216; --ghost:#4a4540;
-  --h0:#262321; --h1:#4d2a1a; --h2:#7c3818; --h3:#b94a17; --h4:#ec6a2c; --h5:#ffb27a;
-  --shadow:0 1px 0 rgba(255,255,255,.02),0 8px 24px -16px rgba(0,0,0,.8);
-}}
-:root[data-theme="dark"]{
-  --bg:#121110; --card:#1c1a18; --ink:#f3efe9; --muted:#9a938a; --line:#2c2926;
-  --accent:#ff6a2b; --accent-2:#ffab52; --accent-soft:#3a2216; --ghost:#4a4540;
-  --h0:#262321; --h1:#4d2a1a; --h2:#7c3818; --h3:#b94a17; --h4:#ec6a2c; --h5:#ffb27a;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html{-webkit-text-size-adjust:100%}
-body{background:var(--bg);color:var(--ink);font:15px/1.45 "Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
-  font-variant-numeric:tabular-nums;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);min-height:100vh}
-.wrap{max-width:1120px;margin:0 auto;padding:20px 16px 48px}
-header{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:end;justify-content:space-between;margin-bottom:18px}
-h1{font-size:15px;font-weight:600;letter-spacing:.02em;color:var(--muted);text-transform:uppercase}
-.brand{display:flex;align-items:center;gap:9px}.brand img{border-radius:7px;flex:0 0 auto}
-.updated{font-size:12.5px;color:var(--muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.updated a{color:var(--accent);text-decoration:none;font-weight:600}
-.controls{display:flex;flex-wrap:wrap;gap:8px;width:100%}
-.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;max-width:100%}
-.chips::-webkit-scrollbar{display:none}
-.chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 13px;
-  font:inherit;font-size:13.5px;font-weight:500;cursor:pointer;white-space:nowrap}
-.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.sep{width:1px;background:var(--line);margin:4px 2px}
+<link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;0,700;1,500&family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
 
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);min-width:0}
-.card h2{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.03em;text-transform:uppercase;margin-bottom:12px;
-  display:flex;justify-content:space-between;gap:6px 12px;align-items:baseline;flex-wrap:wrap}
-.card h2 small{text-transform:none;letter-spacing:0;font-weight:500}
-.span12{grid-column:span 12}.span8{grid-column:span 8}.span6{grid-column:span 6}.span4{grid-column:span 4}
-@media (max-width:860px){.span8,.span6,.span4{grid-column:span 12}}
-
-/* Hero */
-.hero{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:center;overflow:hidden;position:relative}
-@media (max-width:700px){.hero{grid-template-columns:1fr}}
-.big{font-weight:850;font-stretch:118%;font-size:clamp(68px,17vw,148px);line-height:.88;letter-spacing:-.035em}
-.big .unit{font-size:.3em;font-weight:700;letter-spacing:0;color:var(--muted);margin-left:.15em}
-.sub{color:var(--muted);margin-top:8px;font-size:15px}
-.delta{display:inline-block;margin-top:12px;padding:4px 10px;border-radius:999px;font-weight:600;font-size:13.5px;background:var(--accent-soft);color:var(--accent)}
-.goal{display:flex;flex-direction:column;gap:10px}
-.goalbar{height:14px;border-radius:999px;background:var(--h0);position:relative;overflow:visible}
-.goalbar .fill{position:absolute;inset:0 auto 0 0;border-radius:999px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
-.goalbar .tick{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink);opacity:.55;border-radius:2px}
-.goalrow{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
-.goalrow b{color:var(--ink);font-weight:650}
-.goalnote{font-size:14px}
-.goalnote b{font-weight:650}
-
-/* Tiles */
-.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-@media (max-width:860px){.tiles{grid-template-columns:repeat(2,1fr);gap:10px}}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
-.tile .l{font-size:12.5px;color:var(--muted);font-weight:500}
-.tile .v{font-size:clamp(22px,5.4vw,30px);font-weight:800;font-stretch:110%;letter-spacing:-.02em;line-height:1.15;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile .v small{font-size:.5em;font-weight:600;color:var(--muted);margin-left:2px;letter-spacing:0}
-.tile .s{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-/* Charts */
-svg{display:block;width:100%;height:auto;overflow:visible}
-.axis text{fill:var(--muted);font-size:11px}
-.gridline{stroke:var(--line);stroke-width:1}
-.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
-.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
-.heatwrap{overflow-x:auto;scrollbar-width:thin;padding-bottom:4px}
-.heatlegend{display:flex;gap:4px;align-items:center;font-size:11.5px;color:var(--muted);justify-content:flex-end;margin-top:8px}
-.heatlegend span{width:11px;height:11px;border-radius:3px;display:inline-block}
-
-/* Anecdotes */
-.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-@media (max-width:860px){.facts{grid-template-columns:1fr 1fr}}
-@media (max-width:520px){.facts{grid-template-columns:1fr}}
-.fact{border-radius:16px;padding:16px;background:var(--bg);border:1px solid var(--line);display:flex;gap:14px;align-items:flex-start}
-.fact .n{font-weight:850;font-stretch:115%;font-size:28px;line-height:1;color:var(--accent);letter-spacing:-.02em;min-width:64px}
-.fact .t{font-size:14px;line-height:1.35}
-.fact .t small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
-.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:5px 12px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-transform:none;letter-spacing:0}
-
-/* Records */
-.records{display:grid;gap:2px}
-.rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:baseline}
-.rec:last-child{border-bottom:0}
-a.rec{color:inherit;text-decoration:none;border-radius:8px}
-a.rec:hover .val{color:var(--accent)}
-a.rec:hover .rn{text-decoration:underline}
-a.rec .rd::after{content:" ↗";color:var(--accent)}
-#heat rect.has{cursor:pointer}
-.pop{position:fixed;z-index:10;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px -12px rgba(0,0,0,.35);padding:8px;min-width:220px;max-width:min(320px,calc(100vw - 16px));display:none}
-.pop b{display:block;font-size:12px;color:var(--muted);font-weight:600;padding:4px 8px 6px}
-.pop a{display:flex;justify-content:space-between;gap:12px;padding:8px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:13.5px}
-.pop a:hover{background:var(--bg)}
-.pop a span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pop a span:last-child{flex:0 0 auto;color:var(--accent);font-weight:600}
-.rec .k{color:var(--muted);font-size:13.5px}
-.rec .val{font-weight:700;text-align:right;min-width:0}
-.rec .rs{grid-column:1/-1;display:flex;justify-content:flex-end;gap:4px;color:var(--muted);font-size:12px;white-space:nowrap;min-width:0}
-.rec .rs .rn{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.rec .rs .rd{flex:0 0 auto}
-
-/* Rides */
-.rides{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-@media (max-width:860px){.rides{grid-template-columns:1fr 1fr}}
-@media (max-width:520px){.rides{grid-template-columns:1fr}}
-.ride{border:1px solid var(--line);border-radius:16px;padding:14px;background:var(--bg);display:grid;grid-template-columns:84px 1fr;gap:12px;align-items:center;text-decoration:none;color:inherit}
-.ride .map{width:84px;height:84px;border-radius:12px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;overflow:hidden}
-.ride .map svg{width:76px;height:76px}
-.ride .nm{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ride .dt{font-size:12.5px;color:var(--muted)}
-.ride .st{display:flex;gap:10px;font-size:13px;margin-top:6px;flex-wrap:wrap}
-.ride .st b{font-weight:700}
-.indoor{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.05em}
-
-/* Habits */
-.hbar{display:grid;grid-template-columns:34px 1fr 64px;gap:10px;align-items:center;font-size:13px;margin:6px 0}
-.hbar .tr{height:10px;border-radius:999px;background:var(--h0);overflow:hidden}
-.hbar .tr div{height:100%;background:var(--accent);border-radius:999px}
-.hbar .num{text-align:right;color:var(--muted)}
-.split{display:flex;height:12px;border-radius:999px;overflow:hidden;margin:8px 0 6px;background:var(--h0)}
-.split div:first-child{background:var(--accent)}
-.split div:last-child{background:var(--ghost)}
-
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line)}
-th{font-size:12px;color:var(--muted);font-weight:600}
-th:first-child,td:first-child{text-align:left}
-tr.cur td{font-weight:700}
-.yearbar{height:6px;border-radius:999px;background:var(--accent);opacity:.85}
-
-.empty{padding:40px 20px;text-align:center;color:var(--muted)}
-.empty b{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
-.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12px;padding:6px 9px;border-radius:8px;opacity:0;transition:opacity .12s;z-index:9;white-space:nowrap}
-footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
-@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-</style>
 </head>
 <body>
+<header class="appbar">
+  <div class="appbar-in">
+    <a class="brand" href="#synthese" aria-label="Breizh Watts : accueil"><img src="icon-180.png" alt="" width="28" height="28"><span>Breizh Watts</span></a>
+  </div>
+</header>
 <div class="wrap">
-  <header>
-    <div>
-      <div class="brand"><img src="icon-180.png" alt="" width="26" height="26"><h1 id="title">Breizh Watts</h1></div>
-      <div class="updated" id="updated">Chargement…</div>
-    </div>
+  <div class="pagehead">
+    <div class="pagetitle"><h1 id="title">Breizh Watts</h1><div class="updated" id="updated">Chargement…</div></div>
     <div class="controls">
       <div class="chips" id="years" role="group" aria-label="Année"></div>
       <div class="chips" id="sports" role="group" aria-label="Type d'activité"></div>
     </div>
-  </header>
+  </div>
   <main id="app"></main>
-  <footer>Données Garmin Connect · Page générée automatiquement</footer>
+  <footer>Données Garmin Connect</footer>
 </div>
 <div id="recProbe" hidden></div>
 <div class="tip" id="tip"></div>
@@ -195,7 +52,7 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center}
 const RIDE_TYPES = new Set(["Ride","VirtualRide","GravelRide","MountainBikeRide","EBikeRide","EMountainBikeRide","Velomobile","Handcycle"]);
 // Course = Charge.RUN_TYPES (charge.js est chargé après ce script : lu au moment du filtre, jamais au chargement)
 const isRunAct = a => !!(window.Charge && Charge.RUN_TYPES.has(a.t));
-const isRunIndoor = a => a.t==="treadmill_running" || a.t==="virtual_run";   // tapis : badge TAPIS, pas de tracé (isIndoor reste celui du vélo)
+const isRunIndoor = a => a.t==="treadmill_running" || a.t==="virtual_run";   // tapis : mention « Tapis », pas de tracé (isIndoor reste celui du vélo)
 const SPORTS = [
   {id:"bike", label:"Vélo", f:a=>RIDE_TYPES.has(a.t)},
   {id:"out", label:"Extérieur", f:a=>RIDE_TYPES.has(a.t) && !isIndoor(a)},
@@ -262,8 +119,7 @@ function weekKey(dt){const t=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate(
 
 // ------------------------------------------------------------------ Render
 function render(){
-  document.title=S.cfg.titre||"Mes kilomètres";
-  document.getElementById("title").textContent=S.cfg.titre||"Mes kilomètres";
+  document.title=S.cfg.titre||"Breizh Watts";   // le titre de la page (h1) est posé par Nav
   renderUpdated(); renderChips();
   const app=document.getElementById("app");
   if(!S.all.length){
@@ -279,7 +135,7 @@ function render(){
 
   app.innerHTML=`
   <div class="grid">
-    <section class="card hero span12" id="hero"></section>
+    <section class="card hud hero span12" id="hero"></section>
     <section class="span12"><div class="tiles" id="tiles"></div></section>
     <section class="card span12" id="chain"${runMode()?" hidden":""}></section>
     <section class="card span8"><h2>Kilomètres cumulés <span class="legend" id="cumLegend"></span></h2><div id="cum"></div></section>
@@ -317,7 +173,7 @@ function renderUpdated(){
     txt=m<1?"Mis à jour à l'instant":m<60?`Mis à jour il y a ${m} min`:m<1440?`Mis à jour il y a ${Math.round(m/60)} h`:`Mis à jour le ${u.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`}
   let repo=S.cfg.depot;
   if(!repo&&location.hostname.endsWith("github.io")){const user=location.hostname.split(".")[0];const name=location.pathname.split("/").filter(Boolean)[0]||`${user}.github.io`;repo=`${user}/${name}`}
-  el.innerHTML=esc(txt)+(repo?` · <a href="https://github.com/${esc(repo)}/actions/workflows/update.yml" target="_blank" rel="noopener">Forcer la mise à jour ↗</a>`:"");
+  el.innerHTML=`<span>${esc(txt)}</span>`+(repo?`<a href="https://github.com/${esc(repo)}/actions/workflows/update.yml" target="_blank" rel="noopener">Forcer la mise à jour</a>`:"");
 }
 
 function renderChips(){
@@ -354,11 +210,11 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
     const ahead=km-expected;
     const left=Math.max(0,goal-km), weeksLeft=Math.max(1,(n-elapsed)/7);
     let note;
-    if(km>=goal) note=`<b>Objectif atteint</b> — ${nf(km-goal)} km de bonus.`;
-    else if(isCur) note=`${ahead>=0?`<b>${nf(ahead)} km d'avance</b> sur le rythme`:`<b>${nf(-ahead)} km de retard</b> sur le rythme`} · encore <b>${nf(left/weeksLeft)} km/sem.</b> pour y arriver.`;
+    if(km>=goal) note=`<b>Objectif atteint</b> : ${nf(km-goal)} km de bonus.`;
+    else if(isCur) note=`${ahead>=0?`<b>${nf(ahead)} km d'avance</b> sur le rythme.`:`<b>${nf(-ahead)} km de retard</b> sur le rythme.`} Encore <b>${nf(left/weeksLeft)} km par semaine</b> pour y arriver.`;
     else note=`Objectif manqué de <b>${nf(left)} km</b>.`;
     goalHtml=`<div class="goal">
-      <div class="goalrow"><span>Objectif <b>${nf(goal)} km</b></span><span><b>${nf(pct)} %</b></span></div>
+      <div class="goalrow"><span>Objectif ${Y} : <b>${nf(goal)} km</b></span><span><b>${nf(pct)} %</b></span></div>
       <div class="goalbar"><div class="fill" style="width:0"></div>${isCur?`<div class="tick" style="left:${(elapsed/n*100).toFixed(2)}%" title="Rythme attendu aujourd'hui"></div>`:""}</div>
       <div class="goalnote">${note}</div>
       ${isCur?`<div class="goalrow"><span>Projection au 31 déc.</span><b>${nf(proj)} km</b></div>`:""}
@@ -371,9 +227,9 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
   const label=S.sport==="in"?"sur home trainer":S.sport==="out"?"en extérieur":S.sport==="all"?"toutes activités":S.sport==="run"?"en course à pied":"à vélo";
   document.getElementById("hero").innerHTML=`
     <div>
+      <div class="kick">${label[0].toUpperCase()+label.slice(1)} en ${Y}${isCur?`, au ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`:""}</div>
       <div class="big"><span id="bigkm">0</span><span class="unit">km</span></div>
-      <div class="sub">${label} en ${Y}${isCur?` · au ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`:""}</div>
-      ${prev.length?`<span class="delta" style="${diff<0?"background:var(--h0);color:var(--muted)":""}">${diff>=0?"+":"−"}${nf(Math.abs(diff))} km vs ${Y-1} ${isCur?"à la même date":""}</span>`:""}
+      ${prev.length?`<div class="delta${diff<0?" down":""}"><b>${diff>=0?"↑ +":"↓ −"}${nf(Math.abs(diff))} km</b> par rapport à ${Y-1}${isCur?" à la même date":""}</div>`:""}
     </div>${goalHtml}`;
   countUp(document.getElementById("bigkm"),km);
 }
@@ -445,16 +301,15 @@ function renderCum(cur,prev,todayIdx,isCur,Y){
   const path=(arr,end)=>{let d="";const st=Math.max(1,Math.floor(arr.length/240));for(let i=0;i<=end;i+=st)d+=(i?"L":"M")+x(i).toFixed(1)+","+y(arr[i]).toFixed(1);d+="L"+x(end).toFixed(1)+","+y(arr[end]).toFixed(1);return d};
   const ticks=niceTicks(maxY,4);
   let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilomètres cumulés">
-  <defs><linearGradient id="ga" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
   <g class="axis">${ticks.map(t=>`<line class="gridline" x1="${m.l}" x2="${W-m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l-8}" y="${y(t)+4}" text-anchor="end">${nf(t)}</text>`).join("")}
   ${MONTHS.map((mo,i)=>{const di=dayOfYear(new Date(Y,i,1));return W<520&&i%2?"":`<text x="${x(di)+2}" y="${H-6}">${mo}</text>`}).join("")}</g>`;
   if(showGoal) s+=`<line x1="${x(0)}" y1="${y(0)}" x2="${x(365)}" y2="${y(goal)}" stroke="var(--muted)" stroke-dasharray="4 5" stroke-width="1.2"/>`;
-  if(prev.length) s+=`<path d="${path(prev,prev.length-1)}" fill="none" stroke="var(--ghost)" stroke-width="2.2" stroke-linejoin="round"/>`;
+  if(prev.length) s+=`<path d="${path(prev,prev.length-1)}" fill="none" stroke="var(--ghost)" stroke-width="2" stroke-linejoin="round"/>`;
   const cp=path(cur,curEnd);
-  s+=`<path d="${cp}L${x(curEnd)},${y(0)}L${x(0)},${y(0)}Z" fill="url(#ga)"/><path d="${cp}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+  s+=`<path d="${cp}L${x(curEnd)},${y(0)}L${x(0)},${y(0)}Z" fill="var(--accent)" fill-opacity=".09"/><path d="${cp}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
   s+=`<circle cx="${x(curEnd)}" cy="${y(cur[curEnd])}" r="5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
   const lx=x(curEnd), anchor=lx>W-90?"end":"start";
-  s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="13" fill="var(--ink)">${nf(cur[curEnd])} km</text>`;
+  s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="15" font-style="italic" font-family="Barlow Condensed,Barlow,sans-serif" fill="var(--ink)">${nf(cur[curEnd])} km</text>`;
   s+=`<line id="cumCursor" y1="${m.t}" y2="${m.t+ih}" stroke="var(--muted)" stroke-width="1" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="cumHit"/></svg>`;
   box.innerHTML=s;
   document.getElementById("cumLegend").innerHTML=`<span><i style="background:var(--accent)"></i>${Y}</span><span><i style="background:var(--ghost)"></i>${Y-1}</span>${showGoal?`<span><i style="background:repeating-linear-gradient(90deg,var(--muted) 0 3px,transparent 3px 6px)"></i>objectif</span>`:""}`;
@@ -478,8 +333,8 @@ function renderMonths(acts,prev,Y){
   let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Kilomètres par mois"><g class="axis">`;
   for(let i=0;i<12;i++){
     const cx=m.l+gw*i+gw/2, hb=b[i]/max*ih, ha=a[i]/max*ih;
-    s+=`<rect x="${cx-bw/2-3}" y="${m.t+ih-hb}" width="${bw+6}" height="${hb}" rx="5" fill="var(--ghost)" opacity=".45"/>`;
-    s+=`<rect x="${cx-bw/2}" y="${m.t+ih-ha}" width="${bw}" height="${Math.max(ha,a[i]?2:0)}" rx="5" fill="${i===best?"var(--accent)":"var(--accent-2)"}" data-i="${i}" class="mb"/>`;
+    s+=`<rect x="${cx-bw/2-3}" y="${m.t+ih-hb}" width="${bw+6}" height="${hb}" rx="2" fill="var(--ghost)" opacity=".4"/>`;
+    s+=`<rect x="${cx-bw/2}" y="${m.t+ih-ha}" width="${bw}" height="${Math.max(ha,a[i]?2:0)}" rx="2" fill="var(--accent)" ${i===best?"":'fill-opacity=".55"'} data-i="${i}" class="mb"/>`;
     if(a[i]&&(bw>=22||i===best)) s+=`<text x="${cx}" y="${m.t+ih-ha-6}" text-anchor="middle" font-weight="${i===best?700:500}" fill="var(--${i===best?"ink":"muted"})">${a[i]>=1000?nf(a[i]/1000,1)+"k":nf(a[i])}</text>`;
     s+=`<text x="${cx}" y="${H-5}" text-anchor="middle">${W<480?MONTHS[i][0].toUpperCase():MONTHS[i].replace(".","")}</text>`;
   }
@@ -513,7 +368,7 @@ function renderHeat(daily,Y,isCur,todayIdx,acts){
   for(let mo=0;mo<12;mo++){const di=dayOfYear(new Date(Y,mo,1));s+=`<text x="${30+Math.floor((di+off)/7)*pitch}" y="11">${MONTHS[mo]}</text>`}
   s+="</g>";
   for(let i=0;i<n;i++){const k=i+off,wx=Math.floor(k/7),dy=k%7;const fut=isCur&&i>todayIdx;
-    s+=`<rect x="${30+wx*pitch}" y="${18+dy*pitch}" width="${cs}" height="${cs}" rx="${cs>12?3:2}" fill="var(--h${lv(daily[i])})" ${fut?'opacity=".35"':""} data-i="${i}" ${isCur&&i===todayIdx?'stroke="var(--ink)" stroke-width="1.5"':""}/>`}
+    s+=`<rect x="${30+wx*pitch}" y="${18+dy*pitch}" width="${cs}" height="${cs}" rx="2" fill="var(--h${lv(daily[i])})" ${fut?'opacity=".35"':""} data-i="${i}" ${isCur&&i===todayIdx?'stroke="var(--ink)" stroke-width="1.5"':""}/>`}
   box.innerHTML=s+"</svg>";
   const active=daily.filter(v=>v>0).length;
   document.getElementById("heatInfo").textContent=`${active} jours ${runMode()?"courus":"roulés"} sur ${isCur?todayIdx+1:n}`;
@@ -665,7 +520,7 @@ function renderFacts(acts,Y,isCur,todayIdx){
 
 // ------------------------------------------------------------------ Rides
 function traceSvg(pts){
-  if(!pts||pts.length<2) return `<svg viewBox="0 0 76 76"><circle cx="38" cy="38" r="14" fill="none" stroke="var(--ghost)" stroke-width="3"/><path d="M38 24v14l9 6" stroke="var(--ghost)" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
+  if(!pts||pts.length<2) return `<svg viewBox="0 0 76 76"><path d="M22 52c8-4 10-22 18-24s8 14 16 10" fill="none" stroke="var(--ghost)" stroke-width="2.4" stroke-dasharray="2 5" stroke-linecap="round"/></svg>`;
   const lat0=pts[0][0]*Math.PI/180,kx=Math.cos(lat0);
   const xs=pts.map(p=>p[1]*kx),ys=pts.map(p=>-p[0]);
   const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
@@ -673,20 +528,31 @@ function traceSvg(pts){
   const d=pts.map((p,i)=>(i?"L":"M")+((xs[i]-minx)*sc+ox).toFixed(1)+","+((ys[i]-miny)*sc+oy).toFixed(1)).join("");
   return `<svg viewBox="0 0 76 76"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
+// Fil des dernières sorties, façon Strava : qui / quand, rangée de chiffres avec libellés, tracé à droite.
+// Séance d'intérieur (pas de tracé) : petit écran noir avec la puissance moyenne (allure sur tapis), comme sur MyWhoosh / Zwift.
+const SPORT_ICO={
+  bike:'<path d="M5.5 16.5 9 9h6l3.5 7.5M9 9l3 7.5H5.5M15 9l-1-3h-2"/><circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/>',
+  run:'<circle cx="14.5" cy="4.5" r="1.8"/><path d="M7 21l3.2-5.5 3.3 2.5V22M5.5 11.5 9 8.5h4.5l2 3.5 3 1M10.2 15.5 12 9"/>'};
+function rideHtml(a){
+  const run=isRunAct(a), indoor=run?isRunIndoor(a):isIndoor(a), pace=actPace(a);
+  const st=[["Distance",`${nf(a.km,1)} km`]];
+  if(run){ if(pace) st.push(["Allure",`${paceTxt(pace)} /km`]); st.push(["Temps",hfmt(a.mt)]); if(a.el&&!indoor) st.push(["Dénivelé",`${nf(a.el)} m`]); else if(a.hr>0) st.push(["FC",`${nf(a.hr)} bpm`]); }
+  else { if(a.el) st.push(["Dénivelé",`${nf(a.el)} m`]); st.push(["Temps",hfmt(a.mt)]);
+    if(a.mt&&!indoor) st.push(["Vitesse",`${nf(a.km/a.mt*3600,1)} km/h`]); else if(a.w) st.push(["Puissance",`${a.w} W`]); }
+  const thumb=!indoor?`<div class="map">${traceSvg(S.traces[a.id])}</div>`
+    :run?`<div class="map in"><b>${pace?paceTxt(pace):hfmt(a.mt)}</b><small>${pace?"min/km":"durée"}</small></div>`
+    :`<div class="map in"><b>${a.w?a.w:hfmt(a.mt)}</b><small>${a.w?"W moy.":"durée"}</small></div>`;
+  const where=indoor?(run?"Tapis":"Home trainer"):"";
+  return `<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
+    <div class="who"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SPORT_ICO[run?"run":"bike"]}</svg></span>
+      <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${where?`, <span class="indoor">${where}</span>`:""}</div></div></div>
+    <div class="st">${st.map(([l,v])=>`<div><span>${l}</span><b>${v}</b></div>`).join("")}</div>
+    ${thumb}</a>`;
+}
 function renderRides(){
   const sp=SPORTS.find(s=>s.id===S.sport)||SPORTS[0];
-  const L=S.all.filter(sp.f).slice(innerWidth<520?-5:-9).reverse();
-  if(runMode()){
-    document.getElementById("rides").innerHTML=L.map(a=>{const tapis=isRunIndoor(a);return `<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
-    <div class="map">${tapis?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
-    <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${tapis?' · <span class="indoor">TAPIS</span>':""}</div>
-    <div class="st"><span><b>${nf(a.km,1)}</b> km</span>${a.el?`<span><b>${nf(a.el)}</b> m D+</span>`:""}<span><b>${hfmt(a.mt)}</b></span>${actPace(a)?`<span><b>${paceTxt(actPace(a))}</b> /km</span>`:""}${a.hr>0?`<span><b>${nf(a.hr)}</b> bpm</span>`:""}</div></div></a>`}).join("")||`<div class="empty">Aucune sortie</div>`;
-    return;
-  }
-  document.getElementById("rides").innerHTML=L.map(a=>`<a class="ride" href="${actUrl(a)}" target="_blank" rel="noopener">
-    <div class="map">${isIndoor(a)?`<div style="text-align:center">${traceSvg(null)}</div>`:traceSvg(S.traces[a.id])}</div>
-    <div style="min-width:0"><div class="nm">${esc(a.n)}</div><div class="dt">${fmtDate(a.dt,true)}${isIndoor(a)?' · <span class="indoor">HOME TRAINER</span>':""}</div>
-    <div class="st"><span><b>${nf(a.km,1)}</b> km</span>${a.el?`<span><b>${nf(a.el)}</b> m D+</span>`:""}<span><b>${hfmt(a.mt)}</b></span>${a.mt&&!isIndoor(a)?`<span><b>${nf(a.km/a.mt*3600,1)}</b> km/h</span>`:a.w?`<span><b>${a.w}</b> W</span>`:""}</div></div></a>`).join("")||`<div class="empty">Aucune sortie</div>`;
+  const L=S.all.filter(sp.f).slice(innerWidth<520?-5:-10).reverse();
+  document.getElementById("rides").innerHTML=L.map(rideHtml).join("")||`<div class="empty">Aucune sortie</div>`;
 }
 
 function renderYears(){

@@ -67,8 +67,10 @@ assert.equal(ls.length, 3, "valeurs nulles et dates absentes écartées"); v = Y
 v = Y.listVariation(ls, NOW.getTime(), 30); assert.equal(v.cur, 260); assert.equal(Y.listVariation(ls, NOW.getTime(), 400), null, "pas assez de recul"); assert.equal(Y.listVariation([], NOW.getTime(), 30), null);
 // couleur du score de récup : mêmes seuils (75 / 50 / 25) que Recup.scoreColor
 assert.match(read("../recup.js"), /function scoreColor\(s\) \{ return s >= 75 \? "var\(--teal\)" : s >= 50 \? "var\(--accent-2\)" : s >= 25 \? "var\(--amber\)" : "var\(--rose\)"; \}/);
-assert.deepEqual([100, 75, 74, 50, 49, 25, 24, 0].map(Y.recupColor), ["#3cc9b4", "#3cc9b4", "#5aa9f2", "#5aa9f2", "#f2a93b", "#f2a93b", "#f2708a", "#f2708a"]);
-const night = read("../recup.css"); for (const c of ["--teal:#3cc9b4", "--accent-2:#5aa9f2", "--amber:#f2a93b", "--rose:#f2708a"]) assert.ok(night.includes(c), "couleur du thème nuit : " + c);
+assert.deepEqual([100, 75, 74, 50, 49, 25, 24, 0].map(Y.recupColor), ["var(--good)", "var(--good)", "var(--info)", "var(--info)", "var(--warn)", "var(--warn)", "var(--bad)", "var(--bad)"]);
+// dans le thème nuit (onglet Récup), les couleurs de Recup.scoreColor valent les états de la Synthèse
+const night = read("../recup.css"), nv = k => (night.match(new RegExp("html\\.night\\{[^}]*?" + k + ":(#[0-9a-f]{6})")) || [])[1];
+for (const [a, b] of [["--teal", "--good"], ["--accent-2", "--info"], ["--amber", "--warn"], ["--rose", "--bad"]]) { assert.ok(nv(a), "couleur du thème nuit : " + a); assert.equal(nv(a), nv(b), `thème nuit : ${a} = ${b}`); }
 
 console.log(`ok synthese : fond ${f0.ctl.toFixed(2)} · fatigue ${f0.atl.toFixed(2)} · forme ${f0.tsb.toFixed(2)} identiques au Plan ; variations, répartition, semaines, indicateurs`);
 

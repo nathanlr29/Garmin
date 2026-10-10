@@ -9,8 +9,8 @@ const rad = x => x * Math.PI / 180, deg = x => x * 180 / Math.PI;
 const hms = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${pad(m)}` : `${m} min${s < 600 && s % 60 ? ` ${pad(s % 60)} s` : ""}`; };
 const pct = v => `${nf(v * 100)} %`;
 const LS = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } } };
-const PZ = [[.55, "Z1 récup", "#a5b1bd"], [.75, "Z2 endurance", "#4aa3df"], [.9, "Z3 tempo", "#2fb380"], [1.05, "Z4 seuil", "#f2b134"], [1.2, "Z5 VO2max", "#ef6c3a"], [1.5, "Z6 anaérobie", "#d6336c"], [99, "Z7 sprint", "#862e9c"]];
-const HZC = ["#a5b1bd", "#4aa3df", "#2fb380", "#f2b134", "#ef6c3a"];
+const PZ = [[.55, "Z1 récup", "#8e8e93"], [.75, "Z2 endurance", "#2e8bff"], [.9, "Z3 tempo", "#3fbf5f"], [1.05, "Z4 seuil", "#ffc21a"], [1.2, "Z5 VO2max", "#ff6a2a"], [1.5, "Z6 anaérobie", "#ff2e2e"], [99, "Z7 sprint", "#a855f7"]];   // couleurs MyWhoosh / Zwift
+const HZC = ["#8e8e93", "#2e8bff", "#3fbf5f", "#ffc21a", "#ff6a2a"];
 const HZN = ["Z1 récup", "Z2 endurance", "Z3 tempo", "Z4 seuil", "Z5 VO2max"];
 const HZL = ["zone 1 (récup)", "zone 2 (endurance)", "zone 3 (tempo)", "zone 4 (seuil)", "zone 5 (VO2max)"];
 
@@ -78,7 +78,7 @@ const isRun = a => !!(window.Charge && Charge.RUN_TYPES.has(a.t));
 const runIndoor = a => a.t === "treadmill_running" || a.t === "virtual_run";
 const RUN_MIN_KMH = 3;          // en dessous de 3 km/h on est à l'arrêt : exclu des moyennes, des zones et de l'axe d'allure
 // zones d'allure autour de l'allure seuil : bornes hautes en fraction de la VITESSE seuil (< 78 %, 78-88, 88-95, 95-102, > 102 %)
-const RUN_ZONES = [[.78, "Z1 récup", "#a5b1bd"], [.88, "Z2 endurance", "#4aa3df"], [.95, "Z3 tempo", "#2fb380"], [1.02, "Z4 seuil", "#f2b134"], [99, "Z5 VO2max", "#ef6c3a"]];
+const RUN_ZONES = [[.78, "Z1 récup", "#8e8e93"], [.88, "Z2 endurance", "#2e8bff"], [.95, "Z3 tempo", "#3fbf5f"], [1.02, "Z4 seuil", "#ffc21a"], [99, "Z5 VO2max", "#ff6a2a"]];
 const RUN_DEC_SKIP = 600;       // découplage allure/FC : on retire les 10 premières minutes…
 const RUN_DEC_MIN = 1200;       // …et il faut au moins 20 minutes ensuite
 const RUN_CADENCE_LOW = 160;    // pas/min : en dessous, le bilan le signale
@@ -173,15 +173,15 @@ function chartRun(box, st, thrPace) {
   for (let t = 0; t <= n * dt; t += tStep) s += `<text x="${x(t / dt)}" y="${H - 5}" text-anchor="middle">${t >= 3600 ? `${Math.floor(t / 3600)} h${t % 3600 ? pad(t % 3600 / 60) : ""}` : `${t / 60}′`}</text>`;
   const step = hi - lo > 240 ? 60 : hi - lo > 120 ? 30 : 15;
   for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(p)}" y2="${y(p)}"/><text x="${m.l - 5}" y="${y(p) + 4}" text-anchor="end">${paceTxt(p)}</text>`;
-  if (H2.length) [hLo + 5, (hLo + hHi) / 2, hHi - 5].forEach(v => s += `<text x="${W - m.r + 5}" y="${yh(v) + 4}" fill="#c2255c">${Math.round(v)}</text>`);
+  if (H2.length) [hLo + 5, (hLo + hHi) / 2, hHi - 5].forEach(v => s += `<text x="${W - m.r + 5}" y="${yh(v) + 4}" fill="var(--hr)">${Math.round(v)}</text>`);
   s += "</g>";
   if (A.length) { let d = "", pen = false; st.a.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + ya(v).toFixed(1); pen = true; });
     s += `<path d="M${x(0)},${m.t + ih}${d.replace(/^M/, "L").replace(/M/g, "L")}L${x(n - 1)},${m.t + ih}Z" fill="var(--muted)" opacity=".18"/>`; }
   if (thrPace && thrPace >= lo && thrPace <= hi) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(thrPace)}" y2="${y(thrPace)}" stroke="var(--ink)" stroke-dasharray="4 3" opacity=".5"/>`;
   if (pc) { let d = "", pen = false; pc.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" opacity=".95"/>`; }
-  if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="#c2255c" stroke-width="1.6" stroke-linejoin="round"/>`; }
+  if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--hr)" stroke-width="1.6" stroke-linejoin="round"/>`; }
   s += `<line id="bmCur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="bmHit"/></svg>`;
-  box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>allure (min/km, plus rapide en haut)</span>${H2.length ? `<span><i style="background:#c2255c"></i>cardio (bpm)</span>` : ""}${A.length ? `<span><i style="background:var(--muted);opacity:.4"></i>altitude (${Math.round(aLo)}–${Math.round(aHi)} m)</span>` : ""}${thrPace && thrPace >= lo && thrPace <= hi ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>seuil ${paceTxt(thrPace)}</span>` : ""}</div>`;
+  box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>allure (min/km, plus rapide en haut)</span>${H2.length ? `<span><i style="background:var(--hr)"></i>cardio (bpm)</span>` : ""}${A.length ? `<span><i style="background:var(--muted);opacity:.4"></i>altitude (${Math.round(aLo)}–${Math.round(aHi)} m)</span>` : ""}${thrPace && thrPace >= lo && thrPace <= hi ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>seuil ${paceTxt(thrPace)}</span>` : ""}</div>`;
   const svg = box.querySelector("svg"), cur = box.querySelector("#bmCur"), hit = box.querySelector("#bmHit");
   const mv = e => { const r = svg.getBoundingClientRect(), i = clamp(Math.round(((e.clientX - r.left) * W / r.width - m.l) / iw * (n - 1)), 0, n - 1);
     cur.setAttribute("x1", x(i)); cur.setAttribute("x2", x(i)); cur.setAttribute("opacity", .6);
@@ -310,7 +310,7 @@ function noStreamWhy(a) {
 }
 function header(a) {
   const T = window.Plan && Plan.TYPES, pl = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10)) : null;
-  return `<header class="bm-head"><div><div class="bm-k">Bilan de séance${pl ? ` · prévu : <span class="bm-badge" style="background:${T[pl.t].c}">${T[pl.t].l}</span>` : ""}</div><h3 id="bmTitle">${esc(a.n)}</h3>
+  return `<header class="bm-head"><div><div class="bm-k">Bilan de séance${pl ? ` · prévu : <span class="bm-badge" style="--tc:${T[pl.t].c}">${T[pl.t].l}</span>` : ""}</div><h3 id="bmTitle">${esc(a.n)}</h3>
     <div class="bm-sub">${a.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} à ${pad(a.dt.getHours())} h ${pad(a.dt.getMinutes())} · ${isIndoor(a) ? "home trainer" : "dehors"}</div></div>
     <button class="bm-x" data-bmclose aria-label="Fermer">✕</button></header>`;
 }
@@ -375,8 +375,8 @@ function windHtml(a, w) {
   if (!w) return `<h4>Vent subi</h4><p class="note">Météo du jour indisponible pour cette sortie.</p>`;
   const cost = w.cost, c = Math.abs(cost) >= 60;
   return `<h4>Vent subi <small>${nf(w.ws)} km/h en moyenne sur ton parcours</small></h4>
-    <div class="bm-zbar"><div style="width:${w.face * 100}%;background:#e03131"></div><div style="width:${w.cote * 100}%;background:#f2a93b"></div><div style="width:${w.dos * 100}%;background:#2f9e44"></div><div style="width:${w.calme * 100}%;background:#868e96"></div></div>
-    <div class="bm-zleg"><span><i style="background:#e03131"></i>face <b>${pct(w.face)}</b></span><span><i style="background:#f2a93b"></i>côté <b>${pct(w.cote)}</b></span><span><i style="background:#2f9e44"></i>dos <b>${pct(w.dos)}</b></span>${w.calme > .02 ? `<span><i style="background:#868e96"></i>faible <b>${pct(w.calme)}</b></span>` : ""}</div>
+    <div class="bm-zbar"><div style="width:${w.face * 100}%;background:var(--bad)"></div><div style="width:${w.cote * 100}%;background:var(--warn)"></div><div style="width:${w.dos * 100}%;background:var(--good)"></div><div style="width:${w.calme * 100}%;background:var(--z1)"></div></div>
+    <div class="bm-zleg"><span><i style="background:var(--bad)"></i>face <b>${pct(w.face)}</b></span><span><i style="background:var(--warn)"></i>côté <b>${pct(w.cote)}</b></span><span><i style="background:var(--good)"></i>dos <b>${pct(w.dos)}</b></span>${w.calme > .02 ? `<span><i style="background:var(--z1)"></i>faible <b>${pct(w.calme)}</b></span>` : ""}</div>
     <p class="bm-p">${c ? `À puissance égale (≈ ${nf(w.Pc)} W), le vent ${cost > 0 ? "t'a coûté" : "t'a fait gagner"} <b>environ ${hms(Math.abs(cost))}</b> sur ce parcours par rapport à une journée sans vent.` : "Le vent n'a quasiment rien changé à ton temps sur ce parcours."} Puissance estimée : <b>≈ ${nf(w.avgP)} W</b> de moyenne.</p>
     <p class="note">Estimation sans capteur de puissance : vent à 10 m au centre du parcours, modèle physique (${nf(w.M - PHY.bike)} kg + vélo). En groupe, l'abri fausse le calcul.</p>`;
 }
@@ -394,16 +394,22 @@ function chart(box, st, cmp) {
   const tStep = n * dt > 3 * 3600 ? 3600 : n * dt > 3600 ? 1800 : 600;
   for (let t = 0; t <= n * dt; t += tStep) s += `<text x="${x(t / dt)}" y="${H - 5}" text-anchor="middle">${t >= 3600 ? `${Math.floor(t / 3600)} h${t % 3600 ? pad(t % 3600 / 60) : ""}` : `${t / 60}′`}</text>`;
   if (main) [.25, .5, .75, 1].forEach(f => { const v = Math.round(maxV * f / 10) * 10; s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 5}" y="${y(v) + 4}" text-anchor="end">${v}</text>`; });
-  if (H2.length) [hLo + 5, (hLo + hHi) / 2, hHi - 5].forEach(v => s += `<text x="${W - m.r + 5}" y="${yh(v) + 4}" fill="#c2255c">${Math.round(v)}</text>`);
+  if (H2.length) [hLo + 5, (hLo + hHi) / 2, hHi - 5].forEach(v => s += `<text x="${W - m.r + 5}" y="${yh(v) + 4}" fill="var(--hr)">${Math.round(v)}</text>`);
   s += "</g>";
   if (main) { let d = "", pen = false; main.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true; });
-    s += `<path d="M${x(0)},${y(0)}${d.replace(/^M/, "L").replace(/M/g, "L")}L${x(n - 1)},${y(0)}Z" fill="var(--accent)" opacity=".28"/><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.2" opacity=".9"/>`; }
+    // puissance : aire colorée par zone, comme le graphe de séance de MyWhoosh / Zwift (bandes nettes, pas de fondu)
+    let fill = "var(--accent)", defs = "";
+    if (isP) { const ftp = ftpNow(), zc = v => (PZ.find(z => v / ftp < z[0]) || PZ[PZ.length - 1])[2]; let stops = "", prev = null;
+      main.forEach((v, i) => { const c = v == null ? prev : zc(v); if (c !== prev) { const o = (i / Math.max(1, n - 1) * 100).toFixed(2); if (prev) stops += `<stop offset="${o}%" stop-color="${prev}"/>`; stops += `<stop offset="${o}%" stop-color="${c}"/>`; prev = c; } });
+      stops += `<stop offset="100%" stop-color="${prev}"/>`;
+      defs = `<defs><linearGradient id="bmZ" gradientUnits="userSpaceOnUse" x1="${m.l}" x2="${W - m.r}" y1="0" y2="0">${stops}</linearGradient></defs>`; fill = "url(#bmZ)"; }
+    s += `${defs}<path d="M${x(0)},${y(0)}${d.replace(/^M/, "L").replace(/M/g, "L")}L${x(n - 1)},${y(0)}Z" fill="${fill}" opacity="${isP ? .62 : .28}"/><path d="${d}" fill="none" stroke="${isP ? "var(--ink)" : "var(--accent)"}" stroke-width="1" opacity="${isP ? .45 : .9}"/>`; }
   if (cmp && isP) { let t = cmp.shift, d = ""; cmp.plan.w.steps.forEach(stp => { const a = stp.free ? null : stp.lo * cmp.plan.ftp, b = stp.free ? null : stp.hi * cmp.plan.ftp;
       if (a != null) d += `M${x(t / dt).toFixed(1)},${y(a).toFixed(1)}L${x((t + stp.d) / dt).toFixed(1)},${y(b).toFixed(1)}`; t += stp.d; });
     s += `<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-dasharray="4 3" opacity=".75"/>`; }
-  if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="#c2255c" stroke-width="1.8" stroke-linejoin="round"/>`; }
+  if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--hr)" stroke-width="1.8" stroke-linejoin="round"/>`; }
   s += `<line id="bmCur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="bmHit"/></svg>`;
-  box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>${isP ? "puissance (W)" : "vitesse (km/h)"}</span>${H2.length ? `<span><i style="background:#c2255c"></i>cardio (bpm)</span>` : ""}${cmp && isP ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>prévu</span>` : ""}</div>`;
+  box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:${isP ? "linear-gradient(90deg,var(--z2) 0 33%,var(--z4) 33% 66%,var(--z6) 66%)" : "var(--accent)"}"></i>${isP ? "puissance (W), couleur de la zone" : "vitesse (km/h)"}</span>${H2.length ? `<span><i style="background:var(--hr)"></i>cardio (bpm)</span>` : ""}${cmp && isP ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>prévu</span>` : ""}</div>`;
   const svg = box.querySelector("svg"), cur = box.querySelector("#bmCur"), hit = box.querySelector("#bmHit");
   const mv = e => { const r = svg.getBoundingClientRect(), i = clamp(Math.round(((e.clientX - r.left) * W / r.width - m.l) / iw * (n - 1)), 0, n - 1);
     cur.setAttribute("x1", x(i)); cur.setAttribute("x2", x(i)); cur.setAttribute("opacity", .6);

@@ -3,8 +3,8 @@
   "short_name": "Breizh Watts",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#15171c",
-  "theme_color": "#e8501c",
+  "background_color": "#ffffff",
+  "theme_color": "#fc4c02",
   "icons": [
     {
       "src": "icon-180.png",

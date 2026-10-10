@@ -253,7 +253,7 @@ function blkThr(P, acts) {
     <p class="note">${window.Sync && window.Sync.configured && window.Sync.configured() ? "Ce réglage suit tes autres appareils (synchro activée)." : "Ce réglage reste sur cet appareil (active la synchro pour qu'il suive l'iPhone et le PC)."}</p></div>`;
 }
 function blkGauge(acts) {
-  const G = gauge(acts), names = ["sous-charge", "zone sûre", "vigilance", "risque élevé"], cols = ["#4aa3df", "#2f9e44", "#f2b134", "#e03131"];
+  const G = gauge(acts), names = ["sous-charge", "zone sûre", "vigilance", "risque élevé"], cols = ["var(--info)", "var(--good)", "var(--warn)", "var(--bad)"];
   const head = `<h4>Jauge de reprise <small>km courus : les tendons suivent moins vite que le cardio entretenu par le vélo</small></h4>`;
   if (!acts.some(isRun)) return `<div class="pg-box pg-wide" id="crGauge">${head}${note("Pas encore de course enregistrée.")}</div>`;
   const z = GAUGE.zones, sc = GAUGE.scaleMax, bounds = [0, z[0], z[1], z[2], sc], bar = cols.map((c, i) => `<div style="width:${(bounds[i + 1] - bounds[i]) / sc * 100}%;background:${c}" title="${names[i]}"></div>`).join("");

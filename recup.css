@@ -1,102 +1,95 @@
-/* ------------------------------------------------------------------ Onglets Vélo / Récup */
-.tabs{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px;align-self:center}
-.tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;padding:6px 14px;border-radius:999px;cursor:pointer}
-.tabs button[aria-selected="true"]{background:var(--accent);color:#fff}
-@media (max-width:480px){.tabs{padding:2px;gap:0}.tabs button{font-size:12.5px;padding:6px 9px}}   /* 5 onglets en 390 px */
-@media (max-width:360px){.tabs button{font-size:12px;padding:6px 7px}}
+/* ------------------------------------------------------------------ Onglet Récup : toujours en mode nuit (noir OLED, couleurs de sommeil Garmin) */
 .headrow{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;flex-wrap:wrap}
-
-/* ------------------------------------------------------------------ Thème nuit (onglet Récup) */
 html.night{
-  --bg:#0c0f1d; --card:#141a2f; --ink:#e8ebf7; --muted:#8a93b5; --line:#242b46;
-  --accent:#8b7cf6; --accent-2:#5aa9f2; --accent-soft:#272250; --ghost:#3a4266;
-  --amber:#f2a93b; --teal:#3cc9b4; --rose:#f2708a;
-  --deep:#3d4fd1; --light:#6f93f2; --rem:#b48cf6; --awake:#f2a93b;
-  --h0:#1b2140;
-  --shadow:0 1px 0 rgba(255,255,255,.02),0 10px 30px -18px rgba(0,0,0,.9);
+  --bg:#000000; --card:#141416; --raised:#1d1d20; --ink:#f4f4f6; --muted:#9b9ba4; --line:#2a2a2f; --ghost:#46464d;
+  --accent:#ff5b1f; --accent-ink:#ff7a45; --accent-soft:#2b160c;
+  /* états du score de récup (mêmes valeurs que RECUP_COL de synthese.js) */
+  --teal:#2fbf62; --accent-2:#3d9bff; --amber:#f2a20d; --rose:#ff5a5f;
+  --good:#2fbf62; --info:#3d9bff; --warn:#f2a20d; --bad:#ff5a5f;
+  /* phases de sommeil */
+  --deep:#2f46c8; --light:#5b8def; --rem:#a86cf0; --awake:#f0679e;
+  --hr:#ff4d6d; --h0:#1f1f23;
   color-scheme:dark;
 }
-html.night body{background:radial-gradient(1200px 600px at 80% -10%,#1d2050 0%,transparent 60%),var(--bg)}
-html.night .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+html.night .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#000}
 
 /* ------------------------------------------------------------------ Verrou */
 .lock{max-width:420px;margin:40px auto;text-align:center;padding:32px 24px}
 .lock .moon{width:64px;height:64px;margin:0 auto 14px}
-.lock h2{justify-content:center;font-size:15px}
+.lock h2{justify-content:center;font-size:17px}
 .lock p{color:var(--muted);font-size:14px;margin:6px 0 18px}
 .lock form{display:flex;gap:8px}
-.lock input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:11px 14px;font:inherit;font-size:16px}
+.lock input{flex:1;min-width:0;background:var(--raised);border:1px solid var(--line);color:var(--ink);border-radius:var(--r-md);padding:11px 14px;font:inherit;font-size:16px}
 .lock input:focus{outline:2px solid var(--accent);outline-offset:1px}
-.lock button{background:var(--accent);color:#fff;border:0;border-radius:12px;padding:0 18px;font:inherit;font-weight:700;cursor:pointer}
-.lock .err{color:var(--rose);font-size:13px;margin-top:10px;min-height:18px}
+.lock button{background:var(--accent);color:#fff;border:0;border-radius:var(--r-md);padding:0 18px;font:inherit;font-weight:700;cursor:pointer}
+.lock .err{color:var(--bad);font-size:13.5px;margin-top:10px;min-height:18px}
 
-/* ------------------------------------------------------------------ Bilan du matin */
-.morning{display:grid;grid-template-columns:auto 1fr 1fr;gap:22px;align-items:center}
+/* ------------------------------------------------------------------ Bilan du matin (anneau façon Garmin) */
+.morning{display:grid;grid-template-columns:auto 1fr 1fr;gap:24px 32px;align-items:center}
 @media (max-width:900px){.morning{grid-template-columns:auto 1fr}.morning .factors{grid-column:1/-1}}
 @media (max-width:520px){.morning{grid-template-columns:1fr}.ring{margin:0 auto}}
 .ring{position:relative;width:168px;height:168px}
 .ring svg{width:168px;height:168px}
 .ring .c{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
-.ring .n{font-size:52px;font-weight:850;font-stretch:115%;line-height:1;letter-spacing:-.03em}
-.ring .l{font-size:12px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
-.mtitle{font-size:22px;font-weight:750;font-stretch:108%;line-height:1.2}
-.msub{color:var(--muted);font-size:13.5px;margin:4px 0 14px}
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px 16px}
+.ring .n{font:italic 800 62px/1 var(--font-num);letter-spacing:-.01em}
+.ring .l{font-size:13px;color:var(--muted);margin-top:4px}
+.mtitle{font:italic 800 30px/1.1 var(--font-num)}
+.msub{color:var(--muted);font-size:14px;margin:4px 0 14px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 18px}
 @media (max-width:520px){.kpis{grid-template-columns:repeat(2,1fr)}}
-.kpi .l{font-size:12px;color:var(--muted)}
-.kpi .v{font-size:22px;font-weight:800;font-stretch:108%;letter-spacing:-.01em;white-space:nowrap}
-.kpi .v small{font-size:.55em;color:var(--muted);font-weight:600;margin-left:2px}
-.kpi .s{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.factors .f{display:grid;grid-template-columns:110px 1fr 30px;gap:2px 10px;align-items:center;font-size:13px;margin:9px 0}
-.factors .f .tr{height:8px;background:var(--h0);border-radius:999px;overflow:hidden}
-.factors .f .tr div{height:100%;border-radius:999px}
-.factors .f .num{text-align:right;color:var(--muted)}
-.factors .f small{grid-column:1/-1;margin-top:-5px;font-size:11.5px;color:var(--muted)}
-.mtext{font-size:14px;margin:-6px 0 14px;line-height:1.4}
+.kpi .l{font-size:13px;color:var(--muted)}
+.kpi .v{font:700 26px/1.15 var(--font-num);white-space:nowrap}
+.kpi .v small{font:600 .5em var(--font-ui);color:var(--muted);margin-left:2px}
+.kpi .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.factors .f{display:grid;grid-template-columns:110px 1fr 30px;gap:2px 10px;align-items:center;font-size:13.5px;margin:9px 0}
+.factors .f .tr{height:6px;background:var(--h0);border-radius:2px;overflow:hidden}
+.factors .f .tr div{height:100%;border-radius:2px}
+.factors .f .num{text-align:right;color:var(--muted);font-weight:600}
+.factors .f small{grid-column:1/-1;margin-top:-4px;font-size:12px;color:var(--muted)}
+.mtext{font-size:14.5px;margin:-6px 0 14px;line-height:1.45}
 
 /* ------------------------------------------------------------------ Navigation par jour */
 .mnav{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin:-4px 0 6px}
-.mnav input[type=date]{background:var(--bg);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:4px 8px;font:inherit;font-size:13px;color-scheme:dark;min-height:28px}
+.mnav input[type=date]{background:var(--raised);border:1px solid var(--line);color:var(--ink);border-radius:var(--r-md);padding:4px 8px;font:inherit;font-size:13.5px;color-scheme:dark;min-height:30px}
 
 /* ------------------------------------------------------------------ Nuit */
-.navn{display:inline-flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted)}
-.navn button{border:1px solid var(--line);background:var(--bg);color:var(--ink);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:14px}
+.navn{display:inline-flex;gap:6px;align-items:center;font-weight:500;color:var(--muted);font-size:13.5px}
+.navn button{border:1px solid var(--line);background:var(--raised);color:var(--ink);width:30px;height:30px;border-radius:var(--r-md);cursor:pointer;font-size:14px}
 .navn button:disabled{opacity:.35;cursor:default}
-.stages{display:flex;height:12px;border-radius:999px;overflow:hidden;margin:14px 0 10px}
+.stages{display:flex;height:10px;border-radius:2px;overflow:hidden;margin:14px 0 10px;gap:2px}
 .slegend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media (max-width:520px){.slegend{grid-template-columns:repeat(2,1fr)}}
-.slegend div{font-size:12px;color:var(--muted)}
-.slegend b{display:block;color:var(--ink);font-size:15px}
-.slegend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px}
+.slegend div{font-size:12.5px;color:var(--muted)}
+.slegend b{display:block;color:var(--ink);font:700 19px/1.2 var(--font-num)}
+.slegend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px}
 
 /* ------------------------------------------------------------------ Contexte de la nuit */
-.ctx{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
-.ctx .moonrow{grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.ctx{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+.ctx .moonrow{grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:13.5px;color:var(--muted)}
 .ctx .moonrow svg{width:22px;height:22px;flex:0 0 auto}
 .ctx .moonrow b{color:var(--ink);font-weight:600}
-.ctx .it .l{font-size:11.5px;color:var(--muted)}
-.ctx .it .v{font-size:15px;font-weight:700}
-.ctx .it .v small{font-weight:500;color:var(--muted);font-size:11.5px}
-.flag{grid-column:1/-1;font-size:12.5px;background:var(--accent-soft);color:var(--ink);padding:8px 10px;border-radius:10px}
+.ctx .it .l{font-size:12px;color:var(--muted)}
+.ctx .it .v{font:700 18px/1.25 var(--font-num)}
+.ctx .it .v small{font:500 12px var(--font-ui);color:var(--muted)}
+.flag{grid-column:1/-1;font-size:13px;background:var(--accent-soft);border-left:3px solid var(--accent);color:var(--ink);padding:8px 10px}
 
 /* ------------------------------------------------------------------ Lune + comparaisons */
-.cmp{display:grid;gap:10px}
-.cmp .row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 92px;gap:12px;align-items:center;font-size:13.5px;padding:8px 0;border-bottom:1px solid var(--line)}
+.cmp{display:grid;gap:0}
+.cmp .row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) 92px;gap:12px;align-items:center;font-size:14px;padding:10px 0;border-bottom:1px solid var(--line)}
 .cmp .row:last-child{border-bottom:0}
-.cmp .row small{display:block;color:var(--muted);font-size:11.5px}
-.cmp .bar{position:relative;height:10px;background:var(--h0);border-radius:999px}
-.cmp .bar div{position:absolute;top:0;bottom:0;border-radius:999px}
+.cmp .row small{display:block;color:var(--muted);font-size:12px}
+.cmp .bar{position:relative;height:8px;background:var(--h0);border-radius:2px}
+.cmp .bar div{position:absolute;top:0;bottom:0;border-radius:2px}
 .cmp .bar .mid{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--muted);opacity:.5}
-.cmp .d{text-align:right;font-weight:700;white-space:nowrap}
-.cmp .d small{font-weight:500}
-.note{font-size:12px;color:var(--muted);margin-top:10px}
+.cmp .d{text-align:right;font:700 17px/1.2 var(--font-num);white-space:nowrap}
+.cmp .d small{font:500 12px var(--font-ui)}
+.note{font-size:13px;color:var(--muted);margin-top:10px;line-height:1.45}
 
-.pending{font-size:12.5px;color:var(--muted);display:flex;gap:8px;align-items:center}
-.pending i{width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block}
-.linkbtn{background:none;border:0;color:var(--accent);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;padding:0}
+.pending{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.pending i{width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block}
+.linkbtn{background:none;border:0;color:var(--accent-ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:0}
 
-[hidden]{display:none!important}
-.factlink{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%}
-.factlink:hover{border-color:var(--accent)}
-.factlink small{color:var(--accent)!important}
-.mafter{font-size:13px;line-height:1.4;margin:-6px 0 14px;padding:8px 10px;border-radius:10px;background:var(--accent-soft);color:var(--ink)}
+.factlink{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;background:none;border:0;border-top:1px solid var(--line)}
+.factlink:hover .t{color:var(--accent-ink)}
+.factlink small{color:var(--accent-ink)!important}
+.mafter{font-size:13.5px;line-height:1.45;margin:-6px 0 14px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--accent-soft);color:var(--ink)}
