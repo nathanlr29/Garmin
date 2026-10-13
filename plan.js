@@ -302,7 +302,7 @@ function runCtx(mon) {
   let G = null; try { G = window.Course && Course._ && Course._.gauge ? Course._.gauge(acts, Date.now()) : null; } catch (e) {}
   const lim = G && window.Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
   let under = 0; if (G) { const W = G.weeks.filter(w => w.t < mon.getTime()); for (let i = W.length - 1; i >= 0 && W[i].km < lim; i--) under++; }
-  return { pace: Charge.params().runPace || RUN_PACE0, prevMin, resume: !!(G && G.resume), chronic: G ? G.chronic : null, advice: G ? G.advice : null, under };
+  return { pace: Charge.params().runPace || RUN_PACE0, prevMin, resume: !!(G && G.resume), chronic: G ? G.chronic : null, advice: G ? G.advice : null, under, ratio: G ? G.ratio : null, zone: G ? G.zone : null };
 }
 // séances de la semaine selon le mode : reprise = footings (+ lignes droites), entretien = footings + 1 sortie longue, progression = + au plus 1 séance dure
 function runKinds(mode, n, hard, strides) {
@@ -347,7 +347,8 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   for (let n = nWant; n >= 1 && !got; n--) {
     full = runKinds(mode, n, wantHard ? hardType : null, strides);
     const noHard = full.map(t => t === hardType ? "rfoot" : t), noLong = full.map(t => t === "rlong" ? "rfoot" : t), none = noHard.map(t => t === "rlong" ? "rfoot" : t);
-    for (const kinds of [full, noHard, noLong, none]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
+    const plain = full.map(() => "rfoot");   // en dernier recours, que des footings (un jour dur coché ne prend ni lignes droites ni sortie longue)
+    for (const kinds of [full, noHard, noLong, none, plain]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
   }
   const S0 = got ? got.a.ds.map((e, i) => ({ d: e.d, t: got.a.p[i], e, dur: 0 })) : [];
   const floor = x => Math.max(RUN_MIN, RUN_HARDMIN[x.t] || 0), wt = x => x.t === "rlong" ? RUN_LONG : 1, tot = () => S0.reduce((a, x) => a + x.dur, 0);
@@ -424,7 +425,7 @@ function keySlot(items, from, F, ftp, opt = {}) {
   let best = null;
   for (let d = from; d < 7; d++) { const b = items[d].bike;
     if (!b || b.st !== "plan" || TYPES[b.t].hard || isLong(b.t) || b.dur < 45 || d === opt.ignore) continue;
-    if (items[d].run && items[d].run.st !== "missed") continue;   // pas de séance clé le jour d'une course prévue (les ajustements course sont l'étape 5b)
+    if (items[d].run && items[d].run.st !== "missed") continue;   // pas de séance clé le jour d'une course prévue
     if (hardDay(d - 1, true) || hardDay(d + 1, false) || legs(d) || legs(d - 1)) continue;
     const sc = (b.place === "mw" ? 10 : 0) - d;
     if (!best || sc > best.sc) best = { d, sc }; }
@@ -444,6 +445,72 @@ function muscuSlot(items, from, s, c) {
     if (!best || sc > best.sc) best = { d, sc }; }
   return best ? best.d : null;
 }
+// ------------------------------------------------------------------ Course : ajustements quotidiens (étape 5b), chacun annulable comme ceux du vélo
+const RUN_READY_LOW = 45, RUN_READY_REST = 35;   // mêmes seuils que R2 / R2 bis du vélo
+const RUN_HARD_V = .85, RUN_HARD_MIN = 20, RUN_HARD_TSS = 60;   // course dure : plus de 85 % de la vitesse seuil sur plus de 20 min, ou rTSS > 60
+const RUN_RISK_ZONE = 3, RUN_RISK_DUR = 20;      // jauge de reprise en « risque élevé » (zone 3 de course.js, ratio > 1,5) : footings de 20 min
+// Course dure faite (relevé Garmin : vitesse moyenne de la séance, pas le détail des efforts)
+function hardRun(a, pace) {
+  if (!Charge.RUN_TYPES.has(a.t) || !(a.mt > 0)) return false;
+  const m = a.m > 0 ? a.m : (a.km || 0) * 1000;
+  return (a.mt >= RUN_HARD_MIN * 60 && m / a.mt > RUN_HARD_V * 1000 / (pace || RUN_PACE0)) || Charge.tssOf(a) > RUN_HARD_TSS;
+}
+// Jour pour une course ratée de type t (dur min) : les règles de placement de la 5a, le jour possible le plus proche
+function runSlot(items, from, r, rc, F, ftp) {
+  const notMissed = x => x && x.st !== "missed";
+  const legs = d => !!(items[d].muscu && items[d].muscu.s === "legs" && notMissed(items[d].muscu));
+  const hardAt = d => { if (d < 0 || d > 6) return false; const it = items[d], b = it.bike;
+    return legs(d) || !!(notMissed(b) && (TYPES[b.t].hard || isLong(b.t))) || !!(notMissed(it.run) && TYPES[it.run.t].hard) || F[d].rides.some(a => hardRide(a, ftp)); };
+  for (let d = from; d < 7; d++) { const x = rc.days[d], it = items[d], b = it.bike;
+    if (x.r === "none" || it.run || (b && b.t.startsWith("test"))) continue;
+    if (legs(d) || (notMissed(b) && (TYPES[b.t].hard || isLong(b.t)))) {   // jour dur : footing court et très facile, en plus
+      if (r.t === "rfoot" || r.t === "rstrides") return { d, t: "rfoot", dur: Math.min(r.dur, x.dur, RUN_COOL), slot: "add", cool: true };
+      continue; }
+    const alt = x.r === "alt", hard = TYPES[r.t].hard, dur = Math.min(r.dur, x.dur);
+    if (alt && b && b.st !== "plan") continue;                                  // le vélo du jour est déjà fait
+    if (RUN_ALT_ONLY.has(r.t) && !alt) continue;
+    if (hard && (dur < RUN_HARDMIN[r.t] || hardAt(d - 1) || hardAt(d + 1))) continue;
+    return { d, t: r.t, dur, slot: alt ? "alt" : "add", rep: alt && b ? b : null };
+  }
+  return null;
+}
+function runAdjust(out, o) {
+  const { items } = out, { td, now, F, ftp, ready, rc, run, step, info } = o, cur = td < 7, pace = run.pace || Charge.params().runPace || RUN_PACE0;
+  const runAt = d => items[d].run, planned = items.filter(it => it.run).length;
+  // course dure non prévue faite la veille → la séance clé vélo du jour est déplacée (comme R3)
+  items.forEach(x => { if (x.day < td || x.day === 0 || x.day - 1 > td || !x.bike || x.bike.st !== "plan" || !isKey(x.bike.t)) return;
+    const pr = runAt(x.day - 1), a = F[x.day - 1].runs.find(a => hardRun(a, pace));
+    if (!a || (pr && TYPES[pr.t].hard)) return;
+    const t = x.bike.t, tgt = keySlot(items, x.day + 1, F, ftp, { ignore: x.day });
+    step(`radj-${x.day}`, `Course intense imprévue ${dl(x.day - 1)} : ${TYPES[t].l} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée par de l'endurance"} pour ne pas enchaîner deux jours durs.`,
+      () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.moved = x.day; } x.bike.t = "end"; x.bike.changed = true; });
+  });
+  // course ratée → replacée au prochain jour possible de la semaine, sinon abandonnée
+  // il manque (prévues − faites − encore à faire) courses : une course faite un autre jour en compense une ; les plus récentes d'abord
+  const doneN = F.filter((f, d) => d <= td && f.runs.length).length;
+  let lack = planned - doneN - items.filter(x => x.day >= td && x.run && x.run.st === "plan").length;
+  items.slice().reverse().forEach(it => { const r = it.run; if (!r || r.st !== "missed" || lack <= 0) return; lack--;
+    const nm = TYPES[r.t].l, tgt = rc ? runSlot(items, td + (now.getHours() >= 20 ? 1 : 0), r, rc, F, ftp) : null;
+    if (!tgt) { info(`« ${nm} » de ${dl(it.day)} non faite : aucun jour de course possible d'ici dimanche, on la laisse passer.`); return; }
+    step(`rmove-${it.day}`, `« ${nm} » de ${dl(it.day)} non faite : déplacée à ${dl(tgt.d)}${tgt.cool ? ` (footing de ${tgt.dur} min très facile, en plus de la séance du jour)` : ""}.`, () => {
+      const T = items[tgt.d]; if (tgt.rep) T.bike = null;
+      T.run = { t: tgt.t, dur: tgt.dur, slot: tgt.slot, st: "plan", moved: it.day, ...(tgt.rep ? { rep: { t: tgt.rep.t, dur: tgt.rep.dur } } : {}), ...(tgt.cool ? { cool: 1 } : {}) };
+      r.movedTo = tgt.d; });
+  });
+  // récupération basse ce matin : course dure → footing ; très basse : course → repos
+  const T = cur ? items[td] : null, rd = ready && ready.today;
+  if (T && T.run && T.run.st === "plan" && rd != null && rd < RUN_READY_LOW) {
+    const r = T.run, nm = TYPES[r.t].l;
+    if (rd < RUN_READY_REST) step(`rrest-${ymd(now)}`, `Récupération à ${rd}/100 ce matin : pas de course aujourd'hui (« ${nm} » de ${fmtMin(r.dur)} remplacée par du repos).`, () => { T.run = null; });
+    else if (TYPES[r.t].hard) step(`rready-${ymd(now)}`, `Récupération à ${rd}/100 ce matin : « ${nm} » remplacée par un footing facile de ${fmtMin(r.dur)}.`, () => { r.t = "rfoot"; r.changed = true; });
+  }
+  // jauge de reprise en « risque élevé » : courses restantes de la semaine réduites à des footings de 20 min
+  if (cur && run.zone === RUN_RISK_ZONE) {
+    const L = items.filter(x => x.day >= td && x.run && x.run.st === "plan" && !(x.run.t === "rfoot" && x.run.dur <= RUN_RISK_DUR));
+    if (L.length) step("rgauge", `Jauge de reprise à ${nf(run.ratio, 1)} (risque élevé au-delà de 1,5 : tu as couru bien plus ces 7 derniers jours que d'habitude) : ${L.length > 1 ? `les ${L.length} courses restantes passent` : "la course restante passe"} en footing${L.length > 1 ? "s" : ""} de ${RUN_RISK_DUR} min.`,
+      () => L.forEach(x => { x.run.t = "rfoot"; x.run.dur = RUN_RISK_DUR; x.run.changed = true; delete x.run.cool; }));
+  }
+}
 function effective(mon, c, ctx) {
   const cur = mondayOf(new Date()), isCur = +mon === +cur, now = new Date();
   const base = baseWeek(mon, c, ctx), ph = phase(mon, c), key = ymd(mon), ov = store2.get("planOv:" + key) || {};
@@ -462,7 +529,7 @@ function effective(mon, c, ctx) {
     if (R.some(a => hardRide(a, ftp))) hardDays++;
     if (R.length) { if (it.bike) { it.bike.st = "done"; it.bike.acts = R; } else it.extra = R; }
     else if (it.bike && (d < td || (d === td && eveningOver))) it.bike.st = "missed";
-    // course : faite (rattachée au jour, bilan), non prévue = « extra » comme le vélo, ou ratée ; aucun ajustement course ici (étape 5b)
+    // course : faite (rattachée au jour, bilan), non prévue = « extra » comme le vélo, ou ratée ; les ajustements course viennent après ceux du vélo (runAdjust)
     const RN = F[d].runs;
     if (RN.length) { if (it.run) { it.run.st = "done"; it.run.acts = RN; } else it.extra = it.extra.concat(RN); }
     else if (it.run && (d < td || (d === td && eveningOver))) it.run.st = "missed"; }
@@ -515,6 +582,8 @@ function effective(mon, c, ctx) {
     step(`adj-${x.day}`, `Séance intense imprévue ${dl(x.day - 1)} : ${TYPES[t].l} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée par de l'endurance"} pour ne pas enchaîner deux jours durs.`,
       () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.moved = x.day; } x.bike.t = "end"; x.bike.changed = true; });
   });
+  // --- course (étape 5b) : seulement si la semaine porte des courses (sans jour de course, rien ne change)
+  if (base.run) runAdjust(out, { td, now, F, ftp, ready, rc: ctx.rc !== undefined ? ctx.rc : runCfg(c), run: ctx.run || {}, step, info });
   // --- muscu manquée → reportée sur un matin libre
   const seen = new Set();
   missedM.forEach(m => { if (seen.has(m.s)) return; seen.add(m.s);
@@ -712,7 +781,12 @@ function bikeStatus(b) {
   return "";
 }
 function doneSummary(acts) { const a = acts[0], km = acts.reduce((s, x) => s + x.km, 0), mt = acts.reduce((s, x) => s + x.mt, 0); return `${isIndoor(a) ? (a.w ? `${a.w} W · ` : "") : `${nf(km)} km · `}${fmtMin(Math.round(mt / 60))}`; }
-function runStatus(r) { return r.st === "done" ? `<span class="stg ok">faite ✓</span>` : r.st === "missed" ? `<span class="stg ko">non faite</span>` : ""; }
+function runStatus(r) {
+  if (r.st === "done") return `<span class="stg ok">faite ✓</span>`;
+  if (r.st === "missed") return `<span class="stg ko">${r.movedTo != null ? `déplacée à ${dl(r.movedTo)}` : "non faite"}</span>`;
+  if (r.moved != null) return `<span class="stg mv">vient de ${dl(r.moved)}</span>`;
+  return r.changed ? `<span class="stg mv">allégée</span>` : "";
+}
 function runDone(acts) { const km = acts.reduce((s, x) => s + x.km, 0), mt = acts.reduce((s, x) => s + x.mt, 0); return `${nf(km, 1)} km · ${fmtMin(Math.round(mt / 60))}${km > 0 ? ` · ${fmtPace(mt / km)} /km` : ""}`; }
 function runTable(w) {
   const col = v => RZ[RZ.findIndex(z => v < z[0])][1];
@@ -982,7 +1056,7 @@ async function open() {
   render();
 }
 window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
-  _run: { place: placeRuns, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
+  _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
 let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) render(); }, 200); });
