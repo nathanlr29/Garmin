@@ -494,5 +494,11 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
     const Wp = h.Plan._eff(MON, C5, { form: FORM5, ready: { today: 30, last: 30, avg3: 30 }, prev: PREV[0], rc: h.Plan._run.cfg(C5), run: runCtx({ prevMin: 120, zone: 3, ratio: 2 }) });
     assert.ok(!Wp.changes.some(x => ["rgauge", "rrest-2026-11-12"].includes(x.id)));
   }
+  // correction : en reprise avec lignes droites, des jours cochés tous durs gardaient 0 course (les lignes droites n'y vont pas) ; ils prennent des footings
+  {
+    const items = week([[KEY], [LONG], [E60, "legs"], [null], [null], [null], [null]]);
+    const info = place(items, rcOf({ 0: ["add"], 1: ["alt"], 2: ["add"] }, 3, "reprise"), { run: { prevMin: 0, under: 4 } });
+    assert.equal(info.n, 2, info.notes.join(" | ")); assert.ok(items.filter(i => i.run).every(i => i.run.t === "rfoot" && i.run.cool));
+  }
   console.log("ok plan (course 5b) : course ratée replacée ou abandonnée, récup basse, course dure imprévue la veille, jauge en risque élevé, chacun annulable");
 }

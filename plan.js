@@ -347,7 +347,8 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   for (let n = nWant; n >= 1 && !got; n--) {
     full = runKinds(mode, n, wantHard ? hardType : null, strides);
     const noHard = full.map(t => t === hardType ? "rfoot" : t), noLong = full.map(t => t === "rlong" ? "rfoot" : t), none = noHard.map(t => t === "rlong" ? "rfoot" : t);
-    for (const kinds of [full, noHard, noLong, none]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
+    const plain = full.map(() => "rfoot");   // en dernier recours, que des footings (un jour dur coché ne prend ni lignes droites ni sortie longue)
+    for (const kinds of [full, noHard, noLong, none, plain]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
   }
   const S0 = got ? got.a.ds.map((e, i) => ({ d: e.d, t: got.a.p[i], e, dur: 0 })) : [];
   const floor = x => Math.max(RUN_MIN, RUN_HARDMIN[x.t] || 0), wt = x => x.t === "rlong" ? RUN_LONG : 1, tot = () => S0.reduce((a, x) => a + x.dur, 0);
