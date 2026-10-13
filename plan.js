@@ -279,7 +279,8 @@ const RUN_MODES = ["auto", "reprise", "entretien", "progression"], RUN_SLOTS = [
 const RPE_RUN = { trot: "2/10, très facile", easy: "3-4/10, tu peux parler", long: "3-4/10, très régulier", tempo: "6/10, soutenu", thr: "7-8/10, dur mais tenable", vo2: "9/10, très dur", strides: "7/10, vite mais relâché" };
 const RZ = [[.78, "#8e8e93"], [.88, "#2e8bff"], [.95, "#3fbf5f"], [1.02, "#ffc21a"], [99, "#ff6a2a"]];   // couleurs des zones d'allure (comme RUN_ZONES de bilan.js)
 const RUN_OWN_DURS = [20, 30, 40, 45, 50, 60, 75, 90, 105, 120, 150];
-const RUN_OWN = r => !!(r && TYPES[r.t] && TYPES[r.t].sport === "run" && RUN_OWN_DURS.includes(r.dur));   // course réglée à la main (planOv), validée
+// course réglée à la main (planOv), validée : toute durée par pas de 5 min de 20 à 150 (les durées générées, 35 ou 55 min, ne sont pas dans la liste du menu)
+const RUN_OWN = r => !!(r && TYPES[r.t] && TYPES[r.t].sport === "run" && Number.isInteger(r.dur) && r.dur >= 20 && r.dur <= 150 && r.dur % 5 === 0);
 const runMinTotal = n => RUN_MIN * (n >= 2 ? 2 : 1);
 const runTss = (t, dur) => Math.round(dur / 60 * RUN_IF[t] ** 2 * 100);
 const fmtPace = s => { const r = Math.round(s); return `${Math.floor(r / 60)}:${pad(r % 60)}`; };

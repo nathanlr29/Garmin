@@ -505,6 +505,7 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
     const h = setup(); h.store.set("planOv:2026-11-02", JSON.stringify({ 3: { run: { t: "rvo2", dur: 45 } }, 4: { run: 0 }, 2: { run: { t: "rfoot", dur: 999 } } }));
     const W = eff(h, 0, 8);
     assert.equal(runs(W), "rthr/40 rfoot/40 - rvo2/45 - - -", "jeudi (Legs + endurance) : course ajoutée ; vendredi : retirée ; durée hors liste ignorée");
+    { const h3 = setup(); h3.store.set("planOv:2026-11-02", JSON.stringify({ 3: { run: { t: "rtempo", dur: 35 } } })); assert.equal(eff(h3, 0, 8).items[3].run.t, "rtempo", "durée générée hors menu (35 min) : le changement de type est gardé"); }
     assert.ok(W.items[3].run.own && W.items[3].run.added && W.items[3].run.slot === "add" && W.items[3].bike && W.items[3].muscu, "vélo et muscu gardés");
     const h2 = load({ course: COURSE }); h2.store.set("planOv:2026-11-02", JSON.stringify({ 5: { run: { t: "rfoot", dur: 30 } } })); h2.clock.t = new Date(2026, 10, 2, 8).getTime();
     const W2 = h2.Plan._eff(MON, CFGS.cinq, { form: FORM5, ready: { today: 80, last: 80, avg3: 78 }, prev: PREV[0] });
