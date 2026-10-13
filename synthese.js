@@ -618,7 +618,7 @@ const cap1 = t => t.charAt(0).toUpperCase() + t.slice(1);
 // une ligne par jour : « sec, 12-17 °C, vent 15 km/h d'ouest »
 function wxLine(d) {
   if (!d.ok) return "pas encore de prévision";
-  const sky = d.verdict === "good" ? "sec" : d.rain < WX.good.mm ? `averses possibles (risque ${nf(d.pct)} %)`
+  const sky = d.verdict === "good" ? "sec" : d.rain < WX.good.mm ? (d.pct >= WX.good.pct ? `averses possibles (risque ${nf(d.pct)} %)` : "sec")
     : d.win && d.win.to - d.win.from >= WX.bad.dryH ? `sec de ${d.win.from} h à ${d.win.to} h, ${nf(d.rain)} mm de pluie sinon` : `pluie (${nf(d.rain, d.rain < 10 ? 1 : 0)} mm)`;
   return `${sky}, ${nf(d.tmin)}-${nf(d.tmax)} °C, vent ${nf(d.wind)} km/h ${windFrom(d.dir)}${d.gust >= WX.good.gust ? ` (rafales ${nf(d.gust)})` : ""}`;
 }
