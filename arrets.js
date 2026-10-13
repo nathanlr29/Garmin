@@ -113,6 +113,13 @@ const CHUNK = 15;
 const K_POI = "soPoi", POI_V = 4, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
+// 429 (plus de place pour cette IP) ou 502-504 (serveur saturé, environ une requête sur deux le 13/10/2026) : on attend et on redemande au même serveur, 3 fois au plus.
+// Les serveurs de secours sont lents et en retard sur les données : mieux vaut insister auprès d'overpass-api.de.
+async function post(url, q, signal, n = 0) {
+  const r = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal });
+  if (![429, 502, 503, 504].includes(r.status) || n >= 3) return r;
+  await new Promise(w => setTimeout(w, 8000)); return post(url, q, signal, n + 1);
+}
 // Trois serveurs : le 2e part si le 1er n'a pas répondu au bout de 20 s (ou dès qu'il échoue) ; la première réponse valable gagne.
 function overpass(q) {
   return new Promise((ok, ko) => {
@@ -122,7 +129,7 @@ function overpass(q) {
       if (i >= OVP.length) { if (!live) { done = true; ko(last || new Error("Overpass indisponible")); } return; }
       const url = OVP[i++], ac = new AbortController(); acs.push(ac); live++;
       const to = setTimeout(() => ac.abort(), 70000), hedge = setTimeout(next, 20000);
-      fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: ac.signal })
+      post(url, q, ac.signal)
         .then(async r => { if (!r.ok) throw new Error("Overpass " + r.status); const j = await r.json();
           // délai dépassé ou mémoire pleine : Overpass répond 200 avec une « remark » et une liste vide ou incomplète
           if (j.remark && /runtime error|timed out|out of memory|rate_limited/i.test(j.remark)) throw new Error(j.remark); return j; })

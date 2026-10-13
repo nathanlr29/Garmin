@@ -49,8 +49,14 @@ assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de
   const j = await A._overpass("q");
   assert.equal(calls.length, 2, "le 2e serveur est interrogé après le délai dépassé du 1er"); assert.equal(j.elements.length, 1, "réponse du 2e serveur gardée");
   calls.length = 0; ctx.fetch = url => { calls.push(url); return resp({}, false); };
-  await assert.rejects(A._overpass("q"), /Overpass 504/, "tous les serveurs en échec : erreur");
-  assert.equal(calls.length, 3, "les 3 serveurs sont essayés"); }
+  const st = ctx.setTimeout; ctx.setTimeout = (f, ms) => st(f, ms === 8000 ? 0 : ms);
+  await assert.rejects(A._overpass("q"), /Overpass 504/, "tous les serveurs en échec : erreur"); ctx.setTimeout = st;
+  assert.equal(calls.length, 12, "les 3 serveurs sont essayés, 4 fois chacun (504 = saturé)"); assert.equal(new Set(calls).size, 3); }
+// 2 quater bis) 429 (plus de place libre) : on redemande au même serveur après une pause
+{ const calls = [], st = ctx.setTimeout; ctx.setTimeout = (f, ms) => st(f, ms === 8000 ? 0 : ms);
+  ctx.fetch = url => { calls.push(url); return Promise.resolve(calls.length < 3 ? { ok: false, status: 429 } : { ok: true, status: 200, json: async () => ({ elements: [] }) }); };
+  await A._overpass("q"); ctx.setTimeout = st;
+  assert.deepEqual(calls, Array(3).fill(calls[0]), "2 refus 429 puis réponse, toujours le 1er serveur"); }
 // 2 quinquies) longue trace : requête coupée en morceaux de 15 rectangles, doublons fusionnés
 { const C = A._corridor(P), n = C.split("|").length, bodies = [];
   ctx.fetch = (url, o) => { const id = bodies.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 7, lat: 48.2, lon: -1.68, tags: { amenity: "drinking_water" } }, { type: "node", id, lat: 48.3, lon: -1.68, tags: { shop: "bakery" } }] }) }); };
