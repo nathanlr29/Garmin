@@ -26,11 +26,10 @@ if (process.env.BROWSER) {
   const b = await chromium.launch(), pg = await (await b.newContext({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" })).newPage();
   pg.on("console", m => console.log("  [console]", m.text()));
   await pg.goto("https://nathanlr29.github.io/Garmin/");
-  for (const [name, P] of [["longue", routes[0]], ["moyenne", routes[Math.floor(routes.length / 2)]]]) {
-    const q = A._query(A._corridor(P, 200), false);
+  for (const [name, q] of [["mini", '[out:json][timeout:25];nwr["amenity"="drinking_water"](48.0,-1.8,48.2,-1.6);out tags center qt;'], ["moyenne", A._query(A._corridor(routes[Math.floor(routes.length / 2)], 200), false)], ["longue", A._query(A._corridor(routes[0], 200), false)]]) {
     const res = await pg.evaluate(async q => { const out = [];
       for (const u of ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"]) {
-        const t = Date.now(); try { const r = await fetch(u, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+        const t = Date.now(); try { const r = await fetch(u, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(45000) });
           const x = await r.text(); out.push(`${u} -> ${r.status} ${Date.now() - t} ms ${x.length} o ${x.slice(0, 160).replace(/\s+/g, " ")}`); }
         catch (e) { out.push(`${u} -> ERREUR ${Date.now() - t} ms ${e.message}`); } }
       return out; }, q);
