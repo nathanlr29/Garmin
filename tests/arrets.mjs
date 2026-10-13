@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-const win = {}, ctx = { window: win, document: {}, localStorage: { getItem: () => null, setItem() {} }, nf: (v, d = 0) => (+v).toFixed(d).replace(".", ","), esc: s => String(s) };
+const win = {}, ctx = { window: win, document: {}, localStorage: { getItem: () => null, setItem() {} }, nf: (v, d = 0) => (+v).toFixed(d).replace(".", ","), esc: s => String(s), setTimeout, clearTimeout, AbortController };
 vm.createContext(ctx);
 vm.runInContext(readFileSync(new URL("../arrets.js", import.meta.url), "utf8"), ctx);
 const A = win.Arrets;
@@ -43,6 +43,14 @@ assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de
 { const C = A._corridor(P), B = C.split("|").map(b => b.split(",").map(Number));
   assert.ok(B.length >= 32 && B.length <= 34, "un rectangle par tronçon de 3 km : " + B.length);
   assert.ok(B[0][0] > 48.1 + 200 / 111320, "le départ n'est pas dans le premier rectangle"); }
+// 2 quater) trois serveurs Overpass : une réponse « délai dépassé » (code 200) passe au serveur suivant ; tous en échec = erreur
+{ const calls = [], resp = (body, ok = true) => Promise.resolve({ ok, status: ok ? 200 : 504, json: async () => body });
+  ctx.fetch = url => { calls.push(url); return calls.length === 1 ? resp({ remark: "runtime error: Query timed out in \"query\" at line 1 after 26 seconds.", elements: [] }) : resp({ elements: [{ type: "node", id: 1 }] }); };
+  const j = await A._overpass("q");
+  assert.equal(calls.length, 2, "le 2e serveur est interrogé après le délai dépassé du 1er"); assert.equal(j.elements.length, 1, "réponse du 2e serveur gardée");
+  calls.length = 0; ctx.fetch = url => { calls.push(url); return resp({}, false); };
+  await assert.rejects(A._overpass("q"), /Overpass 504/, "tous les serveurs en échec : erreur");
+  assert.equal(calls.length, 3, "les 3 serveurs sont essayés"); }
 // 3) Pause découverte : seulement les lieux avec une fiche, anecdote de 1 à 2 phrases sans ajout
 assert.equal(A._voirKind({ historic: "castle" }), null, "pas de fiche : écarté");
 assert.equal(A._voirKind({ historic: "archaeological_site", archaeological_site: "megalith", wikidata: "Q1" }), "megalith");
