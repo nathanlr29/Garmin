@@ -410,7 +410,7 @@ async function update(ctx, retry) {
   const key = hash(voir + "|" + L_);
   if (key !== ST.key || retry) { ST.poi = null; ST.err = ""; ST.list = []; ST.adv = []; ST.voirSel = null; ST.voirErr = ""; render(); drawMap();
     try { const els = await fetchPois(L_, voir); if (seq !== ST.seq) return; ST.poi = els; ST.key = key; }
-    catch (e) { if (seq !== ST.seq) return; ST.err = "Points d'arrêt indisponibles pour l'instant : les serveurs OpenStreetMap sont saturés."; ST.key = null; render(); return; } }
+    catch (e) { if (seq !== ST.seq) return; console.warn("Overpass", e); ST.err = "Points d'arrêt indisponibles pour l'instant : les serveurs OpenStreetMap sont saturés."; ST.key = null; render(); return; } }
   try {
     if (ST.poi.some(e => e.t.opening_hours)) await ohLib();
     if (seq !== ST.seq) return;
@@ -447,5 +447,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _kindOf: kindOf };
 })();
