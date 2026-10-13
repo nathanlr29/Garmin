@@ -184,3 +184,8 @@
 #sortie .stvc .strow{border:0}
 #sortie .stvc p{margin:2px 0 6px;font-size:13px;line-height:1.45}
 #sortie .stvc a{font-size:13.5px;font-weight:700;color:var(--good);display:inline-block;padding:4px 0}
+.sosub.sobusy{opacity:.45;transition:opacity .2s;pointer-events:none}
+#sortie .stall{border-top:1px solid var(--line);margin:6px 0 4px;padding-top:8px}
+#sortie .stall>summary{cursor:pointer;font-weight:700;font-size:14px;min-height:36px;display:flex;align-items:center;gap:6px}
+#sortie .stall>summary small{font-weight:600;color:var(--muted)}
+#sortie .stall[open]>summary{margin-bottom:6px}
