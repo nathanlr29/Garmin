@@ -13,15 +13,21 @@ const A = win.Arrets, R = JSON.parse(readFileSync(new URL("../data/routes.json",
 const rad = x => x * Math.PI / 180, dist = (a, b) => 6371e3 * Math.hypot(rad(b[0] - a[0]), rad(b[1] - a[1]) * Math.cos(rad(a[0])));
 const toP = pts => { let d = 0; return pts.map((p, i) => ({ lat: p[0], lon: p[1], d: d += i ? dist(pts[i - 1], p) : 0 })); };
 const routes = Object.values(R).filter(Boolean).map(toP).sort((a, b) => b.at(-1).d - a.at(-1).d);
-for (const u of ["https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.osm.jp/api/interpreter"]) { const t = Date.now();
-  try { const r = await fetch(u, { method: "POST", body: "data=" + encodeURIComponent('[out:json][timeout:25];nwr["amenity"="drinking_water"](48.0,-1.8,48.2,-1.6);out tags center qt;'), headers: { ...H, "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(30000) });
-    const x = await r.text(); console.log(`secours ${u.split("/")[2]} : ${r.status} ${Date.now() - t} ms ACAO=${r.headers.get("access-control-allow-origin")} ${x.slice(0, 300).replace(/\s+/g, " ")}`); }
-  catch (e) { console.log(`secours ${u.split("/")[2]} : ERREUR ${Date.now() - t} ms ${e.message}`); } }
 let ko = 0;
-for (const P of [routes.find(p => p.at(-1).d < 130e3), routes.find(p => p.at(-1).d < 90e3), routes[0]]) for (const voir of [false, true]) {
+for (const P of [routes.find(p => p.at(-1).d < 130e3)]) for (const voir of [true]) {
   const L = A._corridor(P, voir ? 300 : 200); log.length = 0; const t = Date.now();
   try { const els = await A._fetchPois(L, voir); console.log(`${Math.round(P.at(-1).d / 1000)} km, à voir=${voir}, ${L.split("|").length} rectangles : OK en ${Date.now() - t} ms, ${els.length} points`); }
   catch (e) { ko++; console.log(`${Math.round(P.at(-1).d / 1000)} km, à voir=${voir} : ÉCHEC en ${Date.now() - t} ms ${e.message}`); }
   log.forEach(l => console.log("   " + l));
 }
-console.log(`${ko} échec(s) sur 6`);
+// vrai navigateur sur le site en ligne, avec le nouvel arrets.js injecté
+{ const { chromium } = await import("playwright");
+  const b = await chromium.launch(), pg = await (await b.newContext({ userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36" })).newPage();
+  const net = []; pg.on("response", r => r.url().includes("interpreter") && net.push(`${r.url().split("/")[2]} ${r.status()}`));
+  await pg.goto("https://nathanlr29.github.io/Garmin/"); await pg.addScriptTag({ content: readFileSync(new URL("../arrets.js", import.meta.url), "utf8") });
+  for (const [P, voir] of [[routes.find(p => p.at(-1).d < 130e3), true], [routes.find(p => p.at(-1).d < 90e3), false]]) {
+    const L = A._corridor(P, voir ? 300 : 200), t = Date.now(); net.length = 0;
+    const r = await pg.evaluate(([L, voir]) => Arrets._fetchPois(L, voir).then(e => "OK " + e.length + " points", e => "ÉCHEC " + e.message), [L, voir]);
+    if (!r.startsWith("OK")) ko++; console.log(`navigateur, ${Math.round(P.at(-1).d / 1000)} km, à voir=${voir} : ${r} en ${Date.now() - t} ms ; réponses : ${net.join(", ")}`); }
+  await b.close(); }
+console.log(`${ko} échec(s)`); process.exit(ko ? 1 : 0);
