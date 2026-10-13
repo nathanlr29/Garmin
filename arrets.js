@@ -1,6 +1,6 @@
 "use strict";
 // Points d'arrêt le long d'une sortie (eau, ravitaillement, toilettes, réparation) : OpenStreetMap via Overpass.
-// Une seule requête par trace (rectangles le long du tracé), gardée en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
+// Requêtes par morceaux de trace (rectangles le long du tracé), gardées en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
 // Les 400 premiers et derniers mètres de la trace ne sont jamais envoyés (le point de départ reste sur l'appareil).
 (() => {
 const $ = id => document.getElementById(id);
