@@ -9,6 +9,7 @@ html.night{
   /* phases de sommeil */
   --deep:#2f46c8; --light:#5b8def; --rem:#a86cf0; --awake:#f0679e;
   --hr:#ff4d6d; --h0:#1f1f23;
+  --glass:rgba(28,28,32,.55); --glass-edge:rgba(255,255,255,.16); --glass-line:rgba(255,255,255,.08); --glass-sel:rgba(255,91,31,.2);
   color-scheme:dark;
 }
 html.night .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#000}
@@ -82,3 +83,6 @@ html.night .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--i
 .factlink:hover .t{color:var(--accent-ink)}
 .factlink small{color:var(--accent-ink)!important}
 .mafter{font-size:13.5px;line-height:1.45;margin:-6px 0 14px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--accent-soft);color:var(--ink)}
+.rans{margin:-4px 0 10px;font-size:14.5px;line-height:1.45}
+.rans b{font-family:var(--font-num);font-size:17px}
+#recup #rRhr .legend{margin-top:6px}
