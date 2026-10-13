@@ -147,7 +147,7 @@
 #plan .howto ol{margin:8px 0 0 20px;display:grid;gap:4px}
 #plan .howto a{color:var(--accent-ink)}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--card);padding:10px 16px;border-radius:var(--r-md);font-size:14px;z-index:40;max-width:calc(100vw - 32px)}
-@media (max-width:720px){.toast{bottom:calc(var(--bar-h) + env(safe-area-inset-bottom) + 12px)}}
+@media (max-width:720px){.toast{bottom:calc(var(--bar-h) + var(--bar-gap) + 12px)}}
 
 #plan .today .tdv,#plan .rank .tdv{display:flex;align-items:baseline;gap:8px}
 #plan .tdv b{font:italic 800 46px/1 var(--font-num);letter-spacing:-.01em}
@@ -223,3 +223,5 @@ html.bm-open{overflow:hidden}
 .pf-bar div{height:100%;border-radius:2px;background:var(--accent)}
 .pf-v{text-align:right}.pf-v small{display:block}
 @media (max-width:520px){.pf-row{grid-template-columns:96px minmax(0,1fr) 112px}}
+#plan .wadd{align-self:flex-start;border:1px dashed var(--line);border-radius:999px;background:transparent;color:var(--muted);font:600 12.5px/1 var(--font-ui);padding:6px 10px;cursor:pointer}
+#plan .wadd:hover{color:var(--ink);border-color:var(--ghost)}

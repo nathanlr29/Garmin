@@ -261,4 +261,28 @@ const src = read("../synthese.js").split("\n").filter(l => !/^\s*\/\//.test(l)).
 const visible = [...src.matchAll(/`([^`]*)`|"([^"\n]*)"/g)].map(m => m[1] || m[2] || "").filter(t => /[a-zé] [a-zé]/i.test(t) && !/^(#|\.|var\(|M\d|<svg)/.test(t)).join("\n");
 assert.ok(!/\b(CTL|ATL|TSB|TSS)\b/.test(visible), "aucun sigle dans les textes affichés : " + (visible.match(/.{0,30}\b(CTL|ATL|TSB|TSS)\b.{0,30}/) || [""])[0]);
 for (const k in Y.HELP) assert.ok(Y.HELP[k].split(/[.!?]\s/).length <= 3, "explication « ? » de 1 à 2 phrases : " + k);
+
+// ---- Ce week-end, dehors ?
+{
+  const wd = t => JSON.stringify(Y.weekendDays(t.getTime()).map(d => d.getDate()));
+  assert.equal(wd(new Date(2026, 9, 13, 10)), "[17,18]", "mardi : samedi 17 et dimanche 18");
+  assert.equal(wd(new Date(2026, 9, 17, 10)), "[17,18]", "samedi : aujourd'hui et demain");
+  assert.equal(wd(new Date(2026, 9, 18, 10)), "[18]", "dimanche matin : aujourd'hui");
+  assert.equal(wd(new Date(2026, 9, 18, 18)), "[24,25]", "dimanche soir : le week-end suivant");
+  // 2 jours × 24 h ; f(heure) → [temp, pluie, risque, vent, rafales, direction]
+  const mk = (...fs) => { const h = { time: [], temperature_2m: [], precipitation: [], precipitation_probability: [], wind_speed_10m: [], wind_gusts_10m: [], wind_direction_10m: [] };
+    fs.forEach((f, k) => { for (let i = 0; i < 24; i++) { const [t, p, pp, w, g, dir] = f(i); h.time.push(`2026-10-${17 + k}T${String(i).padStart(2, "0")}:00`); h.temperature_2m.push(t); h.precipitation.push(p); h.precipitation_probability.push(pp); h.wind_speed_10m.push(w); h.wind_gusts_10m.push(g); h.wind_direction_10m.push(dir); } }); return h; };
+  const sec = () => [14, 0, 10, 15, 30, 270], pluie = i => [12, i >= 13 ? 1.5 : 0, i >= 13 ? 90 : 20, 18, 35, 250], tempete = () => [10, 2, 95, 45, 80, 240];
+  const days = [new Date(2026, 9, 17), new Date(2026, 9, 18)];
+  let L = Y.weekendWx(mk(sec, sec), days);
+  assert.equal(L.map(d => d.verdict).join(), "good,good"); assert.match(Y.weekendAnswer(L), /^Oui, beau week-end/); assert.match(Y.wxLine(L[0]), /^sec, 14-14 °C, vent 15 km\/h d'ouest$/);
+  L = Y.weekendWx(mk(sec, pluie), days);
+  assert.equal(L.map(d => d.verdict).join(), "good,bad", "dimanche : 7,5 mm"); assert.match(Y.weekendAnswer(L), /^Oui, mise sur samedi .* dimanche s'annonce mauvais/);
+  L = Y.weekendWx(mk(pluie, tempete), days);
+  assert.equal(L[0].verdict, "bad"); assert.equal(L[0].win.from, 9); assert.equal(L[0].win.to, 13, "sec de 9 h à 13 h");
+  L = Y.weekendWx(mk(i => [12, i === 15 ? .5 : 0, i === 15 ? 60 : 20, 18, 35, 250], tempete), days);
+  assert.equal(L[0].verdict, "mid"); assert.match(Y.weekendAnswer(L), /^Week-end mitigé : vise samedi, sec de 9 h à 15 h/);
+  assert.match(Y.weekendAnswer(Y.weekendWx(mk(tempete, tempete), days)), /^Plutôt home trainer/);
+  assert.equal(Y.weekendWx({ time: [] }, days).every(d => !d.ok), true); assert.match(Y.weekendAnswer([]), /Pas encore/);
+}
 console.log("ok synthese 4-bis : amorce de la courbe, phrases (progression, aujourd'hui, objectifs, alertes, semaine), barres d'objectif, titres des détails, pas de sigle");

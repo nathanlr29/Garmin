@@ -82,9 +82,9 @@ function renderRecup() {
     <section class="card span6"><h2>VFC pendant la nuit <small id="rHrvInfo"></small></h2><div id="rHrv"></div><div class="note" id="rHrvNote"></div></section>
     <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><div id="rSleep"></div></section>
     <section class="card span6"><h2>Heures de coucher et de lever <small id="rRegInfo"></small></h2><div id="rReg"></div></section>
-    <section class="card span12"><h2>Body Battery <small id="rBBInfo"></small></h2><div id="rBB"></div></section>
-    <section class="card span12"><h2>Ce qui semble jouer sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><div class="cmp" id="rCmp"></div>
-      <p class="note">Comparaison de tes nuits entre elles (score de sommeil et durée) : ce sont des tendances observées, pas des causes prouvées. Un facteur n'apparaît qu'avec au moins 4 nuits concernées.</p></section>
+    <section class="card span12"><h2>Fréquence cardiaque au repos <small id="rRhrInfo"></small></h2><p class="rans" id="rRhrAns"></p><div id="rRhr"></div></section>
+    <section class="card span12"><h2>Ce qui joue sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><p class="rans" id="rCmpAns"></p><div class="cmp" id="rCmp"></div>
+      <p class="note">Tes nuits comparées entre elles (score de sommeil, durée, VFC). Seuls les facteurs dont l'écart est net, pas dû au hasard, sont gardés (5 au plus, 6 nuits concernées au moins) : ce sont des tendances observées, pas des causes prouvées.</p></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
   </div>`;
   $("rPeriod").onclick = e => { const b = e.target.closest("[data-p]"); if (!b) return; RC.period = b.dataset.p === "year" ? "year" : +b.dataset.p; renderRecup(); };
@@ -96,7 +96,7 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderSleep(P); renderReg(P); renderBB(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderRhr(P); renderCmp(); renderFacts();
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -399,55 +399,81 @@ function renderReg(P) {
     showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${clock(d.bedDt)} → ${clock(d.wakeDt)}`); });
   box.querySelector("svg").addEventListener("pointerleave", hideTip);
 }
-function renderBB(P) {
-  const box = $("rBB"), bb = RC.data.bb || [];
-  const today = RC.days[RC.days.length - 1] || {};
-  $("rBBInfo").textContent = today.bbHi != null ? `aujourd'hui : max. ${today.bbHi} · min. ${today.bbLo}` : "";
-  if (bb.length < 2) { tsChart("rBB", P, [{ k: "bbHi", l: "Max.", c: "var(--teal)" }, { k: "bbLo", l: "Min.", c: "var(--amber)" }], { band: ["bbLo", "bbHi", "var(--teal)", .12] }); return; }
-  const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(260, Math.max(180, W * .44))), m = { l: 30, r: 8, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
-  const mm = t => { const [h, mi] = t.split(":").map(Number); return h * 60 + mi; };
-  const x = v => m.l + v / 1440 * iw, y = v => m.t + ih - v / 100 * ih;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Body Battery aujourd'hui"><g class="axis">`;
-  [0, 25, 50, 75, 100].forEach(v => s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`);
-  for (let h = 0; h <= 24; h += W < 480 ? 6 : 3) s += `<text x="${x(h * 60)}" y="${H - 5}" text-anchor="middle">${h} h</text>`;
-  s += "</g>";
-  const pts = bb.map(([t, v]) => [x(mm(t)), y(v)]);
-  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
-  s += `<path d="${d}L${pts[pts.length - 1][0]},${y(0)}L${pts[0][0]},${y(0)}Z" fill="var(--info)" fill-opacity=".16"/><path d="${d}" fill="none" stroke="var(--info)" stroke-width="2.4" stroke-linejoin="round"/>`;
-  const lp = pts[pts.length - 1]; s += `<circle cx="${lp[0]}" cy="${lp[1]}" r="4.5" fill="var(--info)" stroke="var(--card)" stroke-width="2"/><text x="${lp[0] + 8}" y="${lp[1] - 8}" font-weight="700" font-size="13" fill="var(--ink)">${bb[bb.length - 1][1]}</text>`;
-  box.innerHTML = s + "</svg>";
+// FC au repos jour par jour (Garmin, sinon celle du sommeil), comparée à ta moyenne glissante des 30 jours d'avant :
+// 3 bpm ou plus au-dessus = signe de fatigue, de maladie qui couve, de chaleur ou d'alcool ; en dessous = bonne récupération.
+const RHR_HI = 3, RHR_BASE = 30;
+const rhrOf = d => d.rhr ?? d.srhr ?? null;
+function rhrBase(d) { const i = RC.days.indexOf(d), v = RC.days.slice(Math.max(0, i - RHR_BASE), i).map(rhrOf).filter(x => x != null); return v.length >= 7 ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+function renderRhr(P) {
+  const box = $("rRhr"), N = P.filter(d => rhrOf(d) != null);
+  if (!N.length) { box.innerHTML = `<div class="empty">Pas de mesure sur la période</div>`; $("rRhrAns").textContent = ""; $("rRhrInfo").textContent = ""; return; }
+  const last = N[N.length - 1], v = rhrOf(last), bl = rhrBase(last), dv = bl != null ? v - bl : null, avg = avgOf(N.map(d => ({ x: rhrOf(d) })), "x");
+  const when = last === RC.days[RC.days.length - 1] ? "ce matin" : `le ${last.dt.getDate()} ${MONTHS[last.dt.getMonth()]}`;
+  $("rRhrAns").innerHTML = dv == null ? `Ton cœur au repos était à <b>${v} bpm</b> ${when}.`
+    : `Ton cœur au repos était à <b>${v} bpm</b> ${when}, ${Math.abs(dv) < 1 ? "comme ta moyenne des 30 jours d'avant" : `${nf(Math.abs(dv))} bpm ${dv > 0 ? "au-dessus" : "en dessous"} de ta moyenne des 30 jours d'avant (${nf(bl)})`} : ${dv >= RHR_HI ? "signe de fatigue, de chaleur ou d'un virus qui couve, lève le pied si ça dure." : dv <= -1 ? "bonne récupération." : "rien d'anormal."}`;
+  $("rRhrInfo").textContent = `moyenne ${nf(avg, 1)} bpm · min. ${Math.min(...N.map(rhrOf))} · max. ${Math.max(...N.map(rhrOf))}`;
+  const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(260, Math.max(180, W * .36))), m = { l: 30, r: 6, t: 14, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const vals = N.map(rhrOf), lo = Math.floor(Math.min(...vals) - 3), hi = Math.ceil(Math.max(...vals) + 2), y = x => m.t + ih - (x - lo) / (hi - lo) * ih;
+  const gw = iw / N.length, bw = Math.max(1.5, Math.min(18, gw * .7));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Fréquence cardiaque au repos"><g class="axis">`;
+  const stp = Math.max(1, niceTicks(hi - lo, 4)[1] || 2); for (let t = Math.ceil(lo / stp) * stp; t <= hi; t += stp) svg += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`;
+  const step = Math.max(1, Math.ceil(N.length / (W < 480 ? 5 : 8)));
+  N.forEach((d, i) => { if (i % step === 0) svg += `<text x="${m.l + gw * i + gw / 2}" y="${H - 5}" text-anchor="middle">${d.dt.getDate()} ${MONTHS[d.dt.getMonth()]}</text>`; });
+  svg += "</g>";
+  // barres : au-dessus de ta moyenne glissante de 3 bpm ou plus en ambre, sinon en vert ; ligne pointillée = moyenne glissante des 30 jours d'avant
+  N.forEach((d, i) => { const r = rhrOf(d), b = rhrBase(d), cx = m.l + gw * i + gw / 2, c = b != null && r - b >= RHR_HI ? "var(--amber)" : "var(--teal)";
+    svg += `<rect x="${cx - bw / 2}" y="${y(r)}" width="${bw}" height="${Math.max(1, y(lo) - y(r))}" rx="${Math.min(3, bw / 2)}" fill="${c}" opacity=".85" data-i="${i}"/>`; });
+  let path = "", pen = false;
+  N.forEach((d, i) => { const b = rhrBase(d); if (b == null) { pen = false; return; } path += (pen ? "L" : "M") + (m.l + gw * i + gw / 2).toFixed(1) + "," + y(b).toFixed(1); pen = true; });
+  if (path) svg += `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 4" opacity=".55"/>`;
+  box.innerHTML = svg + `</svg><div class="legend">${legend([["au repos", "var(--teal)"], ["3 bpm ou plus au-dessus de ta moyenne", "var(--amber)"], ["ta moyenne des 30 jours d'avant", "var(--ink)", 1]])}</div>`;
+  box.querySelector("svg").addEventListener("pointermove", e => { const r = e.target.closest("rect[data-i]"); if (!r) return hideTip(); const d = N[+r.dataset.i], b = rhrBase(d);
+    showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${rhrOf(d)} bpm au repos${b != null ? `<br>moyenne des 30 jours d'avant : ${nf(b, 1)}` : ""}`); });
+  box.querySelector("svg").addEventListener("pointerleave", hideTip);
 }
 
 // ------------------------------------------------------------------ Comparaisons
+const CMP = { min: 6, t: 2, pts: 2, mins: 15, max: 5, loadTss: 100, lateBedMin: 45, shortNightH: 6.5, stress: 35 };
+const median = a => { const v = a.slice().sort((x, y) => x - y), k = v.length >> 1; return v.length ? (v.length % 2 ? v[k] : (v[k - 1] + v[k]) / 2) : null; };
+function prevDay(d) { const i = RC.days.indexOf(d), p = i > 0 ? RC.days[i - 1] : null, t = new Date(d.dt); t.setDate(t.getDate() - 1); return p && p.d === `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}` ? p : null; }
+// écart moyen entre deux groupes de nuits et sa netteté (t de Welch) ; null si trop peu de valeurs
+function welch(yes, no, f) {
+  const a = yes.map(f).filter(x => x != null), b = no.map(f).filter(x => x != null); if (a.length < 3 || b.length < 3) return null;
+  const m = v => v.reduce((x, y) => x + y, 0) / v.length, va = v => { const mm = m(v); return v.reduce((x, y) => x + (y - mm) ** 2, 0) / (v.length - 1); };
+  const d = m(a) - m(b), se = Math.sqrt(va(a) / a.length + va(b) / b.length);
+  return { d, t: se ? d / se : 0 };
+}
 function renderCmp() {
-  const N = RC.nights.filter(d => d.score != null || d.sl);
+  const N = RC.nights.filter(d => d.score != null || d.sl), isHard = a => window.Plan && Plan.hardRide ? Plan.hardRide(a) : (a.te || 0) >= 3.5;
+  const load = d => dayActivities(d).reduce((s, a) => s + (window.Charge ? Charge.tssOf(a) : 0), 0);
+  // coucher habituel : médiane des 30 nuits d'avant (en minutes depuis 18 h)
+  const bedBase = d => { const i = RC.nights.indexOf(d), v = RC.nights.slice(Math.max(0, i - 30), i).filter(x => x.bedDt).map(x => minsFrom18(x.bedDt)); return v.length >= 10 ? median(v) : null; };
   const F = [
-    ["Autour de la pleine lune", "± 2 jours", d => d.m.full],
-    ["Nuit chaude", "min. ≥ 15 °C", d => d.wx?.tMin != null ? d.wx.tMin >= 15 : null],
-    ["Nuit froide", "min. ≤ 3 °C", d => d.wx?.tMin != null ? d.wx.tMin <= 3 : null],
-    ["Air très humide", "≥ 90 %", d => d.wx?.hum != null ? d.wx.hum >= 90 : null],
-    ["Pression en baisse", "−6 hPa ou plus en 24 h", d => d.wx?.dP != null ? d.wx.dP <= -6 : null],
-    ["Pluie pendant la nuit", "≥ 1 mm", d => d.wx?.rain != null ? d.wx.rain >= 1 : null],
-    ["Vent fort", "rafales ≥ 35 km/h", d => d.wx?.wind != null ? d.wx.wind >= 35 : null],
-    ["Pollen élevé", "≥ 30 grains/m³", d => d.wx?.pollen != null ? d.wx.pollen >= 30 : null],
-    ["Air moyen à mauvais", "indice ≥ 50", d => d.wx?.aqi != null ? d.wx.aqi >= 50 : null],
-    ["Grosse sortie la veille", "≥ 150 km", d => nightFacts(d).km >= 150],
-    ["Effort tardif", "fini < 3 h avant le coucher", d => d.bedDt ? nightFacts(d).late : null],
+    ["Grosse journée la veille", `charge ≥ ${CMP.loadTss}`, d => load(d) >= CMP.loadTss],
+    ["Séance intense la veille", "intervalles, course rapide", d => dayActivities(d).some(isHard)],
+    ["Effort tardif", "fini moins de 3 h avant le coucher", d => d.bedDt ? nightFacts(d).late : null],
     ["Journée de repos la veille", "aucune activité", d => nightFacts(d).acts.length === 0],
-    ["Coucher après minuit", "", d => d.bedDt ? d.bedDt.getHours() < 12 : null],
+    ["Muscu la veille", "", d => dayActivities(d).some(a => /strength/.test(a.t))],
+    ["Coucher tardif pour toi", `${CMP.lateBedMin} min ou plus après ton heure habituelle`, d => { const b = d.bedDt && bedBase(d); return b == null ? null : minsFrom18(d.bedDt) - b >= CMP.lateBedMin; }],
+    ["Nuit courte la veille", `moins de ${nf(CMP.shortNightH, 1)} h`, d => { const p = prevDay(d); return p && p.sl ? p.sl / 3600 < CMP.shortNightH : null; }],
+    ["Journée stressante", `stress moyen Garmin ≥ ${CMP.stress}`, d => { const p = prevDay(d); return p && p.stress != null && p.stress > 0 ? p.stress >= CMP.stress : null; }],
+    ["Nuit chaude", "min. ≥ 15 °C", d => d.wx?.tMin != null ? d.wx.tMin >= 15 : null],
     ["Nuit de week-end", "vendredi et samedi soir", d => { const w = (d.dt.getDay() + 6) % 7; return w === 5 || w === 6; }],
   ];
   const rows = [];
   F.forEach(([label, sub, f]) => {
     const yes = [], no = [];
     N.forEach(d => { const v = f(d); if (v === true) yes.push(d); else if (v === false) no.push(d); });
-    if (yes.length < 4 || no.length < 4) return;
-    const ds = (avgOf(yes, "score") ?? 0) - (avgOf(no, "score") ?? 0), dm = ((avgOf(yes, "sl") ?? 0) - (avgOf(no, "sl") ?? 0)) / 60;
-    const dh = avgOf(yes, "hrv") != null && avgOf(no, "hrv") != null ? avgOf(yes, "hrv") - avgOf(no, "hrv") : null;
-    rows.push({ label, sub, n: yes.length, ds, dm, dh });
+    if (yes.length < CMP.min || no.length < CMP.min) return;
+    const S_ = welch(yes, no, d => d.score), M = welch(yes, no, d => d.sl ? d.sl / 60 : null), Hv = welch(yes, no, d => d.hrv);
+    const net = (S_ && Math.abs(S_.t) >= CMP.t && Math.abs(S_.d) >= CMP.pts) || (M && Math.abs(M.t) >= CMP.t && Math.abs(M.d) >= CMP.mins);
+    if (!net) return;
+    rows.push({ label, sub, n: yes.length, ds: S_ ? S_.d : 0, dm: M ? M.d : 0, dh: Hv ? Hv.d : null, w: Math.max(S_ ? Math.abs(S_.d) / 5 : 0, M ? Math.abs(M.d) / 20 : 0) });
   });
-  rows.sort((a, b) => Math.abs(b.ds) - Math.abs(a.ds));
-  if (!rows.length) { $("rCmp").innerHTML = `<div class="empty">Pas encore assez de nuits pour comparer.</div>`; return; }
+  rows.sort((a, b) => b.w - a.w); rows.splice(CMP.max);
+  if (!rows.length) { $("rCmpAns").textContent = N.length < 30 ? "Pas encore assez de nuits pour voir ce qui joue sur ton sommeil." : "Rien ne ressort nettement : tes nuits varient sans lien clair avec ce qui est mesuré ici."; $("rCmp").innerHTML = ""; return; }
+  const top = rows[0], eff = r => Math.abs(r.ds) >= CMP.pts ? `${r.ds >= 0 ? "+" : "−"}${nf(Math.abs(r.ds), 1)} pts de score` : `${r.dm >= 0 ? "+" : "−"}${nf(Math.abs(r.dm))} min de sommeil`;
+  $("rCmpAns").innerHTML = `Ce qui joue le plus sur tes nuits : <b>${top.label.toLowerCase()}</b> (${eff(top)} en moyenne).`;
   const sc = 12;
   $("rCmp").innerHTML = rows.map(r => { const w = Math.min(50, Math.abs(r.ds) / sc * 50), pos = r.ds >= 0;
     return `<div class="row"><div>${r.label}<small>${r.sub ? r.sub + " · " : ""}${r.n} nuits</small></div>

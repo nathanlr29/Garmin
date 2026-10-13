@@ -1,6 +1,6 @@
 "use strict";
 // Points d'arrêt le long d'une sortie (eau, ravitaillement, toilettes, réparation) : OpenStreetMap via Overpass.
-// Une seule requête par trace (couloir de 150 m), gardée en cache ; si le service ne répond pas, la sortie s'affiche sans les arrêts.
+// Une seule requête par trace (rectangles le long du tracé), gardée en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
 // Les 400 premiers et derniers mètres de la trace ne sont jamais envoyés (le point de départ reste sur l'appareil).
 (() => {
 const $ = id => document.getElementById(id);
@@ -76,66 +76,74 @@ function nameOf(t, k) {
 
 // ------------------------------------------------------------------ Couloir et requête Overpass
 const CUT = 400, NEAR = 150, VOIR = 300;  // « À voir » : à moins de 300 m du tracé, avec une fiche Wikipédia
-function simplify(xy, tol) {  // Douglas-Peucker itératif
-  const keep = new Uint8Array(xy.length); keep[0] = keep[xy.length - 1] = 1;
-  const st = [[0, xy.length - 1]];
-  while (st.length) {
-    const [a, b] = st.pop(), [ax, ay] = xy[a], [bx, by] = xy[b], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1;
-    let md = 0, mi = -1;
-    for (let i = a + 1; i < b; i++) { const [x, y] = xy[i], f = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2)), d = Math.hypot(x - ax - f * dx, y - ay - f * dy); if (d > md) { md = d; mi = i; } }
-    if (md > tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); }
-  }
-  return xy.map((_, i) => i).filter(i => keep[i]);
-}
-function corridor(P) {  // tracé simplifié, sans les abords du départ et de l'arrivée
+// Rectangles le long du tracé (tronçons de 3 km, élargis du rayon de recherche), sans les abords du départ et de l'arrivée.
+// Une requête par rectangle utilise l'index spatial d'Overpass : bien plus rapide (et moins souvent en échec) que « around » sur une longue ligne.
+const SEG = 3000;
+function corridor(P, pad = NEAR) {
   const tot = P[P.length - 1].d, Q = P.filter(p => p.d >= CUT && p.d <= tot - CUT);
   if (Q.length < 2) return null;
-  const c = Math.cos(rad(Q[0].lat)), xy = Q.map(p => [p.lon * c * 111320, p.lat * 110540]);
-  let tol = 40, idx = simplify(xy, tol);
-  while (idx.length > 250) { tol *= 1.5; idx = simplify(xy, tol); }
-  return idx.map(i => `${Q[i].lat.toFixed(5)},${Q[i].lon.toFixed(5)}`).join(",");
+  const c = Math.cos(rad(Q[0].lat)), dLa = pad / 110540, dLo = pad / (111320 * c), B = [];
+  let cur = null;
+  Q.forEach(p => {
+    if (!cur || p.d - cur.d0 > SEG) { if (cur) B.push(cur); cur = { d0: p.d, s: p.lat, n: p.lat, w: p.lon, e: p.lon }; }
+    cur.s = Math.min(cur.s, p.lat); cur.n = Math.max(cur.n, p.lat); cur.w = Math.min(cur.w, p.lon); cur.e = Math.max(cur.e, p.lon);
+  });
+  B.push(cur);
+  return B.map(b => [b.s - dLa, b.w - dLo, b.n + dLa, b.e + dLo].map(v => v.toFixed(4)).join(",")).join("|");
 }
-const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
-// filtres sur des clés fixes (index Overpass) : bien plus rapides que les expressions sur les clés
-const query = L => {
-  const A = (r, f) => `nwr${f}(around:${r},${L});`;
-  return `[out:json][timeout:60];(`
-    + A(NEAR, '["amenity"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station)$"]')
-    + A(NEAR, '["shop"~"^(bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle)$"]')
-    + A(NEAR, '["landuse"="cemetery"]') + A(NEAR, '["amenity"="grave_yard"]')
-    // « À voir » : le tag wikipedia ou wikidata est vérifié ensuite (voirKind)
-    + A(VOIR, '["historic"~"^(castle|manor|chateau|church|chapel|archaeological_site|megalith|menhir|dolmen|tumulus|mill|windmill|watermill|wayside_cross|wayside_shrine|calvary|monument|ruins)$"]["wikidata"]')
-    + A(VOIR, '["amenity"="place_of_worship"]["wikidata"]') + A(VOIR, '["tourism"="viewpoint"]') + A(VOIR, '["man_made"~"^(windmill|watermill)$"]["wikidata"]')
-    + A(VOIR, '["natural"~"^(peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge)$"]["wikidata"]') + A(VOIR, '["leisure"="nature_reserve"]["wikidata"]')
-    + `);out center tags;`;
+const OVP = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+// filtres sur des clés fixes (index Overpass) ; « À voir » seulement si la Pause découverte est cochée
+const query = (L, voir) => {
+  const st = [];
+  L.split("|").forEach(bb => {
+    const A = f => st.push(`nwr${f}(${bb});`);
+    A('["amenity"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|grave_yard)$"]');
+    A('["shop"~"^(bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle)$"]');
+    A('["landuse"="cemetery"]');
+    if (voir) {  // le tag wikipedia ou wikidata est vérifié ensuite (voirKind)
+      A('["historic"~"^(castle|manor|chateau|church|chapel|archaeological_site|megalith|menhir|dolmen|tumulus|mill|windmill|watermill|wayside_cross|wayside_shrine|calvary|monument|ruins)$"]["wikidata"]');
+      A('["amenity"="place_of_worship"]["wikidata"]'); A('["tourism"="viewpoint"]'); A('["man_made"~"^(windmill|watermill)$"]["wikidata"]');
+      A('["natural"~"^(peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge)$"]["wikidata"]'); A('["leisure"="nature_reserve"]["wikidata"]');
+    }
+  });
+  return `[out:json][timeout:25][maxsize:67108864];(${st.join("")});out tags center qt;`;
 };
 const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type"];
-const K_POI = "soPoi", POI_V = 3, POI_TTL = 7 * 864e5;
+const K_POI = "soPoi", POI_V = 4, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
-async function fetchPois(L) {
-  const key = hash(POI_V + "|" + L), cache = LS.get(K_POI, {});
+// Trois serveurs : le 2e part si le 1er n'a pas répondu au bout de 10 s (ou dès qu'il échoue) ; la première réponse valable gagne.
+function overpass(q) {
+  return new Promise((ok, ko) => {
+    let i = 0, live = 0, done = false, last; const acs = [];
+    const next = () => {
+      if (done) return;
+      if (i >= OVP.length) { if (!live) { done = true; ko(last || new Error("Overpass indisponible")); } return; }
+      const url = OVP[i++], ac = new AbortController(); acs.push(ac); live++;
+      const to = setTimeout(() => ac.abort(), 35000), hedge = setTimeout(next, 10000);
+      fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: ac.signal })
+        .then(async r => { if (!r.ok) throw new Error("Overpass " + r.status); const j = await r.json();
+          // délai dépassé ou mémoire pleine : Overpass répond 200 avec une « remark » et une liste vide ou incomplète
+          if (j.remark && /runtime error|timed out|out of memory|rate_limited/i.test(j.remark)) throw new Error(j.remark); return j; })
+        .then(j => { if (done) return; done = true; acs.forEach(a => a !== ac && a.abort()); ok(j); })
+        .catch(e => { last = e; })
+        .finally(() => { clearTimeout(to); clearTimeout(hedge); live--; next(); });
+    };
+    next();
+  });
+}
+async function fetchPois(L, voir) {
+  const key = hash(POI_V + "|" + voir + "|" + L), cache = LS.get(K_POI, {});
   if (cache[key] && Date.now() - cache[key].at < POI_TTL) return cache[key].els;
   if (ST.inflight.has(key)) return ST.inflight.get(key);
   const pr = (async () => {
-    let last;
-    for (const url of OVP) {
-      const ac = new AbortController(), to = setTimeout(() => ac.abort(), 45000);
-      try {
-        const r = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(query(L)), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: ac.signal });
-        if (!r.ok) throw new Error("Overpass " + r.status);
-        const j = await r.json();
-        // délai dépassé ou mémoire pleine : Overpass répond 200 avec une « remark » et une liste vide ou incomplète
-        if (j.remark && /runtime error|timed out|out of memory/i.test(j.remark)) throw new Error(j.remark);
-        const els = (j.elements || []).map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
-          return { id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }; }).filter(e => e.lat != null);
-        const c = LS.get(K_POI, {}); c[key] = { at: Date.now(), els };
-        Object.keys(c).sort((a, b) => c[b].at - c[a].at).slice(4).forEach(k => delete c[k]);  // 4 traces gardées au plus
-        if (!LS.set(K_POI, c)) LS.set(K_POI, { [key]: c[key] });
-        return els;
-      } catch (e) { last = e; } finally { clearTimeout(to); }
-    }
-    throw last || new Error("Overpass indisponible");
+    const j = await overpass(query(L, voir));
+    const els = (j.elements || []).map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
+      return { id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }; }).filter(e => e.lat != null && (kindOf(e.t) || voirKind(e.t)));
+    const c = LS.get(K_POI, {}); c[key] = { at: Date.now(), els };
+    Object.keys(c).sort((a, b) => c[b].at - c[a].at).slice(4).forEach(k => delete c[k]);  // 4 traces gardées au plus
+    if (!LS.set(K_POI, c)) LS.set(K_POI, { [key]: c[key] });
+    return els;
   })();
   ST.inflight.set(key, pr); pr.finally(() => ST.inflight.delete(key)).catch(() => {});
   return pr;
@@ -215,16 +223,22 @@ function place(els, P, r) {
 }
 
 // ------------------------------------------------------------------ Arrêts conseillés (1 à 3), reliés à la carte Nutrition
+// Jamais en début de sortie : premier arrêt après EARLY h de route (plus tôt s'il fait chaud), aucun dans la dernière demi-heure.
+// Parmi les points au bon moment, on préfère un vrai point d'eau, un commerce ouvert, et un bourg (plusieurs commerces à côté).
+const EARLY = 1.75, EARLY_HOT = 1.25, MIN_H = 2.25, MIN_H_HOT = 1.75, LATE = .4;
 function advise(L, r, nut) {
-  const h = r.secs / 3600, t0 = r.T[0], hot = r.ok && r.tmax >= 25, adv = [], used = new Set();
-  const atH = p => (p.t0 - t0) / 3600e3, inRange = p => atH(p) > .2 * h && atH(p) < h - .25;
-  const pick = (cands, target, cost) => { let best = null, bc = Infinity; cands.forEach(p => { if (used.has(p.id) || !inRange(p)) return; const c = Math.abs(atH(p) - target) * 60 + p.off / 15 + cost(p); if (c < bc) { bc = c; best = p; } }); return best; };
+  const h = r.secs / 3600, t0 = r.T[0], hot = r.ok && r.tmax >= 25, adv = [], used = new Set(), early = hot ? EARLY_HOT : EARLY;
+  const atH = p => (p.t0 - t0) / 3600e3, inRange = p => atH(p) >= early && atH(p) <= h - LATE;
+  // un bourg : au moins 2 autres points d'eau ou commerces à moins de 300 m (choix sur place, toilettes souvent proches)
+  const town = p => L.filter(q => q !== p && q.cat !== "voir" && dist([p.lat, p.lon], [q.lat, q.lon]) < 300).length >= 2 ? -8 : 0;
+  const pick = (cands, target, cost) => { let best = null, bc = Infinity; cands.forEach(p => { if (used.has(p.id) || !inRange(p)) return; const c = Math.abs(atH(p) - target) * 40 + p.off / 15 + cost(p) + town(p); if (c < bc) { bc = c; best = p; } }); return best; };
   const cap = nut ? nut.cap : 1.2, drink = nut ? nut.drink : .6, rate = nut ? nut.rate : 0;
-  const refill = p => p.k === "water" ? 0 : p.k === "cemetery" ? 20 + (p.winter ? 30 : 0) : p.cat === "ravito" ? (p.oh && p.oh.open === false ? Infinity : p.oh && p.oh.open === true ? 15 : 30) : Infinity;
-  // eau : vers le milieu au-delà de 2 h, plus tôt s'il fait chaud ou si les bidons sont vides avant
-  if (h > 2 || (hot && h > 1.5)) {
+  const shut = p => p.oh && p.oh.open === false, known = p => p.oh && p.oh.open === true;
+  const refill = p => p.k === "water" ? 0 : p.k === "cemetery" ? 25 + (p.winter ? 30 : 0) : p.cat === "ravito" ? (shut(p) ? Infinity : (known(p) ? 8 : 22) + (p.k === "fuel" ? 8 : 0)) : Infinity;
+  // eau : vers le milieu des longues sorties, plus tôt s'il fait chaud ou si les bidons sont vides avant
+  if (h > MIN_H || (hot && h > MIN_H_HOT)) {
     const empty = cap / drink;
-    let target = Math.min(h / 2, empty * .9); if (hot) target = Math.min(target, h * .4);
+    let target = Math.max(early, Math.min(h / 2, empty * .9)); if (hot) target = Math.max(early, Math.min(target, h * .4));
     const w = pick(L, target, refill);
     if (w) { used.add(w.id); adv.push({ p: w, role: "eau", why: `Vers ${hm(w.t0)}, ${dur(atH(w))} après le départ : à ${fmt(drink * 1000)} ml/h, tes ${fmt(cap, 1)} L de bidons ${atH(w) >= empty * .8 ? "seront presque vides" : "seront bien entamés"}${hot ? " (il fait chaud)" : ""}. Remplis-les.` });
       // deuxième remplissage si la sortie est longue
@@ -234,11 +248,11 @@ function advise(L, r, nut) {
   }
   // ravitaillement ouvert au-delà de 3 h
   if (h > 3 && adv.length < 3) {
-    const shop = p => p.cat !== "ravito" ? Infinity : p.oh && p.oh.open === false ? Infinity : (p.oh && p.oh.open === true ? 0 : 25) + (p.k === "fuel" ? 8 : 0);
+    const shop = p => p.cat !== "ravito" || shut(p) ? Infinity : (known(p) ? 0 : 20) + (p.k === "fuel" ? 8 : 0) + (p.k === "bakery" || p.k === "shop" ? 0 : 4);
     const same = adv.find(a => a.p.cat === "ravito" && Math.abs(atH(a.p) - h * .55) < .6);
     if (same) { same.role = "eau + ravito"; same.why += ` Profites-en pour acheter de quoi manger${rate ? ` (${rate} g de glucides par heure)` : ""}.`; }
-    else { const f = pick(L, h * .55, shop);
-      if (f) { used.add(f.id); adv.push({ p: f, role: "ravito", why: `Arrêt ravito vers ${hm(f.t0)}${f.oh && f.oh.open ? "" : " (horaires à vérifier)"}${rate ? ` : il te faut ${rate} g de glucides par heure, de quoi recharger les poches pour la fin` : ""}${f.cat === "ravito" && f.k !== "fuel" ? ", et tu peux y remplir les bidons" : ""}.` }); } }
+    else { const f = pick(L, Math.max(early, h * .55), shop);
+      if (f) { used.add(f.id); adv.push({ p: f, role: "ravito", why: `Arrêt ravito vers ${hm(f.t0)}${known(f) ? "" : " (horaires à vérifier)"}${rate ? ` : il te faut ${rate} g de glucides par heure, de quoi recharger les poches pour la fin` : ""}${f.cat === "ravito" && f.k !== "fuel" ? ", et tu peux y remplir les bidons" : ""}.` }); } }
   }
   return adv.slice(0, 3).sort((a, b) => a.p.km - b.p.km);
 }
@@ -254,6 +268,8 @@ function setGps(id, v) { const s = LS.get(K_GPS, {}), sig = ST.sig; s[sig] = { .
 // ------------------------------------------------------------------ Affichage
 const K_CAT = "soStopCat";
 const K_DEC = "soDecouv", decouv = () => LS.get(K_DEC, false) === true;
+const K_ALL = "soStopAll", allOn = () => LS.get(K_ALL, false) === true;   // liste complète dépliée : tous les points sur la carte et le profil
+const shownOnMap = (p, on, advIds) => advIds.has(p.id) || (p.cat === "voir" ? on.voir : allOn() && on[p.cat]);
 const catsOn = () => ({ eau: true, ravito: true, wc: true, repa: true, ...LS.get(K_CAT, {}), voir: decouv() && LS.get(K_CAT, {}).voir !== false });
 function iconHtml(p, big) { const c = CATS[p.cat]; return `<span class="stmk${big ? " big" : ""}" style="--c:${c.col}">${KINDS[p.k].ic}</span>`; }
 function tipHtml(p) { const st = statusTxt(p); return `<b>${esc(p.name)}</b><br>${KINDS[p.k].l} · km ${fmt(p.km, 1)} · vers ${hm(p.t0)}<br>à ${fmt(p.off)} m du tracé${st ? `<br>${esc(st)}` : ""}`; }
@@ -262,7 +278,7 @@ function drawMap() {
   if (!ST.layer || ST.layerMap !== map) { if (ST.layer) ST.layer.remove(); ST.layer = L.layerGroup().addTo(map); ST.layerMap = map; }
   ST.layer.clearLayers(); ST.mk = {};
   const on = catsOn(), advIds = new Set(ST.adv.map(a => a.p.id));
-  ST.list.filter(p => on[p.cat] || advIds.has(p.id)).forEach(p => {
+  ST.list.filter(p => shownOnMap(p, on, advIds)).forEach(p => {
     const big = advIds.has(p.id), s = big ? 30 : 24;
     ST.mk[p.id] = L.marker([p.lat, p.lon], { zIndexOffset: big ? 600 : 300, icon: L.divIcon({ className: "stdiv", html: iconHtml(p, big), iconSize: [s, s], iconAnchor: [s / 2, s / 2] }) }).bindTooltip(tipHtml(p)).addTo(ST.layer);
   });
@@ -281,12 +297,14 @@ function render() {
   if (info) info.textContent = ST.stops.length ? `${ST.stops.length} à moins de ${NEAR} m du tracé` : "";
   const shown = L_.filter(p => on[p.cat] && p.cat !== "voir"), lim = ST.showAll ? shown.length : 10, nut = ST.ctx.nut;
   box.innerHTML = `${ST.adv.length ? `<div class="stadv">${ST.adv.map(a => `<div class="stac"><div class="stach"><span class="stbadge">Arrêt conseillé · ${esc(a.role)}</span></div>${row(a.p, true)}<p>${esc(a.why)}</p></div>`).join("")}</div>`
-      : `<p class="sosmall">${ST.ctx.r.secs < 2 * 3600 ? "Sortie de moins de 2 h : pas besoin de s'arrêter, 1 ou 2 bidons suffisent." : "Aucun point d'eau ni commerce ouvert trouvé au bon moment près du tracé : pars avec les bidons pleins et prévois un arrêt dans un bourg."}</p>`}
+      : `<p class="sosmall">${ST.ctx.r.secs <= MIN_H * 3600 ? "Sortie de moins de 2 h 15 : pas besoin de s'arrêter, 1 ou 2 bidons suffisent." : "Aucun point d'eau ni commerce ouvert trouvé au bon moment près du tracé : pars avec les bidons pleins et prévois un arrêt dans un bourg."}</p>`}
     ${nut && ST.ctx.r.secs >= 2 * 3600 ? `<p class="note stnut">Calé sur la carte Nutrition : ${fmt(nut.drink * 1000)} ml/h à boire${nut.rate ? `, ${nut.rate} g de glucides par heure` : ""}.</p>` : ""}
     <label class="stdec"><input type="checkbox" id="stDec" ${decouv() ? "checked" : ""}><span><b>Pause découverte</b><small>3 à 5 lieux à voir près du tracé (château, mégalithe, chapelle, point de vue…), avec une anecdote Wikipédia</small></span></label>
     ${decouv() ? voirHtml() : ""}
+    <details class="stall" id="stAll" ${allOn() ? "open" : ""}><summary>Tous les points le long du tracé <small>${ST.stops.length}</small></summary>
     <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).filter(([k]) => k !== "voir" || decouv()).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
     ${shown.length ? `<div class="stlist">${shown.slice(0, lim).map(p => row(p)).join("")}</div>${shown.length > lim ? `<button class="btn2 stmore" id="stMore">Afficher les ${shown.length} points</button>` : ""}` : `<p class="note">Rien dans ces catégories près du tracé.</p>`}
+    </details>
     <p class="note">Données OpenStreetMap, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
     ${HELP}`;
   box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const k = b.dataset.cat, c = LS.get(K_CAT, {}); c[k] = !catsOn()[k]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
@@ -294,8 +312,9 @@ function render() {
   box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const m = ST.mk && ST.mk[b.dataset.go], map = ST.ctx.map; if (!m || !map) return;
     map.setView(m.getLatLng(), Math.max(map.getZoom(), 14)); m.openTooltip();
     const rc = map.getContainer().getBoundingClientRect(); if (rc.bottom < 0 || rc.top > innerHeight) map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" }); });
+  $("stAll").ontoggle = e => { if (e.target.open === allOn()) return; LS.set(K_ALL, e.target.open); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); };
   if ($("stMore")) $("stMore").onclick = () => { ST.showAll = true; render(); };
-  $("stDec").onchange = e => { LS.set(K_DEC, e.target.checked); setList(); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); if (e.target.checked) findVoir(ST.seq); };
+  $("stDec").onchange = e => { LS.set(K_DEC, e.target.checked); if (e.target.checked) update(ST.ctx); else { setList(); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); } };
 }
 function voirHtml() {
   const V = ST.voirSel;
@@ -387,21 +406,24 @@ async function findVoir(seq) {
 async function update(ctx, retry) {
   const seq = ++ST.seq; ST.ctx = ctx;
   const sig = sigOf(ctx.route); if (sig !== ST.sig) { ST.sig = sig; ST.gps = (LS.get(K_GPS, {})[sig]) || {}; ST.showAll = false; }
-  const L_ = corridor(ctx.P); if (!L_) { ST.poi = []; ST.err = ""; annotate(); render(); return; }
-  const key = hash(L_);
+  const voir = decouv(), L_ = corridor(ctx.P, voir ? VOIR : NEAR + 50); if (!L_) { ST.poi = []; ST.err = ""; annotate(); render(); return; }
+  const key = hash(voir + "|" + L_);
   if (key !== ST.key || retry) { ST.poi = null; ST.err = ""; ST.list = []; ST.adv = []; ST.voirSel = null; ST.voirErr = ""; render(); drawMap();
-    try { const els = await fetchPois(L_); if (seq !== ST.seq) return; ST.poi = els; ST.key = key; }
-    catch (e) { if (seq !== ST.seq) return; ST.err = "Points d'arrêt indisponibles pour l'instant (le service OpenStreetMap ne répond pas)."; ST.key = null; render(); return; } }
-  if (ST.poi.some(e => e.t.opening_hours)) await ohLib();
-  if (seq !== ST.seq) return;
-  annotate(); render(); drawMap(); ctx.onDone && ctx.onDone();
+    try { const els = await fetchPois(L_, voir); if (seq !== ST.seq) return; ST.poi = els; ST.key = key; }
+    catch (e) { if (seq !== ST.seq) return; ST.err = "Points d'arrêt indisponibles pour l'instant : les serveurs OpenStreetMap sont saturés."; ST.key = null; render(); return; } }
+  try {
+    if (ST.poi.some(e => e.t.opening_hours)) await ohLib();
+    if (seq !== ST.seq) return;
+    annotate();
+  } catch (e) { if (seq !== ST.seq) return; console.error(e); ST.err = "Points d'arrêt illisibles pour ce parcours."; ST.key = null; render(); return; }
+  render(); drawMap(); ctx.onDone && ctx.onDone();
   if (decouv()) findVoir(seq);
 }
 // icônes sur le profil : [{x (m), ic, adv}]
 function icons() {
   if (!ST.ctx || !ST.poi) return [];
   const on = catsOn(), adv = new Set(ST.adv.map(a => a.p.id));
-  return ST.list.filter(p => on[p.cat] || adv.has(p.id)).map(p => ({ d: p.km * 1000, ic: KINDS[p.k].ic, adv: adv.has(p.id), name: p.name }));
+  return ST.list.filter(p => shownOnMap(p, on, adv)).map(p => ({ d: p.km * 1000, ic: KINDS[p.k].ic, adv: adv.has(p.id), name: p.name }));
 }
 // ------------------------------------------------------------------ Export GPS (GPX et FIT)
 // Nom court lisible sur l'Edge (15 caractères au plus) : « Eau cimetière », « Boulang. 14h » (heure de fermeture si connue)

@@ -235,6 +235,7 @@ function renderLoad() {
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
         <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button><button class="btn" id="soGpx">Exporter en GPX</button><button class="btn" id="soFit" title="Parcours FIT avec les points d'arrêt : alertes « À venir » sur le GPS Garmin">Exporter pour Garmin (.fit)</button>
       </div></div>
+    <p class="soerr" id="soErr"></p>
     ${altBar(r)}
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
     <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
@@ -306,36 +307,42 @@ async function renderPick() {
   $("pShort").onchange = e => { SO.pickShort = e.target.checked; list(); };
   list();
 }
-function showErr(m) { const e = $("soErr"); if (e) e.textContent = m; else alert(m); }
+function showErr(m) { const e = $("soErr"); if (e) e.textContent = m; }
 function gain(P) { let g = 0; for (let i = 1; i < P.length; i++) g += Math.max(0, P[i].e - P[i - 1].e); return g; }
 
+// Changer de parcours plusieurs fois de suite : seul le dernier choix s'affiche (les calculs plus anciens sont abandonnés en route)
 async function setRoute(r) {
-  showErr("Analyse de la trace…");
+  const seq = SO.routeSeq = (SO.routeSeq || 0) + 1, body = $("soBody");
+  if (body) body.classList.add("sobusy");   // pas d'écran d'attente : l'ancienne analyse s'estompe le temps du calcul
   try {
     r.pts = await fillElevation(r.pts);
+    if (seq !== SO.routeSeq) return;
     if (!LS.set("sortieRoute", r)) { r.pts = r.pts.filter((_, i) => i % 3 === 0 || i === r.pts.length - 1); LS.set("sortieRoute", r); }
     SO.route = r; SO.P = profile(r.pts); SO.climbs = climbs(SO.P); SO.wx = null;
     renderLoad(); $("soBody").hidden = false; compute();
-  } catch (e) { showErr(e.message); }
+  } catch (e) { if (seq === SO.routeSeq) showErr(e.message); }
+  finally { if (seq === SO.routeSeq && body) body.classList.remove("sobusy"); }
 }
 
 async function compute() {
   if (!SO.P) return;
-  const s = settings(), start = startOf(s);
+  const seq = SO.seq = (SO.seq || 0) + 1, P = SO.P, s = settings(), start = startOf(s);
   let wx = null, err = "";
-  try { wx = await loadWx(SO.P, start); } catch (e) { err = e.message; }
+  try { wx = await loadWx(P, start); } catch (e) { err = e.message; }
+  if (seq !== SO.seq || P !== SO.P) return;   // parcours ou réglages changés pendant l'attente de la météo
   if (wx && wx.loc[0].hourly.temperature_2m.every(v => v == null)) { err = "Pas encore de prévisions pour cette date (16 jours maximum)."; wx = null; }
-  const res = simulate(SO.P, wx, start, s.speed, false);
+  const res = simulate(P, wx, start, s.speed, false);
   SO.res = res;
-  const loop = dist([SO.P[0].lat, SO.P[0].lon], [SO.P[SO.P.length - 1].lat, SO.P[SO.P.length - 1].lon]) < 3000;
-  const rev = wx && loop ? simulate(SO.P, wx, start, s.speed, true) : null;
+  const loop = dist([P[0].lat, P[0].lon], [P[P.length - 1].lat, P[P.length - 1].lon]) < 3000;
+  const rev = wx && loop ? simulate(P, wx, start, s.speed, true) : null;
   // créneaux de départ de la journée
   const best = [];
-  if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(SO.P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
+  if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
   renderTiles(res, err); renderVerdict(res, rev, best, err, s); renderBest(best, s);
-  await renderMap(res, wx); renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
+  await renderMap(res, wx); if (seq !== SO.seq) return;
+  renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
   // points d'arrêt (OpenStreetMap) : en dernier, la sortie s'affiche même si le service ne répond pas
-  if (window.Arrets && SO.res === res) Arrets.update({ P: SO.P, r: res, map: SO.map, nut: SO.nut, route: SO.route,
+  if (window.Arrets && SO.res === res) Arrets.update({ P, r: res, map: SO.map, nut: SO.nut, route: SO.route,
     onDone: () => { if (SO.res === res) { renderProfile(res); renderNutrition(res); } }, onIcons: () => { if (SO.res === res) renderProfile(res); } });
 }
 
@@ -386,6 +393,7 @@ function arrowIcon(w) {
 }
 async function renderMap(r, wx) {
   try { await ensureLeaflet(); } catch (e) { $("soMap").innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
+  if (SO.res !== r) return;   // un autre parcours a été choisi entre-temps
   if (!SO.map) {
     SO.map = L.map("soMap", { zoomControl: true, attributionControl: true });
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(SO.map);
@@ -408,8 +416,9 @@ async function renderMap(r, wx) {
   add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#16a34a", fillOpacity: 1 }).bindTooltip("Départ"));
   add(L.circleMarker([P[P.length - 1].lat, P[P.length - 1].lon], { radius: 6, color: "#fff", weight: 3, fillColor: "#222226", fillOpacity: 1 }).bindTooltip("Arrivée"));
   SO.hover = add(L.circleMarker([P[0].lat, P[0].lon], { radius: 7, color: "#fff", weight: 3, fillColor: "#fc4c02", opacity: 0, fillOpacity: 0 }));
-  SO.map.fitBounds(L.latLngBounds(P.map(p => [p.lat, p.lon])), { padding: [24, 24] });
-  setTimeout(() => SO.map.invalidateSize(), 50);
+  // cadrage sur le nouveau parcours, refait une fois la mise en page terminée (carte qui vient d'apparaître ou de changer de taille)
+  const bounds = L.latLngBounds(P.map(p => [p.lat, p.lon])), frame = () => { if (SO.P !== P) return; SO.map.invalidateSize(); SO.map.fitBounds(bounds, { padding: [24, 24] }); };
+  frame(); requestAnimationFrame(frame); setTimeout(frame, 120);
 }
 
 function renderProfile(r) {
@@ -1143,7 +1152,7 @@ function renderGen() {
       <p class="gwhy">${esc(c.why)}</p>
       ${(w => w.length ? `<small class="gwarn">${w.join(" · ")}</small>` : "")([c.ov >= .01 ? `${fmt(c.ov * 100)} % en double` : "", c.main > .03 ? `${fmt(c.main * 100)} % sur grande route` : ""].filter(Boolean))}
       ${c.cut ? `<small class="gnote2">Aller-retour de ${fmt(c.cut)} m retiré du tracé</small>` : ""}
-      ${on ? (chosen === c.id ? `<button class="btn2" disabled>Analyse affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
+      ${on ? (chosen === c.id ? `<button class="btn2" disabled>Boucle affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
     <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>

@@ -34,6 +34,15 @@ assert.equal(adv.length, 2, "un arrêt eau et un ravito");
 assert.equal(adv[0].p.name, "Fontaine"); assert.match(adv[0].role, /eau/);
 assert.equal(adv[1].p.name, "Ouverte", "la boulangerie fermée (samedi matin) n'est pas conseillée"); assert.equal(adv[1].role, "ravito");
 assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de 2 h : pas d'arrêt");
+// 2 bis) jamais d'arrêt conseillé en début de sortie : rien avant 1 h 45, rien sous 2 h 15 de sortie
+{ const early = [node(.1, 10, { amenity: "drinking_water" }), node(.3, 10, { shop: "bakery", opening_hours: "Mo-Su 07:00-19:00" })], LE = A._place(early, P, r);
+  LE.forEach(p => { if (p.t.opening_hours) p.oh = A._ohSimple(p.t.opening_hours, p.t0); });
+  assert.equal(A._advise(LE, r, { drink: .6, cap: 1.2, rate: 60, water: 2.4 }).length, 0, "points à 24 et 72 min : pas conseillés");
+  assert.equal(A._advise(L, { ...r, secs: 2.2 * 3600 }, null).length, 0, "2 h 12 : pas d'arrêt"); }
+// 2 ter) requête Overpass : rectangles de 3 km le long du tracé, sans les 400 premiers et derniers mètres
+{ const C = A._corridor(P), B = C.split("|").map(b => b.split(",").map(Number));
+  assert.ok(B.length >= 32 && B.length <= 34, "un rectangle par tronçon de 3 km : " + B.length);
+  assert.ok(B[0][0] > 48.1 + 200 / 111320, "le départ n'est pas dans le premier rectangle"); }
 // 3) Pause découverte : seulement les lieux avec une fiche, anecdote de 1 à 2 phrases sans ajout
 assert.equal(A._voirKind({ historic: "castle" }), null, "pas de fiche : écarté");
 assert.equal(A._voirKind({ historic: "archaeological_site", archaeological_site: "megalith", wikidata: "Q1" }), "megalith");

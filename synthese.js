@@ -408,6 +408,30 @@ function blkToday(D) {
     <div class="sygauges"><div class="sygauge"><div class="sygh"><span>Fraîcheur ${q("fraicheur")}</span><b style="color:${BAND[A.tone === "bad" ? "bad" : A.label === "chargé" ? "mid" : "good"]}">${f.tsb >= 0 ? "+" : ""}${nf(f.tsb)}</b><small>${A.label}</small></div>${gauge(f.tsb, FRAIS.min, FRAIS.max, FRAIS.segs, FRAIS.good, "Fraîcheur")}${helpP("fraicheur")}</div>${recRow}</div>
     <p class="syfatl">Fatigue récente : <b>${nf(f.atl)}</b> ${q("fatigue")} <span>contre un niveau de ${nf(f.ctl)} : ${f.atl > f.ctl ? "plus fatigué que ton habitude" : "moins fatigué que ton habitude"}</span></p>${helpP("fatigue")}</section>`;
 }
+function blkWx() {
+  return `<section class="card span12 syblk" id="syWx" hidden><h2>Ce week-end, dehors ?</h2><div id="syWxBody"></div></section>`;
+}
+// prévisions Open-Meteo (gardées 1 h sur l'appareil), au point de départ des boucles s'il est réglé, sinon au centre de la ville de config.json ;
+// coordonnées arrondies à 0,01° (≈ 1 km) : le point de départ n'est jamais envoyé exactement. En cas d'échec, la carte reste cachée.
+async function loadWx() {
+  const box = document.getElementById("syWx"); if (!box) return;
+  let st = null; try { st = JSON.parse(localStorage.getItem("soStart")); } catch (e) {}
+  const cfg = (typeof S !== "undefined" && S.cfg) || {}, lat = st && isFinite(st.lat) ? st.lat : cfg.latitude ?? 48.1173, lon = st && isFinite(st.lon) ? st.lon : cfg.longitude ?? -1.6778;
+  const days = weekendDays(Date.now()), a = ymd(days[0]), b = ymd(days[days.length - 1]), key = `${lat.toFixed(2)},${lon.toFixed(2)}|${a}|${b}`;
+  let j = null; try { const c = JSON.parse(localStorage.getItem(K_WX)); if (c && c.key === key && Date.now() - c.at < WX.ttl) j = c.j; } catch (e) {}
+  if (!j) {
+    try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m&start_date=${a}&end_date=${b}&timezone=Europe%2FParis`);
+      if (!r.ok) return; j = (await r.json()).hourly; if (!j) return; lsSet(K_WX, JSON.stringify({ key, at: Date.now(), j })); } catch (e) { return; }
+  }
+  const el = document.getElementById("syWx"); if (!el) return;
+  const L = weekendWx(j, days); if (!L.some(d => d.ok)) return;
+  const far = Math.round((days[0] - new Date(new Date().toDateString())) / DAY) >= WX.far;
+  const tone = d => d.ok ? BAND[d.verdict] : "var(--ghost)";
+  el.querySelector("#syWxBody").innerHTML = `<p class="syans">${weekendAnswer(L)}</p>
+    <div class="sywx">${L.map(d => `<div class="sywxd"><span class="sydot2" style="background:${tone(d)}"></span><b>${cap1(dayName(d.dt))}</b><span>${wxLine(d)}</span></div>`).join("")}</div>
+    ${far ? `<p class="note">Prévisions à ${Math.round((days[0] - new Date(new Date().toDateString())) / DAY)} jours, encore incertaines : reviens jeudi ou vendredi.</p>` : ""}`;
+  el.hidden = false;
+}
 function blkGoals(D) {
   const O = D.obj, row = (name, o, P, unit, dec, what) => {
     if (!o) return `<div class="syobj"><div class="syoh"><b>${name}</b></div>${note("Pas assez de mesures depuis le 1er janvier.")}</div>`;
@@ -554,6 +578,61 @@ function gather() {
     thr: { pace: p.runPace, src: thrSrc }, rec };
 }
 
+
+// ------------------------------------------------------------------ Météo du week-end (« Ce week-end, dehors ? »)
+// Fenêtre de sortie : 9 h-18 h. Verdict par jour, seuils simples : bon = sec (< 1 mm, risque < 50 %), vent < 30 km/h, rafales < 55, au moins 6 °C ;
+// mauvais = 5 mm ou plus, moins de 3 h sèches, vent ≥ 40 km/h, rafales ≥ 70 ou moins de 2 °C ; sinon mitigé.
+const WX = { from: 9, to: 18, dryMm: .2, dryPct: 40, good: { mm: 1, pct: 50, wind: 30, gust: 55, t: 6 }, bad: { mm: 5, dryH: 3, wind: 40, gust: 70, t: 2 }, ttl: 36e5, far: 4 };
+const K_WX = "synWx";
+const DIRS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
+const windFrom = deg => { const d = DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; return (/^[eo]/.test(d) ? "d'" : "de ") + d; };
+// samedi et dimanche à venir (aujourd'hui compris) ; le dimanche à partir de 17 h, c'est le week-end suivant
+function weekendDays(now) {
+  const t = new Date(now), dow = t.getDay(), base = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  const add = n => new Date(base.getFullYear(), base.getMonth(), base.getDate() + n);
+  if (dow === 6) return [add(0), add(1)];
+  if (dow === 0) return t.getHours() < 17 ? [add(0)] : [add(6), add(7)];
+  return [add(6 - dow), add(7 - dow)];
+}
+// h : réponse horaire d'Open-Meteo (time en heure locale « AAAA-MM-JJTHH:MM ») ; days : dates locales
+function weekendWx(h, days) {
+  return days.map(dt => {
+    const key = ymd(dt), I = [];
+    (h.time || []).forEach((t, i) => { const hr = +t.slice(11, 13); if (t.slice(0, 10) === key && hr >= WX.from && hr < WX.to) I.push(i); });
+    if (!I.length || I.some(i => h.temperature_2m[i] == null)) return { dt, key, ok: false };
+    const v = k => I.map(i => +h[k][i] || 0), T = v("temperature_2m"), P = v("precipitation"), PP = v("precipitation_probability"), W = v("wind_speed_10m"), G = v("wind_gusts_10m");
+    const rain = P.reduce((a, b) => a + b, 0), pct = Math.max(...PP), wind = W.reduce((a, b) => a + b, 0) / W.length, gust = Math.max(...G);
+    const dir = (() => { let x = 0, y = 0; I.forEach(i => { const r = (+h.wind_direction_10m[i] || 0) * Math.PI / 180; x += Math.sin(r); y += Math.cos(r); }); return Math.atan2(x, y) * 180 / Math.PI; })();
+    const dry = I.map((_, k) => P[k] < WX.dryMm && PP[k] < WX.dryPct);
+    let best = null, cur = null; dry.forEach((d, k) => { if (d) { if (!cur) cur = { a: k, b: k }; else cur.b = k; if (!best || cur.b - cur.a > best.b - best.a) best = { ...cur }; } else cur = null; });
+    const dryH = dry.filter(Boolean).length, tmin = Math.min(...T), tmax = Math.max(...T);
+    const g = WX.good, b = WX.bad;
+    const verdict = rain < g.mm && pct < g.pct && wind < g.wind && gust < g.gust && tmax >= g.t ? "good"
+      : rain >= b.mm || dryH < b.dryH || wind >= b.wind || gust >= b.gust || tmax < b.t ? "bad" : "mid";
+    const win = best ? { from: WX.from + best.a, to: WX.from + best.b + 1 } : null;
+    return { dt, key, ok: true, verdict, rain, pct, wind, gust, dir, tmin, tmax, dryH, win };
+  });
+}
+const dayName = d => d.toLocaleDateString("fr-FR", { weekday: "long" });
+const cap1 = t => t.charAt(0).toUpperCase() + t.slice(1);
+// une ligne par jour : « sec, 12-17 °C, vent 15 km/h d'ouest »
+function wxLine(d) {
+  if (!d.ok) return "pas encore de prévision";
+  const sky = d.verdict === "good" ? "sec" : d.rain < WX.good.mm ? `averses possibles (risque ${nf(d.pct)} %)`
+    : d.win && d.win.to - d.win.from >= WX.bad.dryH ? `sec de ${d.win.from} h à ${d.win.to} h, ${nf(d.rain)} mm de pluie sinon` : `pluie (${nf(d.rain, d.rain < 10 ? 1 : 0)} mm)`;
+  return `${sky}, ${nf(d.tmin)}-${nf(d.tmax)} °C, vent ${nf(d.wind)} km/h ${windFrom(d.dir)}${d.gust >= WX.good.gust ? ` (rafales ${nf(d.gust)})` : ""}`;
+}
+// phrase-réponse : faut-il prévoir le vélo dehors ou le home trainer ?
+function weekendAnswer(L) {
+  const D = L.filter(d => d.ok); if (!D.length) return "Pas encore de prévision pour le week-end.";
+  const good = D.filter(d => d.verdict === "good"), mid = D.filter(d => d.verdict === "mid"), nm = d => dayName(d.dt);
+  if (D.length === 1) { const d = D[0]; return d.verdict === "good" ? `Oui, ${nm(d)} s'annonce bon pour rouler dehors.` : d.verdict === "mid" ? `Possible ${nm(d)}, ${d.win && d.win.to - d.win.from >= WX.bad.dryH ? `en visant le créneau de ${d.win.from} h à ${d.win.to} h` : "avec un coupe-vent"}.` : `Plutôt home trainer ${nm(d)} : ${d.rain >= WX.bad.mm ? "pluie annoncée" : d.wind >= WX.bad.wind || d.gust >= WX.bad.gust ? "vent fort annoncé" : "météo peu engageante"}.`; }
+  if (good.length === D.length) return "Oui, beau week-end pour rouler dehors : les deux jours s'annoncent secs.";
+  if (good.length) { const o = D.find(d => d !== good[0]); return `Oui, mise sur ${nm(good[0])} pour rouler dehors : ${nm(o)} s'annonce ${o.verdict === "bad" ? "mauvais" : "plus incertain"}.`; }
+  if (mid.length) { const m = mid.slice().sort((a, b) => b.dryH - a.dryH)[0]; return `Week-end mitigé : vise ${nm(m)}${m.win && m.win.to - m.win.from >= WX.bad.dryH ? `, sec de ${m.win.from} h à ${m.win.to} h` : ", avec un coupe-vent"}.`; }
+  return "Plutôt home trainer ce week-end : pluie ou vent fort annoncés les deux jours.";
+}
+
 // ------------------------------------------------------------------ Rendu de l'onglet
 function plotDetails(D) { plotCurve(D); plotWeeks(D); if (D.proj.ftp) projChart(document.querySelector(".syFtpPlot"), D.proj.ftp, D.proj.ftpSer, "W", PROJ.ftpDec, "Projection de la FTP"); if (D.proj.vo2) projChart(document.querySelector(".syVo2Plot"), D.proj.vo2, D.proj.vo2Ser, "", PROJ.vo2Dec, "Projection de la VO2max"); }
 function render() {
@@ -561,10 +640,11 @@ function render() {
   const per = +lsGet(K_PERIOD); S_.period = PERIODS.some(p => p[0] === per) ? per : 12;
   if (!(typeof S !== "undefined" && S.all.length)) { box.innerHTML = `<div class="card empty"><b>Pas encore de données</b>Lance le workflow « Mise à jour Garmin » puis reviens ici.</div>`; return; }
   const D = S_.D = gather();
-  box.innerHTML = `<div class="grid">${blkReleve(D)}${blkProgress(D)}${blkToday(D)}${blkGoals(D)}${blkDet(D)}${blkWeek(D)}${detailsHtml(D)}</div>`;
+  box.innerHTML = `<div class="grid">${blkReleve(D)}${blkProgress(D)}${blkToday(D)}${blkWx()}${blkGoals(D)}${blkDet(D)}${blkWeek(D)}${detailsHtml(D)}</div>`;
   if (D.prog) miniCurve(document.getElementById("syMini"), D.fit.slice(-CURVE_DAYS), D.prog.peak);
   const det = document.getElementById("syDetails"); if (det && det.open) plotDetails(D);
   bind(box);
+  loadWx();
 }
 function bind(box) {
   box.querySelectorAll("[data-per]").forEach(b => b.onclick = () => { lsSet(K_PERIOD, b.dataset.per); S_.period = +b.dataset.per; box.querySelectorAll("[data-per]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); plotCurve(S_.D); });
@@ -583,7 +663,7 @@ async function open() {
 }
 
 window.Synthese = { open, render, _: { theilSen, rampPoints, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
-  trendWord, progress, advice, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
+  trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });
 if (window.Nav && window.Nav.curTab() === "synthese") open();
