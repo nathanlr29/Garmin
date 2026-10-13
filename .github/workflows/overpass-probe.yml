@@ -2,6 +2,7 @@ name: Sonde Overpass (temporaire)
 on:
   push:
     branches: [claude/project-thread-u2hlah]
+concurrency: { group: overpass-probe, cancel-in-progress: true }
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -10,5 +11,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps chromium
-      - run: UA="BreizhWatts/1.0 (https://nathanlr29.github.io/Garmin/)" BROWSER=1 node tests/overpass-probe.mjs
+      - run: node tests/overpass-probe.mjs
