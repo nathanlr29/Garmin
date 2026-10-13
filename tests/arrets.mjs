@@ -51,6 +51,13 @@ assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de
   calls.length = 0; ctx.fetch = url => { calls.push(url); return resp({}, false); };
   await assert.rejects(A._overpass("q"), /Overpass 504/, "tous les serveurs en échec : erreur");
   assert.equal(calls.length, 3, "les 3 serveurs sont essayés"); }
+// 2 quinquies) longue trace : requête coupée en morceaux de 15 rectangles, doublons fusionnés
+{ const C = A._corridor(P), n = C.split("|").length, bodies = [];
+  ctx.fetch = (url, o) => { const id = bodies.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 7, lat: 48.2, lon: -1.68, tags: { amenity: "drinking_water" } }, { type: "node", id, lat: 48.3, lon: -1.68, tags: { shop: "bakery" } }] }) }); };
+  const els = await A._fetchPois(C, false);
+  assert.equal(bodies.length, Math.ceil(n / 15), `${n} rectangles : ${Math.ceil(n / 15)} requêtes`);
+  assert.ok(bodies.every(b => b.split("amenity").length - 1 <= 15), "15 rectangles au plus par requête");
+  assert.equal(els.length, 1 + bodies.length, "le point présent dans chaque réponse n'est gardé qu'une fois"); }
 // 3) Pause découverte : seulement les lieux avec une fiche, anecdote de 1 à 2 phrases sans ajout
 assert.equal(A._voirKind({ historic: "castle" }), null, "pas de fiche : écarté");
 assert.equal(A._voirKind({ historic: "archaeological_site", archaeological_site: "megalith", wikidata: "Q1" }), "megalith");
