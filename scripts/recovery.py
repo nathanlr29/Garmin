@@ -202,23 +202,6 @@ def fetch_day(api, d, with_hypno):
     return rec
 
 
-def body_battery_curve(api, d):
-    bb = safe(api.get_body_battery, d.isoformat()) or []
-    if isinstance(bb, dict):
-        bb = [bb]
-    out = []
-    for entry in bb:
-        for v in entry.get("bodyBatteryValuesArray") or []:
-            if not isinstance(v, (list, tuple)) or len(v) < 2 or not v[0]:
-                continue
-            lvl = v[1] if len(v) == 2 else next((x for x in v[1:] if isinstance(x, int) and not isinstance(x, bool)), None)
-            if isinstance(lvl, (int, float)) and 0 <= lvl <= 100:
-                t = local_from_gmt_ms(v[0])
-                if t.date() == d:
-                    out.append([t.strftime("%H:%M"), int(lvl)])
-    return sorted(out)
-
-
 # ------------------------------------------------------------------ Météo / air (Open-Meteo, sans clé)
 def get_json(url, params):
     full = url + "?" + urllib.parse.urlencode(params)
@@ -680,8 +663,6 @@ def run(api):
 
     new = {
         "days": dict(sorted(days.items())),
-        "bb": body_battery_curve(api, today),
-        "bbDate": today.isoformat(),
         "wx_cache": {k: {"aqi": v["wx"].get("aqi"), "pollen": v["wx"].get("pollen")} for k, v in days.items() if v.get("wx")},
         "pending": len([d for d in all_dates if not days.get(d.isoformat(), {}).get("f")]),
         "profile": fetch_profile(api, START, today, state.get("profile")),
