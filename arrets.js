@@ -447,5 +447,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _query: query, _kindOf: kindOf };
 })();

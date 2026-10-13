@@ -1,0 +1,14 @@
+name: Sonde Overpass (temporaire)
+on:
+  push:
+    branches: [claude/project-thread-u2hlah]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tests/overpass-probe.mjs
+      - run: for u in https://overpass-api.de/api/status https://overpass.kumi.systems/api/status https://overpass.private.coffee/api/status; do echo "== $u"; curl -sS -m 20 "$u" | head -20; done
