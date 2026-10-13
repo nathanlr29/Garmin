@@ -38,6 +38,7 @@ Langue de l'interface et des échanges : **français**.
 | `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh pour qu'ils apparaissent enregistrés par l'Edge 540 (laps/session reconstruits depuis les records) |
 | `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup (+ profil : FTP, VO2max, zones, bloc course `profile.run`) et configuration initiale Garmin |
 | `tests/test_garmin.py` | Tests Python des scripts (lecture des réponses Garmin, flux de course, vrai FIT factice) : `python3 tests/test_garmin.py` (`fitdecode` pour le test FIT, sinon sauté) |
+| `.claude/skills/ponytail*` | Skills Ponytail (mode « dev senior paresseux » : `/ponytail lite\|full\|ultra`, `/ponytail-review`…), copiées du dépôt dietrichgebert/ponytail, sans ses hooks. Origine et mise à jour : `.claude/skills/ponytail/SOURCE.md`. Non déployées |
 
 ### Traces et parcours
 - `data/traces.json` : les 30 dernières activités dehors (tous sports), 160 points max, chargé avec la page (mini-tracés, chaîne).
