@@ -1,6 +1,6 @@
 "use strict";
 // Points d'arrêt le long d'une sortie (eau, ravitaillement, toilettes, réparation) : OpenStreetMap via Overpass.
-// Une seule requête par trace (rectangles le long du tracé), gardée en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
+// Requêtes par morceaux de trace (rectangles le long du tracé), gardées en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
 // Les 400 premiers et derniers mètres de la trace ne sont jamais envoyés (le point de départ reste sur l'appareil).
 (() => {
 const $ = id => document.getElementById(id);
@@ -106,13 +106,21 @@ const query = (L, voir) => {
       A('["natural"~"^(peak|waterfall|cave_entrance|rock|stone|cliff|beach|valley|gorge)$"]["wikidata"]'); A('["leisure"="nature_reserve"]["wikidata"]');
     }
   });
-  return `[out:json][timeout:25][maxsize:67108864];(${st.join("")});out tags center qt;`;
+  return `[out:json][timeout:60][maxsize:67108864];(${st.join("")});out tags center qt;`;
 };
 const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type"];
+const CHUNK = 15;
 const K_POI = "soPoi", POI_V = 4, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
-// Trois serveurs : le 2e part si le 1er n'a pas répondu au bout de 10 s (ou dès qu'il échoue) ; la première réponse valable gagne.
+// 429 (plus de place pour cette IP) ou 502-504 (serveur saturé, environ une requête sur deux le 13/10/2026) : on attend et on redemande au même serveur, 3 fois au plus.
+// Les serveurs de secours sont lents et en retard sur les données : mieux vaut insister auprès d'overpass-api.de.
+async function post(url, q, signal, n = 0) {
+  const r = await fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal });
+  if (![429, 502, 503, 504].includes(r.status) || n >= 3) return r;
+  await new Promise(w => setTimeout(w, 8000)); return post(url, q, signal, n + 1);
+}
+// Trois serveurs : le 2e part si le 1er n'a pas répondu au bout de 20 s (ou dès qu'il échoue) ; la première réponse valable gagne.
 function overpass(q) {
   return new Promise((ok, ko) => {
     let i = 0, live = 0, done = false, last; const acs = [];
@@ -120,8 +128,8 @@ function overpass(q) {
       if (done) return;
       if (i >= OVP.length) { if (!live) { done = true; ko(last || new Error("Overpass indisponible")); } return; }
       const url = OVP[i++], ac = new AbortController(); acs.push(ac); live++;
-      const to = setTimeout(() => ac.abort(), 35000), hedge = setTimeout(next, 10000);
-      fetch(url, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: ac.signal })
+      const to = setTimeout(() => ac.abort(), 70000), hedge = setTimeout(next, 20000);
+      post(url, q, ac.signal)
         .then(async r => { if (!r.ok) throw new Error("Overpass " + r.status); const j = await r.json();
           // délai dépassé ou mémoire pleine : Overpass répond 200 avec une « remark » et une liste vide ou incomplète
           if (j.remark && /runtime error|timed out|out of memory|rate_limited/i.test(j.remark)) throw new Error(j.remark); return j; })
@@ -137,8 +145,12 @@ async function fetchPois(L, voir) {
   if (cache[key] && Date.now() - cache[key].at < POI_TTL) return cache[key].els;
   if (ST.inflight.has(key)) return ST.inflight.get(key);
   const pr = (async () => {
-    const j = await overpass(query(L, voir));
-    const els = (j.elements || []).map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
+    // Une longue trace dépasse le délai d'Overpass en une requête (mesuré : 300 km ou 120 km avec « À voir ») : morceaux de 15 rectangles, 2 à la fois (2 places par IP sur overpass-api.de).
+    const B = L.split("|"), parts = [], all = new Map(); let k = 0;
+    for (let i = 0; i < B.length; i += CHUNK) parts.push(B.slice(i, i + CHUNK).join("|"));
+    const worker = async () => { while (k < parts.length) (await overpass(query(parts[k++], voir))).elements?.forEach(e => all.set(e.type + e.id, e)); };
+    await Promise.all([worker(), worker()]);
+    const els = [...all.values()].map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
       return { id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }; }).filter(e => e.lat != null && (kindOf(e.t) || voirKind(e.t)));
     const c = LS.get(K_POI, {}); c[key] = { at: Date.now(), els };
     Object.keys(c).sort((a, b) => c[b].at - c[a].at).slice(4).forEach(k => delete c[k]);  // 4 traces gardées au plus
@@ -447,5 +459,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
 })();
