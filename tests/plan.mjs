@@ -395,3 +395,104 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   const both = days.find(x => x.run && x.bike); if (both) assert.ok(both.any.run && both.any.t === both.bike.t, "vélo + course le même jour : la course est dans `.run`");
 }
 console.log("ok plan (course) : modes, volumes, plafonds, placement, liens validés, réglages à partir du lundi suivant, courses faites");
+
+// ======================================================================= 4. ajustements quotidiens de la course (étape 5b)
+// Semaine de référence (lundi 2 novembre, config « cinq ») avec course lundi « à la place », mardi « en plus », jeudi et vendredi « à la place »,
+// 3 courses en progression : lun Seuil course 40 min (à la place), mar footing 40 min (midi), mer VO2 vélo (clé), jeu Legs + endurance,
+// ven sortie longue course 50 min, sam sweet spot, dim sortie longue vélo.
+{
+  const MON = new Date(2026, 10, 2), C5 = cfgRun(CFGS.cinq, { 0: ["alt"], 1: ["add"], 3: ["alt"], 4: ["alt"] }, 3, "progression");
+  const FORM5 = { ctl: 150, atl: 140, tsb: 10, lastHard: 3, km7: 120, h7: 6, n7: 4, c7: 0 };
+  const runAct = (d, h, o = {}) => ({ id: 700 + d * 10 + h, n: "Course", t: "running", dt: new Date(2026, 10, 2 + d, h, 0, 0), d: `2026-11-0${2 + d}T${pad(h)}:00:00`, mt: 3600, km: 9, m: 9000, hr: 140, ...o });
+  // eff(jour, heure, options) : semaine ajustée à cet instant
+  const setup = (acts = []) => { const h = load({ acts, course: COURSE }); h.store.set("runThrPace", "232"); return h; };
+  const eff = (h, d, hr, o = {}) => { h.clock.t = new Date(2026, 10, 2 + d, hr, 0, 0).getTime();
+    return h.Plan._eff(MON, C5, { form: FORM5, ready: { today: 80, last: 80, avg3: 78, ...(o.ready || {}) }, prev: PREV[0], rc: h.Plan._run.cfg(C5), run: runCtx({ prevMin: 120, ...(o.run || {}) }) }); };
+  const runs = W => W.items.map(it => it.run ? `${it.run.t}/${it.run.dur}${it.run.st !== "plan" ? "/" + it.run.st : ""}` : "-").join(" ");
+  const ids = W => W.changes.map(x => x.id);
+  const W0 = eff(setup(), 0, 8);
+  assert.equal(runs(W0), "rthr/40 rfoot/40 - - rlong/50 - -", "semaine de référence");
+  assert.deepEqual([W0.items[2].bike.t, W0.items[3].muscu.s, W0.items[6].bike.t], ["vo2r", "legs", "long"]);
+  assert.equal(W0.changes.length, 0, "lundi matin, rien à ajuster");
+
+  // ---- 4.1 course ratée → replacée au prochain jour possible, sinon abandonnée (une ligne)
+  {
+    const h = setup(), W = eff(h, 2, 10);   // mercredi 10 h : lundi et mardi non faits
+    assert.equal(W.items[0].run.st, "missed"); assert.equal(W.items[1].run.st, "missed");
+    // le seuil de lundi : jeudi est un jour de jambes (jour dur : footing seulement), vendredi a déjà une course, samedi et dimanche ne sont pas cochés
+    assert.equal(W.items[0].run.movedTo, undefined);
+    assert.ok(W.changes.some(x => x.id === null && /^« Seuil course » de lundi non faite : aucun jour de course possible d'ici dimanche/.test(x.text)), W.changes.map(x => x.text).join(" | "));
+    // le footing de mardi : jeudi, en footing court et très facile, en plus de la séance du jour (règle de la 5a)
+    const th = W.items[3].run;
+    assert.ok(th && th.t === "rfoot" && th.cool && th.slot === "add" && th.dur <= 30 && th.moved === 1, JSON.stringify(th));
+    assert.equal(W.items[3].bike.t, "end", "le vélo de jeudi reste"); assert.equal(W.items[1].run.movedTo, 3);
+    assert.ok(ids(W).includes("rmove-1"));
+    // annulable
+    h.store.set("planUndo:2026-11-02", JSON.stringify(["rmove-1"]));
+    const U = eff(h, 2, 10); assert.equal(U.items[3].run, undefined, "annulé : rien n'est replacé"); assert.equal(U.items[1].run.movedTo, undefined);
+    // une seule course (lundi) et vendredi coché « à la place », libre : la course ratée y va
+    const C6 = cfgRun(CFGS.cinq, { 0: ["alt"], 4: ["alt"] }, 1, "entretien");
+    const h6 = setup(); h6.clock.t = new Date(2026, 10, 4, 10).getTime();
+    const W6 = h6.Plan._eff(MON, C6, { form: FORM5, ready: { today: 80, last: 80, avg3: 78 }, prev: PREV[0], rc: h6.Plan._run.cfg(C6), run: runCtx({ prevMin: 120 }) });
+    const moved = W6.items.find(it => it.run && it.run.moved != null);
+    assert.equal(runs(W6), "rfoot/60/missed - - - rfoot/60 - -"); assert.equal(W6.items[4].run.moved, 0); assert.equal(W6.items[4].run.slot, "alt");
+    assert.ok(moved, "la course ratée de lundi trouve un jour : " + runs(W6)); { assert.ok(moved.day >= 2 && moved.day !== 3, "jamais un jour non coché"); if (TY[moved.run.t].hard) for (const e of [moved.day - 1, moved.day + 1]) { const n = W6.items[e]; if (n) assert.ok(!(n.muscu && n.muscu.s === "legs") && !(n.bike && (TY[n.bike.t].hard || n.bike.t === "long")), "séance dure : jamais collée à un jour dur"); } }
+    // une course faite un autre jour compense : rien n'est replacé
+    const hc = setup([runAct(2, 7)]), Wc = eff(hc, 2, 10);
+    assert.ok(Wc.items[2].extra.some(a => a.t === "running"), "course de mercredi : en plus");
+    assert.ok(ids(Wc).includes("rmove-1") && !Wc.changes.some(x => /de lundi/.test(x.text)), "2 non faites, 1 faite en plus : il en manque une seule, la plus récente est replacée");
+    const hd = setup([runAct(0, 18), runAct(2, 7)]), Wd = eff(hd, 2, 10);
+    assert.equal(Wd.items[0].run.st, "done"); assert.ok(!Wd.changes.some(x => /non faite/.test(x.text) && /course|Footing/.test(x.text)), "lundi fait, mardi raté, mercredi couru en plus : le compte y est, rien à replacer : " + JSON.stringify(Wd.changes));
+  }
+  // ---- 4.2 récupération basse : course dure → footing ; très basse : course → repos
+  {
+    let h = setup(), W = eff(h, 0, 8, { ready: { today: 40 } });
+    assert.equal(W.items[0].run.t, "rfoot"); assert.equal(W.items[0].run.changed, true); assert.equal(W.items[0].run.dur, 40, "même durée");
+    assert.ok(W.changes.some(x => x.id === "rready-2026-11-02" && /« Seuil course » remplacée par un footing facile de 40 min/.test(x.text)));
+    h.store.set("planUndo:2026-11-02", JSON.stringify(["rready-2026-11-02"])); assert.equal(eff(h, 0, 8, { ready: { today: 40 } }).items[0].run.t, "rthr", "annulable");
+    W = eff(setup(), 0, 8, { ready: { today: 30 } });
+    assert.equal(W.items[0].run, null, "récup < 35 : repos"); assert.ok(ids(W).includes("rrest-2026-11-02"));
+    W = eff(setup(), 4, 8, { ready: { today: 40 } }); assert.equal(W.items[4].run.t, "rlong", "récup 40, course facile : rien ne change");
+    W = eff(setup(), 4, 8, { ready: { today: 34 } }); assert.equal(W.items[4].run, null, "récup 34 : même la course facile passe en repos");
+    W = eff(setup(), 0, 8, { ready: { today: 45 } }); assert.equal(W.items[0].run.t, "rthr", "45 : pas basse (même seuil que le vélo)");
+    W = eff(setup(), 0, 8, { ready: { today: null } }); assert.equal(W.items[0].run.t, "rthr", "pas de récup du jour : rien");
+  }
+  // ---- 4.3 course dure non prévue faite la veille → la séance clé vélo du jour est déplacée (comme R3)
+  {
+    const RUN = setup().Plan._run;   // allure seuil 3:52/km (runThrPace)
+    assert.equal(RUN.hard(runAct(0, 12, { m: 14000 }), 232), true, "3,9 m/s sur 1 h : plus de 85 % de la vitesse seuil (4,31 m/s)");
+    assert.equal(RUN.hard(runAct(0, 12, { m: 14000, mt: 1140, km: 4.4 }), 232) , false, "19 min : trop court (rTSS 17)");
+    assert.equal(RUN.hard(runAct(0, 12), 232), false, "2,5 m/s : footing");
+    assert.equal(RUN.hard(runAct(0, 12, { mt: 7800, m: 20000, km: 20 }), 232), true, "2 h 10 lente : rTSS > 60");
+    assert.equal(RUN.hard({ ...runAct(0, 12, { m: 14000 }), t: "Ride" }, 232), false, "le vélo n'est pas concerné ici");
+    const hard = runAct(1, 18, { m: 14000, km: 14 });
+    let h = setup([hard]), W = eff(h, 2, 8);
+    assert.equal(W.items[1].run.st, "done", "la course de mardi est faite (c'était un footing prévu)");
+    assert.notEqual(W.items[2].bike.t, "vo2r"); assert.ok(W.items[2].bike.changed);
+    const ch = W.changes.find(x => x.id === "radj-2"); assert.ok(ch && /^Course intense imprévue mardi : VO2max 30\/15 remplacée par de l.endurance/.test(ch.text), JSON.stringify(W.changes));
+    const tgt = W.items.find(it => it.bike && it.bike.moved === 2);
+    if (tgt) assert.equal(tgt.bike.t, "vo2r"); else assert.equal(W.items[2].bike.t, "end");
+    h.store.set("planUndo:2026-11-02", JSON.stringify(["radj-2"])); assert.equal(eff(h, 2, 8).items[2].bike.t, "vo2r", "annulable");
+    // footing la veille : rien ; course dure PRÉVUE la veille : rien
+    assert.equal(eff(setup([runAct(1, 18)]), 2, 8).items[2].bike.t, "vo2r");
+    h = setup([hard]); eff(h, 2, 8); const k = "planWk:2026-11-02", base = JSON.parse(h.store.get(k)); base.items[1].run.t = "rthr"; h.store.set(k, JSON.stringify(base));
+    assert.equal(eff(h, 2, 8).items[2].bike.t, "vo2r", "séance dure prévue : déjà comptée dans le plan");
+    // sans aucun jour de course réglé : jamais (garde-fou n°1)
+    const h0 = load({ acts: [hard], course: COURSE }); h0.store.set("runThrPace", "232"); h0.clock.t = new Date(2026, 10, 4, 8).getTime();
+    const W0b = h0.Plan._eff(MON, CFGS.cinq, { form: FORM5, ready: { today: 80, last: 80, avg3: 78 }, prev: PREV[0] }); assert.ok(!W0b.changes.some(x => /^r/.test(x.id || "")));
+  }
+  // ---- 4.4 jauge de reprise en « risque élevé » → courses restantes réduites à des footings de 20 min
+  {
+    let h = setup(), W = eff(h, 1, 8, { run: { zone: 3, ratio: 1.62 } });
+    assert.equal(runs(W), "rthr/40/missed rfoot/20 - - rfoot/20 - -");
+    assert.ok(W.items[1].run.changed && W.items[4].run.changed);
+    const ch = W.changes.find(x => x.id === "rgauge"); assert.ok(ch && /^Jauge de reprise à 1[.,]6\d* \(risque élevé au-delà de 1,5/.test(ch.text) && /les 2 courses restantes passent en footings de 20 min/.test(ch.text), ch && ch.text);
+    h.store.set("planUndo:2026-11-02", JSON.stringify(["rgauge"])); assert.equal(runs(eff(h, 1, 8, { run: { zone: 3, ratio: 1.62 } })), "rthr/40/missed rfoot/40 - - rlong/50 - -", "annulable");
+    for (const z of [0, 1, 2, null]) assert.equal(eff(setup(), 1, 8, { run: { zone: z, ratio: 1.4 } }).changes.filter(x => x.id === "rgauge").length, 0, `zone ${z} : rien`);
+    // semaine passée : pas d'ajustement (la jauge est celle d'aujourd'hui)
+    h = setup(); h.clock.t = new Date(2026, 10, 12, 8).getTime();
+    const Wp = h.Plan._eff(MON, C5, { form: FORM5, ready: { today: 30, last: 30, avg3: 30 }, prev: PREV[0], rc: h.Plan._run.cfg(C5), run: runCtx({ prevMin: 120, zone: 3, ratio: 2 }) });
+    assert.ok(!Wp.changes.some(x => ["rgauge", "rrest-2026-11-12"].includes(x.id)));
+  }
+  console.log("ok plan (course 5b) : course ratée replacée ou abandonnée, récup basse, course dure imprévue la veille, jauge en risque élevé, chacun annulable");
+}

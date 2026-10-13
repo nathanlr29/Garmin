@@ -485,10 +485,10 @@ function runAdjust(out, o) {
       () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.moved = x.day; } x.bike.t = "end"; x.bike.changed = true; });
   });
   // course ratée → replacée au prochain jour possible de la semaine, sinon abandonnée
+  // il manque (prévues − faites − encore à faire) courses : une course faite un autre jour en compense une ; les plus récentes d'abord
   const doneN = F.filter((f, d) => d <= td && f.runs.length).length;
-  items.forEach(it => { const r = it.run; if (!r || r.st !== "missed") return;
-    const fut = items.filter(x => x.day >= td && x.run && x.run.st === "plan").length;
-    if (doneN + fut >= planned) return;   // une course faite un autre jour compense déjà
+  let lack = planned - doneN - items.filter(x => x.day >= td && x.run && x.run.st === "plan").length;
+  items.slice().reverse().forEach(it => { const r = it.run; if (!r || r.st !== "missed" || lack <= 0) return; lack--;
     const nm = TYPES[r.t].l, tgt = rc ? runSlot(items, td + (now.getHours() >= 20 ? 1 : 0), r, rc, F, ftp) : null;
     if (!tgt) { info(`« ${nm} » de ${dl(it.day)} non faite : aucun jour de course possible d'ici dimanche, on la laisse passer.`); return; }
     step(`rmove-${it.day}`, `« ${nm} » de ${dl(it.day)} non faite : déplacée à ${dl(tgt.d)}${tgt.cool ? ` (footing de ${tgt.dur} min très facile, en plus de la séance du jour)` : ""}.`, () => {
@@ -506,7 +506,7 @@ function runAdjust(out, o) {
   // jauge de reprise en « risque élevé » : courses restantes de la semaine réduites à des footings de 20 min
   if (cur && run.zone === RUN_RISK_ZONE) {
     const L = items.filter(x => x.day >= td && x.run && x.run.st === "plan" && !(x.run.t === "rfoot" && x.run.dur <= RUN_RISK_DUR));
-    if (L.length) step("rgauge", `Jauge de reprise à ${nf(run.ratio, 1)} (risque élevé au-delà de 1,5 : tu as couru beaucoup plus que d'habitude cette semaine) : ${L.length > 1 ? `les ${L.length} courses restantes passent` : "la course restante passe"} en footing${L.length > 1 ? "s" : ""} de ${RUN_RISK_DUR} min.`,
+    if (L.length) step("rgauge", `Jauge de reprise à ${nf(run.ratio, 1)} (risque élevé au-delà de 1,5 : tu as couru bien plus ces 7 derniers jours que d'habitude) : ${L.length > 1 ? `les ${L.length} courses restantes passent` : "la course restante passe"} en footing${L.length > 1 ? "s" : ""} de ${RUN_RISK_DUR} min.`,
       () => L.forEach(x => { x.run.t = "rfoot"; x.run.dur = RUN_RISK_DUR; x.run.changed = true; delete x.run.cool; }));
   }
 }
