@@ -5,10 +5,10 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node tests/overpass-probe.mjs
-      - run: for u in https://overpass-api.de/api/status https://overpass.kumi.systems/api/status https://overpass.private.coffee/api/status; do echo "== $u"; curl -sS -m 20 "$u" | head -20; done
+      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps chromium
+      - run: UA="BreizhWatts/1.0 (https://nathanlr29.github.io/Garmin/)" BROWSER=1 node tests/overpass-probe.mjs
