@@ -19,11 +19,11 @@ const run = async (name, q) => { console.log(`  statut avant : ${await status()}
   const x = await r.text(); let n = "?"; try { n = JSON.parse(x).elements.length; } catch (e) {}
   console.log(`${name} : ${r.status} en ${Date.now() - t} ms, ${n} éléments`); await sleep(20000); };
 console.log(`statut initial : ${await status()}`);
-await run("1 actuelle nwr base+voir", A._query(boxes.join("|"), true).replace("[timeout:60]", "[timeout:120]"));
+await run("1 actuelle nwr base+voir", mk("nwr", [...BASE, ...VOIR]));
 await run("2 nw base+voir", mk("nw", [...BASE, ...VOIR]));
 await run("3 nwr base seule", mk("nwr", BASE));
 await run("4 nw base seule", mk("nw", BASE));
 await run("5 nwr voir seul", mk("nwr", VOIR));
 await run("6 nw voir seul", mk("nw", VOIR));
 await run("7 nw voir sans natural", mk("nw", VOIR.filter(f => !f.includes("natural"))));
-await run("8 actuelle nwr base+voir (2e fois)", A._query(boxes.join("|"), true).replace("[timeout:60]", "[timeout:120]"));
+await run("8 actuelle nwr base+voir (2e fois)", mk("nwr", [...BASE, ...VOIR]));
