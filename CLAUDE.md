@@ -35,7 +35,7 @@ Langue de l'interface et des échanges : **français**.
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
 | `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT (vélo et course) → `data/streams/<id>.json` + `index.json` |
-| `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh pour qu'ils apparaissent enregistrés par l'Edge 540 (laps/session reconstruits depuis les records) |
+| `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh (laps/session reconstruits depuis les records) et les envoie sur Garmin. Identité `IDENTITY` : `tacx` (défaut depuis le 14/10/2026, appli Tacx Training, partenaire dont Garmin compte les séances pour la VO2max) ou `edge540` (charge et effet seulement, ni VO2max ni FTP). Test : `MyWhooshIdentity` dans `tests/test_garmin.py` |
 | `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup (+ profil : FTP, VO2max, zones, bloc course `profile.run`) et configuration initiale Garmin |
 | `tests/test_garmin.py` | Tests Python des scripts (lecture des réponses Garmin, flux de course, vrai FIT factice) : `python3 tests/test_garmin.py` (`fitdecode` pour le test FIT, sinon sauté) |
 | `.claude/skills/ponytail*` | Skills Ponytail (mode « dev senior paresseux » : `/ponytail lite\|full\|ultra`, `/ponytail-review`…), copiées du dépôt dietrichgebert/ponytail, sans ses hooks. Origine et mise à jour : `.claude/skills/ponytail/SOURCE.md`. Non déployées |
