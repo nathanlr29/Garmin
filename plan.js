@@ -965,6 +965,12 @@ function withWorkouts(W) {
   const thr = W.items.some(it => it.run) ? Charge.params().runPace : null;
   W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, W.ph); if (it.run) it.run.w = buildRun(it.run.t, it.run.dur, thr); }); return W;
 }
+// Proposition de séances fondatrices (page de conception, privée) : lien seulement, rien n'est appliqué au plan
+const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
+function renderDesign() {
+  return `<section class="card span12 design"><p class="tdmsg">Trois séances fondatrices sont proposées (30/15, seuil long, sortie longue d'endurance) : elles ne sont pas encore appliquées à ce plan.</p>
+    <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Lire la proposition complète</a> · page privée, visible seulement avec ton compte Claude.</p></section>`;
+}
 function render() {
   const box = $("plan"); if (!box) return;
   if (!store2.get("planSince")) store2.set("planSince", ymd(new Date()));
@@ -973,7 +979,7 @@ function render() {
   const Wc = withWorkouts(effective(cur, c, ctxFor(cur, form, ready)));
   const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, c, ctxFor(PS.mon, form, ready)));
   PS.W = W; PS.Wc = Wc;
-  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderAvail(c)}
+  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderAvail(c)}${renderDesign()}
     <section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><div id="pProgBody"><p class="note">${window.Bilan ? "Analyse en cours…" : ""}</p></div></section>${renderRank(prof, c)}</div>`;
   bind(c, prof);
   if (window.Bilan) Bilan.progress($("pProgBody"), { ftp: prof.ftp, goal: c.goal, profile: prof }).catch(() => {});

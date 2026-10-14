@@ -219,6 +219,7 @@ Premier onglet (`synthese`, titre « Ma forme »). **Défaut** : un appareil san
 - Endurance (`end`) : relances de cadence de 2 min à **64 %** de FTP, sous les 68 % de l'endurance (avant : 72 %, une « récup » plus dure que l'effort) ; le tableau nomme l'intervalle (« 2 min de cadence élevée entre chaque ») au lieu de « récup ».
 - **Course à la main** (`planOv:<lundi>[jour].run = {t, dur}`, `0` = retirée) : bouton « + course » sur chaque jour à venir (et dans la carte Aujourd'hui), effet immédiat, y compris cette semaine et sans aucun jour de course coché ; **aucune règle de placement** (muscu et vélo le même jour possibles). Type et durée changeables, « Retirer cette course », « Revenir au plan » (course générée modifiée). Statut « ajoutée » / « modifiée ». Durées validées (`RUN_OWN_DURS`).
 - Le contenu des séances muscu n'est **pas** géré ici : on place seulement les 4 séances.
+- Carte « Trois séances fondatrices » (`renderDesign`, sous Mes disponibilités) : simple lien vers la proposition d'entraîneur du 14/10/2026 (`DESIGN_URL`, page Claude privée). **Rien de cette proposition n'est appliqué au moteur** tant que Nathan ne l'a pas validée.
 - Clés localStorage : `planCfg`, `planRc` (réglages course par semaine), `runThrPace` (course, voir charge.js), `planWk:<lundi>`, `planOv:<lundi>`, `planUndo:<lundi>`, `muscuLbl`, `planSince`, `planFtp`, `bwWeight`, `bwAge`.
 - API de test : `window.Plan._gen/_eff/_cfg/_phase/_build/_zwo` et `_run` (réglages, placement, contenu des séances course).
 
