@@ -225,3 +225,6 @@ html.bm-open{overflow:hidden}
 @media (max-width:520px){.pf-row{grid-template-columns:96px minmax(0,1fr) 112px}}
 #plan .wadd{align-self:flex-start;border:1px dashed var(--line);border-radius:999px;background:transparent;color:var(--muted);font:600 12.5px/1 var(--font-ui);padding:6px 10px;cursor:pointer}
 #plan .wadd:hover{color:var(--ink);border-color:var(--ghost)}
+#plan .design{border-left:3px solid var(--accent);background:var(--accent-soft)}
+#plan .design .tdmsg{margin:0}
+#plan .design a{color:var(--accent-ink)}
