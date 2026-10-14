@@ -475,6 +475,9 @@ function renderTips(r, wx) {
   $("soTips").innerHTML = T.length ? `<dl class="sotips">${T.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : `<p class="note">Les conseils apparaissent avec les prévisions.</p>`;
 }
 // ------------------------------------------------------------------ Nutrition
+// produits Decathlon de Nathan (glucides par unité) ; pâte de fruits : valeur moyenne d'étiquette, à corriger si besoin
+const NUT = { drink: { name: "boisson 1:0,8 CMA CGM", g: 90 }, gel: { one: "gel 1:0,8", many: "gels 1:0,8", g: 45 }, pate: { one: "pâte de fruits", many: "pâtes de fruits", g: 20 } };
+const nutQty = (n, p) => `${n} ${n > 1 ? p.many : p.one}`;
 function renderNutrition(r) {
   const box = $("soNut"); if (!box) return;
   const ftp = (window.Plan && Plan.ftp && Plan.ftp()) || 0, kg = riderKg(), h = r.secs / 3600, P = SO.P;
@@ -489,16 +492,23 @@ function renderNutrition(r) {
   const drink = Math.round(clamp(.4 + .03 * (tAvg - 10) + .5 * (x - .6), .35, 1.3) * .8 * 20) / 20;  // L/h (≈ 80 % de la sueur)
   const na = Math.round(drink * (tAvg > 25 ? 700 : 500) / 50) * 50;                                 // mg de sodium par heure
   const water = drink * h, carbs = rate * h, iso = rate >= 60;
-  // horaire : on mange toutes les 30 min à partir de 30-40 min, et on repère quand les 2 bidons sont vides
+  // boisson : 1 sachet par bidon de 600 ml, dans chaque bidon ou 1 sur 2, pour qu'elle couvre environ 2/3 des glucides (le reste en solide)
+  const full = drink / .6 * NUT.drink.g, mix = iso ? (rate * 2 / 3 >= full * .75 ? 1 : .5) : 0, isoG = Math.min(rate, full * mix);
+  // horaire : on mange toutes les 30 min à partir de 35 min ; le manque s'accumule et se paie en pâtes de fruits, puis en gels dans le dernier tiers
   const kmAt = tt => { let k = 0; while (k < P.length - 1 && r.T[k] < tt) k++; return P[k].d / 1000; };
-  const t0 = r.T[0], rows = [];
+  const t0 = r.T[0], rows = [], bag = { gel: 0, pate: 0 };
+  let debt = 0;
   if (rate > 0) for (let m = 35; m <= h * 60 - 20; m += 30) {
-    const late = m > h * 40, g = Math.round((iso ? rate - 36 : rate) / 2);
-    const food = g <= 0 ? "boisson iso uniquement" : g <= 22 ? (late ? "1 gel" : "1 banane ou 1 pâte de fruits") : g <= 32 ? (late ? "1 gel + quelques gorgées iso" : "1 barre") : late ? "1 gel + 1 pâte de fruits" : "1 barre + 1 gel";
-    rows.push({ t: new Date(t0 + m * 6e4), km: kmAt(t0 + m * 6e4), what: `${food} <small>≈ ${Math.max(0, g)} g</small>` });
+    debt += (rate - isoG) / 2;
+    const late = m > h * 40, it = { gel: 0, pate: 0 };
+    while (debt >= (late ? NUT.gel : NUT.pate).g * .5) { const k = late || debt >= NUT.gel.g + NUT.pate.g ? "gel" : "pate"; it[k]++; bag[k]++; debt -= NUT[k].g; }
+    const g = it.gel * NUT.gel.g + it.pate * NUT.pate.g;
+    if (g) rows.push({ t: new Date(t0 + m * 6e4), km: kmAt(t0 + m * 6e4), what: `${[it.gel && nutQty(it.gel, NUT.gel), it.pate && nutQty(it.pate, NUT.pate)].filter(Boolean).join(" + ")} <small>≈ ${g} g</small>` });
   }
   const cap = 1.2;  // 2 bidons de 600 ml
-  for (let k = 1; k * cap < water; k++) { const tt = t0 + k * cap / drink * 3600e3; rows.push({ t: new Date(tt), km: kmAt(tt), what: `<b>Remplir les bidons</b> <small>(${fmt(k * cap, 1)} L bus)</small>`, water: 1 }); }
+  for (let k = 1; k * cap < water; k++) { const tt = t0 + k * cap / drink * 3600e3; rows.push({ t: new Date(tt), km: kmAt(tt), what: `<b>Remplir les bidons</b>${iso ? ` + ${mix * 2} sachet${mix > .5 ? "s" : ""} de boisson` : ""} <small>(${fmt(k * cap, 1)} L bus)</small>`, water: 1 }); }
+  const sachets = Math.ceil(water / .6 * mix);
+  const take = [sachets && `${sachets} sachet${sachets > 1 ? "s" : ""} de ${NUT.drink.name}`, bag.gel && nutQty(bag.gel, NUT.gel), bag.pate && nutQty(bag.pate, NUT.pate)].filter(Boolean);
   // arrêts conseillés (carte Arrêts) : où remplir les bidons
   const adv = window.Arrets ? Arrets.advice().filter(a => /eau/.test(a.role)) : [];
   rows.forEach(rw => { if (!rw.water) return; const a = adv.find(a => Math.abs(a.p.t0 - rw.t) < 50 * 6e4); if (a) rw.what += `<small>→ ${esc(a.p.name)}, km ${fmt(a.p.km)} (${hm(a.p.t0)})</small>`; });
@@ -519,7 +529,8 @@ function renderNutrition(r) {
       <div><h3>Avant</h3><p>${h >= 2 ? (kg ? `Repas 2 à 3 h avant avec environ <b>${Math.round(kg * (h >= 3 ? 2 : 1.2) / 10) * 10} g de glucides</b> (pâtes, riz, pain, flocons d'avoine), peu de fibres et de graisses.` : "Repas riche en glucides 2 à 3 h avant (indique ton poids pour la quantité).") : "Un repas normal ou une collation 1 à 2 h avant suffit."}${h >= 4 ? " La veille, un dîner riche en glucides." : ""}</p>
         <h3>Après</h3><p>${h >= 2 ? `Dans l'heure : ${kg ? `environ <b>${Math.round(kg / 5) * 5} g de glucides</b>` : "des glucides"} et 20 à 25 g de protéines, plus ${fmt(Math.max(.5, water * .5), 1)} L à boire dans les heures qui suivent.` : "Un repas normal."}</p></div>
       <div><h3>Pendant</h3>${rows.length ? `<table class="sotab nuttab"><tbody>${rows.map(rw => `<tr${rw.water ? ' class="w"' : ""}><td>${hm(rw.t)}</td><td>km ${fmt(rw.km)}</td><td>${rw.what}</td></tr>`).join("")}</tbody></table>` : "<p>Pas besoin de manger : boire régulièrement suffit.</p>"}
-        ${iso ? `<p class="note">Avec ${rate} g/h : un bidon de boisson iso (≈ 36 g) par heure, le reste en solide puis en gels.</p>` : ""}</div>
+        ${take.length ? `<p>À emporter : <b>${take.join(", ")}</b>${iso ? " (sachets pour remplir en route compris)" : ""}.</p>` : ""}
+        ${iso ? `<p class="note">Avec ${rate} g/h : 1 sachet de ${NUT.drink.name} (${NUT.drink.g} g) ${mix < 1 ? "dans 1 bidon sur 2" : "par bidon de 600 ml"}, soit ≈ ${fmt(isoG)} g/h en buvant ${fmt(drink * 1000)} ml/h ; le reste en pâtes de fruits, puis en gels dans le dernier tiers.</p>` : ""}</div>
     </div>
     <p class="note">Calcul à partir d'un modèle physique (poids ${kg ? fmt(kg, 1) + " kg" : "75 kg par défaut"} + vélo, pente, vent prévu, vitesse visée). Au-delà de 60 g/h, entraîne ton estomac à l'entraînement avant le jour J.</p>`;
 }
