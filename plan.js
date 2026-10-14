@@ -620,20 +620,25 @@ function build(type, durMin, ph) {
     hardWarm(); const M = T - used() - 480, reps = clamp(Math.floor((M + off) / (on + off) * light), 3, [5, 6, 5][p]);
     for (let i = 0; i < reps; i++) { st(on, pct, `Intervalle ${i + 1}/${reps}`); if (i < reps - 1) st(off, .5, "Récupération"); }
     fill(480); cool(480); title = `VO2max ${reps} × ${on / 60}'`; goal = `Le cœur du travail VO2max : ${reps} efforts de ${on / 60} min à ${Math.round(pct * 100)} % de FTP. Tenir la puissance jusqu'au bout, cadence 95-105.`;
-  } else if (type === "vo2r") {  // protocole de Rønnestad : 30 s dur / 15 s facile pendant 9 min 45
-    const pct = [1.18, 1.2, 1.22][p];
-    hardWarm(); const M = T - used() - 480, sets = clamp(Math.floor((M + 180) / 765 * light), 1, 3);
+  } else if (type === "vo2r") {  // séance fondatrice S1 (proposition du 14/10/2026, protocole de Rønnestad) : 3 × 13 × (30 s à 118 % / 15 s à 50 %), intensité fixe
+    const pct = 1.18;
+    ramp(600, .5, .7, "Échauffement progressif"); st(300, .7, "Endurance");
+    for (let i = 0; i < 2; i++) { st(30, 1.2, "Activation"); st(90, .55, "Récup"); } st(120, .55, "Souple");
+    const M = T - used() - 300, sets = clamp(Math.floor((M + 180) / 765 * light), 1, 3);
     for (let k = 0; k < sets; k++) { for (let i = 0; i < 13; i++) { st(30, pct, `Série ${k + 1} · ${i + 1}/13`); st(15, .5, "Récup"); } if (k < sets - 1) st(180, .55, "Entre deux séries"); }
-    fill(480); cool(480); title = `VO2max ${sets} × 13 × 30/15`; goal = `Le protocole de Rønnestad : ${sets} série${sets > 1 ? "s" : ""} de 13 × (30 s à ${Math.round(pct * 100)} % / 15 s facile). Sur 10 semaines, il a fait gagner 8,7 % de VO2max contre 2,6 % pour des intervalles de 5 min. Cadence élevée, effort régulier.`;
+    fill(600); cool(clamp(T - used(), 300, 600)); title = `VO2max ${sets} × 13 × 30/15`;
+    goal = `Le protocole de Rønnestad : ${sets} série${sets > 1 ? "s" : ""} de 13 × (30 s à ${Math.round(pct * 100)} % / 15 s à 50 %), 3 min souples entre les séries. Effort 7-8/10 en fin de série, cadence 95-105, assis. Une répétition qui lâche : baisse de 5 % jusqu'à la fin de la série. Deux séances propres d'affilée : monte de 2 % (intensité MyWhoosh). Chez des cyclistes entraînés, ce format a fait gagner 8,7 % de VO2max contre 2,6 % pour des intervalles de 5 min.`;
   } else if (type === "vo2s") {
     hardWarm(); const M = T - used() - 480, sets = clamp(Math.floor((M + 300) / 900 * light), 1, 3);
     for (let k = 0; k < sets; k++) { for (let i = 0; i < 10; i++) { st(30, 1.3, `Série ${k + 1} · ${i + 1}/10`); st(30, .5, "Récup"); } if (k < sets - 1) st(300, .55, "Entre deux séries"); }
     fill(480); cool(480); title = `VO2max ${sets} × 10 × 30/30`; goal = `Des efforts courts à 130 % qui font monter la VO2 sans s'épuiser : ${sets} série${sets > 1 ? "s" : ""} de 10 × (30 s dur / 30 s facile).`;
-  } else if (type === "thr") {
-    const L = [12, 15, 20][p] * 60, pct = [.95, .97, 1.0][p];
-    hardWarm(); const M = T - used() - 480, reps = clamp(Math.floor((M + 300) / (L + 300) * light), 2, 4);
-    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(300, .55, "Récupération"); }
-    fill(480); cool(480); title = `Seuil ${reps} × ${L / 60}'`; goal = `Repousser la FTP : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %. Puissance régulière, pas de départ trop fort.${L >= 1200 ? vo2note : ""}`;
+  } else if (type === "thr") {  // séance fondatrice S2 (proposition du 14/10/2026) : seuil long à 95 %, on allonge les blocs, pas l'intensité
+    const L = [12, 15, 20][p] * 60, pct = .95;
+    ramp(480, .5, .75, "Échauffement progressif"); st(120, .85, "Montée"); st(120, .6, "Souple");
+    const M = T - used() - 300, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 3);
+    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
+    fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil long ${reps} × ${L / 60}'`;
+    goal = `Tenir longtemps près du seuil : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, cadence 85-95, assis. Effort 6-7/10, phrases courtes possibles ; la FC se stabilise après 5-6 min de bloc. Si elle monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc : ta FTP est trop haute. On progresse par la durée des blocs (12, 15 puis 20 min), pas par l'intensité.${L >= 1200 ? vo2note : ""}`;
   } else if (type === "ss") {
     const L = [15, 20, 20][p] * 60, pct = .9;
     ramp(600, .5, .75, "Échauffement progressif"); const M = T - used() - 360, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 4);
@@ -644,11 +649,9 @@ function build(type, durMin, ph) {
     st(Math.max(0, Math.round((M - blocks * 1200) / 2)), .68, "Endurance");
     for (let i = 0; i < blocks; i++) { st(900, .82, `Tempo ${i + 1}/${blocks}`); st(300, .62, "Souple"); }
     fill(300); cool(300); title = `Endurance + ${blocks} × 15' tempo`; goal = "Une base d'endurance avec quelques blocs tempo pour élargir le moteur aérobie.";
-  } else if (type === "end") {
-    ramp(420, .5, .68, "Échauffement"); const M = T - used() - 300, n = Math.floor(M / 900);
-    // relances de cadence à puissance un peu plus basse : jamais au-dessus de la zone de travail (sinon la « récup » serait plus dure que l'effort)
-    for (let i = 0; i < n; i++) { st(780, .68, "Endurance"); st(120, .64, "Cadence élevée (100-110 rpm)"); }
-    fill(300, .68); cool(300); title = `Endurance ${fmtMin(durMin)}`; goal = "Zone 2 : construire la base aérobie qui soutient FTP et VO2max. Facile, régulier, on doit pouvoir parler.";
+  } else if (type === "end") {  // Z2 de la proposition du 14/10/2026 : régulière, sans relances
+    ramp(420, .5, .65, "Échauffement"); fill(300, .67, "Zone 2"); cool(300); title = `Endurance ${fmtMin(durMin)}`;
+    goal = "Zone 2 régulière à 67 % (65-70 %), sans relances : la base aérobie qui soutient FTP et VO2max. Tu dois pouvoir parler en phrases complètes. Dehors, au cardio : environ 120 à 138 bpm, 142 au plus sur le plat, et ne cours pas après la FC dans les bosses courtes (elle réagit avec 30 à 90 s de retard).";
   } else if (type === "rec") {
     ramp(300, .45, .55, "Mise en route"); fill(240, .5, "Très facile"); cool(240); title = `Récupération ${fmtMin(durMin)}`; goal = "Faire tourner les jambes sans fatigue. Aucune intensité.";
   } else if (type === "long") {
@@ -968,7 +971,7 @@ function withWorkouts(W) {
 // Proposition de séances fondatrices (page de conception, privée) : lien seulement, rien n'est appliqué au plan
 const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
 function renderDesign() {
-  return `<section class="card span12 design"><p class="tdmsg">Trois séances fondatrices sont proposées (30/15, seuil long, sortie longue d'endurance) : elles ne sont pas encore appliquées à ce plan.</p>
+  return `<section class="card span12 design"><p class="tdmsg">Ton plan suit les séances fondatrices : 30/15 de Rønnestad, seuil long et endurance en zone 2 régulière. La sortie longue au cardio reste à appliquer.</p>
     <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Lire la proposition complète</a> · page privée, visible seulement avec ton compte Claude.</p></section>`;
 }
 function render() {

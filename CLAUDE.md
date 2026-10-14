@@ -216,10 +216,14 @@ Premier onglet (`synthese`, titre « Ma forme »). **Défaut** : un appareil san
   - R3 : assez de séances dures faites, ou sortie dure non prévue la veille ;
   - muscu manquée → replacée.
   - Chaque changement est annulable (`planUndo:<lundi>`).
-- Endurance (`end`) : relances de cadence de 2 min à **64 %** de FTP, sous les 68 % de l'endurance (avant : 72 %, une « récup » plus dure que l'effort) ; le tableau nomme l'intervalle (« 2 min de cadence élevée entre chaque ») au lieu de « récup ».
+- **Séances fondatrices** (proposition du 14/10/2026, validée par Nathan le même jour) :
+  - VO2max 30/15 (`vo2r`) : protocole de Rønnestad, séries de 13 × (30 s à **118 %** / 15 s à 50 %), 3 min souples entre les séries, 3 séries dès 66 min (1 à 3 selon la durée, × 0,8 en décharge) ; intensité fixe, on la monte de 2 % dans MyWhoosh après deux séances propres ;
+  - Seuil (`thr`) = **seuil long** : 2 à 3 blocs à **95 %** (fixe), de 12, 15 puis 20 min selon la semaine du bloc, 4 min de récup ; on progresse par la durée des blocs, pas par l'intensité ;
+  - Endurance (`end`) : **zone 2 régulière à 67 %**, sans relances (les anciennes relances de cadence à 64 % sont retirées), repères cardio pour dehors dans le texte.
+  - La sortie longue (`long`, `longplus`) n'a pas changé.
 - **Course à la main** (`planOv:<lundi>[jour].run = {t, dur}`, `0` = retirée) : bouton « + course » sur chaque jour à venir (et dans la carte Aujourd'hui), effet immédiat, y compris cette semaine et sans aucun jour de course coché ; **aucune règle de placement** (muscu et vélo le même jour possibles). Type et durée changeables, « Retirer cette course », « Revenir au plan » (course générée modifiée). Statut « ajoutée » / « modifiée ». Durées validées (`RUN_OWN_DURS`).
 - Le contenu des séances muscu n'est **pas** géré ici : on place seulement les 4 séances.
-- Carte « Trois séances fondatrices » (`renderDesign`, sous Mes disponibilités) : simple lien vers la proposition d'entraîneur du 14/10/2026 (`DESIGN_URL`, page Claude privée). **Rien de cette proposition n'est appliqué au moteur** tant que Nathan ne l'a pas validée.
+- Carte « Trois séances fondatrices » (`renderDesign`, sous Mes disponibilités) : lien vers la proposition d'entraîneur du 14/10/2026 (`DESIGN_URL`, page Claude privée). 30/15, seuil long et zone 2 sont appliqués (voir plus haut) ; la sortie longue au cardio (S3) ne l'est pas.
 - Clés localStorage : `planCfg`, `planRc` (réglages course par semaine), `runThrPace` (course, voir charge.js), `planWk:<lundi>`, `planOv:<lundi>`, `planUndo:<lundi>`, `muscuLbl`, `planSince`, `planFtp`, `bwWeight`, `bwAge`.
 - API de test : `window.Plan._gen/_eff/_cfg/_phase/_build/_zwo` et `_run` (réglages, placement, contenu des séances course).
 
