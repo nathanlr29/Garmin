@@ -27,6 +27,10 @@ try:
     import fitdecode  # noqa: F401
 except ImportError:
     fitdecode = None
+try:
+    import fit_tool  # noqa: F401
+except ImportError:
+    fit_tool = None
 
 
 # ---------------------------------------------------------------- Extraits bruts publiés
@@ -280,6 +284,61 @@ class RealFit(unittest.TestCase):
         self.assertEqual(st["vo"][0], 8.5)
         self.assertEqual(st["gct"][0], 240)    # 240,5 ms
         self.assertAlmostEqual(st["v"][0], 140, delta=1)
+
+
+
+# ---------------------------------------------------------------- MyWhoosh : réécriture du FIT
+def make_mywhoosh_fit(path, n=600):
+    """Séance MyWhoosh factice : en-tête de l'appli (fabricant 331), vélo virtuel, puissance et cardio."""
+    from fit_tool.fit_file_builder import FitFileBuilder
+    from fit_tool.profile.messages.file_id_message import FileIdMessage
+    from fit_tool.profile.messages.record_message import RecordMessage
+    from fit_tool.profile.messages.session_message import SessionMessage
+    b = FitFileBuilder(auto_define=True)
+    t0 = int(T0.timestamp() * 1000)
+    fid = FileIdMessage()
+    fid.type, fid.manufacturer, fid.product, fid.time_created = 4, 331, 1, t0
+    b.add(fid)
+    for i in range(n):
+        r = RecordMessage()
+        r.timestamp, r.power, r.heart_rate, r.cadence, r.distance, r.speed = t0 + i * 1000, 200 + i % 50, 140, 90, i * 9.0, 9.0
+        b.add(r)
+    s = SessionMessage()
+    s.timestamp, s.start_time, s.sport, s.sub_sport = t0 + n * 1000, t0, 2, 58
+    b.add(s)
+    b.build().to_file(str(path))
+
+
+@unittest.skipUnless(fit_tool and fitdecode, "fit-tool ou fitdecode non installé")
+class MyWhooshIdentity(unittest.TestCase):
+    def head(self, path):
+        out = {}
+        with fitdecode.FitReader(str(path)) as fr:
+            for f in fr:
+                if isinstance(f, fitdecode.FitDataMessage) and f.name in ("file_id", "device_info", "session") and f.name not in out:
+                    out[f.name] = {("product" if x.name == "garmin_product" else x.name): x.raw_value for x in f.fields}
+        return out
+
+    def run_as(self, ident):
+        import tempfile
+        import mywhoosh as mw
+        d = Path(tempfile.mkdtemp())
+        make_mywhoosh_fit(d / "mw.fit")
+        start, npts, watts = mw.disguise(d / "mw.fit", d / "out.fit", 3_456_789_012, 2922, ident)
+        self.assertEqual(npts, 600)
+        self.assertEqual(watts, sum(200 + i % 50 for i in range(600)))
+        return self.head(d / "out.fit")
+
+    def test_appli_tacx(self):
+        h = self.run_as("tacx")
+        self.assertEqual((h["file_id"]["manufacturer"], h["file_id"]["product"], h["file_id"]["serial_number"]), (89, 20533, 1))
+        self.assertEqual(h["device_info"]["manufacturer"], 89)
+        self.assertEqual((h["session"]["sport"], h["session"]["sub_sport"]), (2, 58))   # reste du vélo virtuel
+        self.assertEqual(h["session"]["avg_power"], round(sum(200 + i % 50 for i in range(600)) / 600))
+
+    def test_edge_540(self):
+        h = self.run_as("edge540")
+        self.assertEqual((h["file_id"]["manufacturer"], h["file_id"]["product"], h["file_id"]["serial_number"]), (1, 4061, 3_456_789_012))
 
 
 if __name__ == "__main__":

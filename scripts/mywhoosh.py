@@ -1,13 +1,22 @@
-"""MyWhoosh → Garmin Connect, présenté comme enregistré par ton Garmin Edge 540.
+"""MyWhoosh → Garmin Connect, présenté comme une séance de l'appli Tacx Training (ou de ton Edge 540).
 
 Pourquoi : Garmin ne calcule la charge, l'effet d'entraînement, la VO2max et le statut que pour
 ses appareils et ses partenaires certifiés (Zwift, Rouvy…), pas pour MyWhoosh.
 
+Identité (`IDENTITY`) :
+  - "tacx" (par défaut depuis le 14/10/2026) : appli Tacx Training, l'une des 4 applis dont Garmin dit
+    que les séances « peuvent contribuer à ta VO2max » (avec Zwift, TrainerRoad et ROUVY). Garmin
+    analyse alors la séance comme celles de Zwift (charge, effet, VO2max ; FTP si ton appareil la détecte).
+    Identité par défaut de peloton-to-garmin pour le vélo (fabricant 89, produit 20533, unité 1).
+  - "edge540" : séance enregistrée par ton Edge 540. Garmin calcule charge et effet, mais pas la VO2max
+    ni la FTP (constaté du 4 au 13/10/2026) : sur ses appareils, ce sont eux qui les calculent pendant la
+    sortie, et l'Edge 540 ne calcule jamais la VO2max en intérieur.
+
 Ce que fait ce module, à chaque passage de la mise à jour :
   1. connexion à MyWhoosh (identifiants dans les secrets GitHub, jamais écrits ni affichés) ;
   2. liste des dernières séances, téléchargement du fichier FIT des nouvelles ;
-  3. réécriture de l'en-tête du fichier : fabricant Garmin, modèle Edge 540, numéro de série et
-     firmware de TON Edge 540 (lus sur ton compte Garmin) ; puissance, cardio, cadence intacts ;
+  3. réécriture de l'en-tête du fichier selon `IDENTITY` (appli Tacx, ou Edge 540 avec le numéro de série
+     et le firmware de TON Edge lus sur ton compte Garmin) ; puissance, cardio, cadence intacts ;
   4. contrôle du fichier réécrit (mêmes points, même puissance), puis envoi sur Garmin Connect.
 
 Sécurité : les identifiants restent dans les secrets GitHub ; le jeton MyWhoosh ne vit qu'en mémoire ;
@@ -33,6 +42,8 @@ from garminconnect import GarminConnectTooManyRequestsError
 ROOT = Path(__file__).resolve().parent.parent
 STATE = ROOT / "data" / "mywhoosh_sync.json"
 GARMIN, EDGE_540, EDGE_540_FW = 1, 4061, 2922   # identifiants FIT (FIT SDK 21.188)
+TACX, TACX_APP, TACX_UNIT, TACX_SW = 89, 20533, 1, 130   # appli Tacx Training (Windows), comme peloton-to-garmin
+IDENTITY = "tacx"   # "tacx" ou "edge540" (voir plus haut)
 SOURCES = {0, 255, 331, 260, 32, 289, 294, 307}  # fabricants « applis » à remplacer (dont MyWhoosh = 331)
 API = "https://service14.mywhoosh.com/v2/rider/profile"
 MAX_PER_RUN, MAX_BYTES = 5, 25 * 1024 * 1024
@@ -161,8 +172,8 @@ def _summary(pts, t0, t1):
                 up=round(up), down=round(down))
 
 
-def disguise(src, dst, serial, fw):
-    """Reconstruit la séance comme l'écrirait un Garmin Edge 540.
+def disguise(src, dst, serial, fw, ident="edge540"):
+    """Reconstruit la séance comme l'écrirait l'appli Tacx Training (ident="tacx") ou un Garmin Edge 540.
 
     Les points (puissance, cardio, cadence, vitesse, distance, position virtuelle) sont recopiés tels quels.
     Les résumés écrits par MyWhoosh sont souvent faux (un seul tour de 10 min, horodatages au départ,
@@ -231,12 +242,16 @@ def disguise(src, dst, serial, fw):
         b.add(DefinitionMessage.from_data_message(m))
         b.add(m)
 
-    add(put(FileIdMessage(), type=4, manufacturer=GARMIN, product=EDGE_540, serial_number=serial,
+    man, prod = (TACX, TACX_APP) if ident == "tacx" else (GARMIN, EDGE_540)
+    if ident == "tacx":
+        serial, fw = TACX_UNIT, TACX_SW
+    add(put(FileIdMessage(), type=4, manufacturer=man, product=prod, serial_number=serial,
             time_created=(fid0.time_created if fid0 and fid0.time_created else start)))
     add(put(FileCreatorMessage(), software_version=fw))
     add(put(EventMessage(), timestamp=start, event=0, event_type=0, event_group=0))           # chrono : départ
-    add(put(DeviceInfoMessage(), timestamp=start, device_index=0, manufacturer=GARMIN, product=EDGE_540,
-            serial_number=serial, software_version=fw / 100, source_type=5))                  # l'Edge lui-même
+    add(put(DeviceInfoMessage(), timestamp=start, device_index=0, manufacturer=man, product=prod,
+            serial_number=serial, software_version=fw / 100, source_type=5,
+            product_name="TacxTrainingAppWin" if ident == "tacx" else None))                 # l'appareil lui-même
     prev = None
     for m in recs:
         if prev is not None and (m.timestamp - prev) / 1000 > GAP:                             # pause
@@ -271,14 +286,14 @@ def disguise(src, dst, serial, fw):
             event_type=1, local_timestamp=int(end / 1000) + off - FIT_EPOCH))
     b.build().to_file(str(dst))
 
-    # contrôle : mêmes points, mêmes watts, même cardio, en-tête Garmin Edge 540, séance cohérente
+    # contrôle : mêmes points, mêmes watts, même cardio, en-tête voulu, séance cohérente
     f = FitFile.from_file(str(dst))
     out = [r.message for r in f.records if isinstance(r.message, RecordMessage)]
     fid = next((r.message for r in f.records if isinstance(r.message, FileIdMessage)), None)
     so = next((r.message for r in f.records if isinstance(r.message, SessionMessage)), None)
     if (len(out) != len(recs) or sum(m.power or 0 for m in out) != sum(m.power or 0 for m in recs)
             or sum(m.heart_rate or 0 for m in out) != sum(m.heart_rate or 0 for m in recs)
-            or not fid or fid.manufacturer != GARMIN or fid.product != EDGE_540
+            or not fid or fid.manufacturer != man or fid.product != prod
             or not so or abs((so.total_timer_time or 0) - S["timer"]) > 2 or so.timestamp != end):
         raise RuntimeError("contrôle du fichier réécrit échoué, séance non envoyée")
     return start, len(recs), sum(m.power or 0 for m in recs)
@@ -286,7 +301,7 @@ def disguise(src, dst, serial, fw):
 
 # ------------------------------------------------------------------ Garmin : doublons
 def on_garmin(api, start_ms):
-    """Cherche une activité Garmin qui démarre à ±3 min : renvoie 'garmin', 'autre' ou None."""
+    """Cherche une activité Garmin qui démarre à ±3 min : renvoie 'garmin' (Garmin ou envoyée par ce script), 'autre' ou None."""
     try:
         recent = api.get_activities(0, 30) or []
     except Exception:
@@ -298,7 +313,7 @@ def on_garmin(api, start_ms):
         t = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000
         if abs(t - start_ms) <= 180_000:
             man = str(g.get("manufacturer") or "").upper()
-            return "garmin" if man == "GARMIN" else "autre"
+            return "garmin" if man in ("GARMIN", "TACX") else "autre"
     return None
 
 
@@ -315,13 +330,13 @@ def run(api):
         state = {"started": True, "done": [_h(a["activityFileId"]) for a in reversed(acts)],
                  "last": {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "msg": f"{len(acts)} séances existantes mémorisées"}}
         STATE.write_text(json.dumps(state, indent=1))
-        print(f"MyWhoosh : {len(acts)} séances existantes mémorisées ; les prochaines partiront sur Garmin comme un Edge 540.")
+        print(f"MyWhoosh : {len(acts)} séances existantes mémorisées ; les prochaines partiront sur Garmin.")
         return
     new = [a for a in reversed(acts) if _h(a["activityFileId"]) not in done][:MAX_PER_RUN]
     if not new:
         print("MyWhoosh : rien de nouveau.")
         return
-    serial, fw = edge540(api)
+    serial, fw = edge540(api) if IDENTITY == "edge540" else (TACX_UNIT, TACX_SW)
     if not serial:
         # pas d'Edge 540 trouvé sur le compte : numéro stable dérivé du compte MyWhoosh (jamais affiché)
         serial = 1_000_000_000 + int(_h(wid), 16) % 3_000_000_000
@@ -333,7 +348,7 @@ def run(api):
         try:
             raw, fit = tmp / f"mw_{key}.fit", tmp / f"BreizhWatts_{key}.fit"
             download(token, wid, a["activityFileId"], raw)
-            start, npts, watts = disguise(raw, fit, serial, fw)
+            start, npts, watts = disguise(raw, fit, serial, fw, IDENTITY)
             dup = on_garmin(api, start) if start else None
             if dup == "garmin":
                 msgs.append(f"« {name} » déjà sur Garmin")
@@ -342,7 +357,7 @@ def run(api):
             else:
                 try:
                     api.upload_activity(str(fit))
-                    msgs.append(f"« {name} » envoyée sur Garmin comme Edge 540 ({npts} points)")
+                    msgs.append(f"« {name} » envoyée sur Garmin comme {'appli Tacx' if IDENTITY == 'tacx' else 'Edge 540'} ({npts} points)")
                 except Exception as e:
                     if "409" not in str(e) and "uplicate" not in str(e):
                         raise
