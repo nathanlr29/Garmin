@@ -24,7 +24,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30         # Pages peut rester bloqué en « updating_pages » plus de 10 min (14/10/2026)
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -90,3 +90,5 @@ jobs:
         id: deploy
         if: ${{ !cancelled() && steps.save.outcome == 'success' && (steps.save.outputs.changed == 'true' || github.event_name != 'schedule') }}
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 1500000           # 25 min (10 par défaut) : laisser à Pages le temps de finir
