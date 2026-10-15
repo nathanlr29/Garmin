@@ -284,5 +284,11 @@ for (const k in Y.HELP) assert.ok(Y.HELP[k].split(/[.!?]\s/).length <= 3, "expli
   assert.equal(L[0].verdict, "mid"); assert.match(Y.weekendAnswer(L), /^Week-end mitigé : vise samedi, sec de 9 h à 15 h/);
   assert.match(Y.weekendAnswer(Y.weekendWx(mk(tempete, tempete), days)), /^Plutôt home trainer/);
   assert.equal(Y.weekendWx({ time: [] }, days).every(d => !d.ok), true); assert.match(Y.weekendAnswer([]), /Pas encore/);
+  // détail heure par heure (déplié au clic) : 9 h à 17 h, heures de pluie marquées
+  L = Y.weekendWx(mk(sec, pluie), days);
+  assert.equal(L[1].hours.length, 9); assert.equal(L[1].hours[0].h, 9); assert.equal(L[1].hours.filter(x => !x.dry).length, 5, "pluie de 13 h à 17 h");
+  const th = Y.wxHoursHtml(L[1]); assert.equal((th.match(/<tr class="wet">/g) || []).length, 5); assert.match(th, /<td>9 h<\/td><td>12<\/td><td>–<\/td>/); assert.match(th, /<td>13 h<\/td><td>12<\/td><td>1[,.]5 mm <small>90 %<\/small><\/td><td>18 O<\/td>/);
+  assert.equal(Y.wxHoursHtml({ ok: false }), "");
+  assert.equal(Y.wxMoreUrl(48.1173, -1.6778), "https://www.meteoblue.com/fr/meteo/semaine/48.12N1.68W");
 }
 console.log("ok synthese 4-bis : amorce de la courbe, phrases (progression, aujourd'hui, objectifs, alertes, semaine), barres d'objectif, titres des détails, pas de sigle");

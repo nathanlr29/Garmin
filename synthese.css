@@ -89,7 +89,19 @@
 /* Ce week-end, dehors ? : une ligne par jour */
 .sywx{display:grid;gap:6px;margin-top:10px}
 .sywxd{display:grid;grid-template-columns:auto 84px 1fr;align-items:baseline;gap:8px;font-size:14px;padding-top:6px;border-top:1px solid var(--line)}
+.sywxday{border-top:1px solid var(--line)}
+.sywxday>.sywxd{border-top:0;cursor:pointer;list-style:none;grid-template-columns:auto 84px 1fr auto}
+.sywxday>.sywxd::-webkit-details-marker{display:none}
+.sywxday>.sywxd::after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin:0 4px 3px;align-self:center}
+.sywxday[open]>.sywxd::after{transform:rotate(-135deg);margin-bottom:-2px}
+.sywxday>.sywxd:hover b{color:var(--accent-ink)}
+.sywxh{width:100%;max-width:440px;border-collapse:collapse;margin:6px 0 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.sywxh th,.sywxh td{text-align:left}
+.sywxh th{font-weight:400;color:var(--muted);padding:2px 6px 4px 0}
+.sywxh td{padding:3px 6px 3px 0;border-top:1px solid var(--line);white-space:nowrap}
+.sywxh small{color:var(--muted);font-size:11px}
+.sywxh tr.wet td:nth-child(3){color:var(--info)}
 .sywxd b{font-weight:700}
 .sywxd span:last-child{color:var(--muted)}
-@media (max-width:420px){.sywxd{grid-template-columns:auto 1fr}.sywxd span:last-child{grid-column:2}}
+@media (max-width:420px){.sywxd,.sywxday>.sywxd{grid-template-columns:auto 1fr auto}.sywxd span:last-child{grid-column:2}.sywxday>.sywxd::after{grid-column:3;grid-row:1}}
 .syreleve .crvar b{white-space:normal;overflow-wrap:anywhere}
