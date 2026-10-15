@@ -428,8 +428,10 @@ async function loadWx() {
   const far = Math.round((days[0] - new Date(new Date().toDateString())) / DAY) >= WX.far;
   const tone = d => d.ok ? BAND[d.verdict] : "var(--ghost)";
   el.querySelector("#syWxBody").innerHTML = `<p class="syans">${weekendAnswer(L)}</p>
-    <div class="sywx">${L.map(d => `<div class="sywxd"><span class="sydot2" style="background:${tone(d)}"></span><b>${cap1(dayName(d.dt))}</b><span>${wxLine(d)}</span></div>`).join("")}</div>
-    ${far ? `<p class="note">Prévisions à ${Math.round((days[0] - new Date(new Date().toDateString())) / DAY)} jours, encore incertaines : reviens jeudi ou vendredi.</p>` : ""}`;
+    <div class="sywx">${L.map(d => d.ok
+      ? `<details class="sywxday"><summary class="sywxd"><span class="sydot2" style="background:${tone(d)}"></span><b>${cap1(dayName(d.dt))}</b><span>${wxLine(d)}</span></summary>${wxHoursHtml(d)}</details>`
+      : `<div class="sywxd"><span class="sydot2" style="background:${tone(d)}"></span><b>${cap1(dayName(d.dt))}</b><span>${wxLine(d)}</span></div>`).join("")}</div>
+    <p class="note">Touche un jour pour le détail heure par heure${cfg.latitude != null ? `, ou <a href="${wxMoreUrl(cfg.latitude, cfg.longitude)}" target="_blank" rel="noopener">prévisions complètes sur meteoblue</a>` : ""}.${far ? ` Prévisions à ${Math.round((days[0] - new Date(new Date().toDateString())) / DAY)} jours, encore incertaines : reviens jeudi ou vendredi.` : ""}</p>`;
   el.hidden = false;
 }
 function blkGoals(D) {
@@ -610,7 +612,8 @@ function weekendWx(h, days) {
     const verdict = rain < g.mm && pct < g.pct && wind < g.wind && gust < g.gust && tmax >= g.t ? "good"
       : rain >= b.mm || dryH < b.dryH || wind >= b.wind || gust >= b.gust || tmax < b.t ? "bad" : "mid";
     const win = best ? { from: WX.from + best.a, to: WX.from + best.b + 1 } : null;
-    return { dt, key, ok: true, verdict, rain, pct, wind, gust, dir, tmin, tmax, dryH, win };
+    const hours = I.map((i, k) => ({ h: WX.from + k, t: T[k], mm: P[k], pct: PP[k], wind: W[k], gust: G[k], dir: +h.wind_direction_10m[i] || 0, dry: dry[k] }));
+    return { dt, key, ok: true, verdict, rain, pct, wind, gust, dir, tmin, tmax, dryH, win, hours };
   });
 }
 const dayName = d => d.toLocaleDateString("fr-FR", { weekday: "long" });
@@ -622,6 +625,16 @@ function wxLine(d) {
     : d.win && d.win.to - d.win.from >= WX.bad.dryH ? `sec de ${d.win.from} h à ${d.win.to} h, ${nf(d.rain)} mm de pluie sinon` : `pluie (${nf(d.rain, d.rain < 10 ? 1 : 0)} mm)`;
   return `${sky}, ${nf(d.tmin)}-${nf(d.tmax)} °C, vent ${nf(d.wind)} km/h ${windFrom(d.dir)}${d.gust >= WX.good.gust ? ` (rafales ${nf(d.gust)})` : ""}`;
 }
+// détail heure par heure d'un jour (déplié au clic) : heure, température, pluie, vent et rafales ; heure sèche ou non
+const DIRS_S = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+const dirShort = deg => DIRS_S[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+function wxHoursHtml(d) {
+  if (!d.ok || !d.hours) return "";
+  return `<table class="sywxh"><thead><tr><th>heure</th><th>°C</th><th>pluie</th><th>vent km/h</th></tr></thead><tbody>${d.hours.map(x =>
+    `<tr${x.dry ? "" : ' class="wet"'}><td>${x.h} h</td><td>${nf(x.t)}</td><td>${x.mm >= .1 ? `${nf(x.mm, 1)} mm` : "–"}${x.pct >= 30 ? ` <small>${nf(x.pct)} %</small>` : ""}</td><td>${nf(x.wind)} ${dirShort(x.dir)}${x.gust >= WX.good.gust ? ` <small>raf. ${nf(x.gust)}</small>` : ""}</td></tr>`).join("")}</tbody></table>`;
+}
+// page de prévisions complètes (meteoblue, 7 jours heure par heure) au centre de la ville de config.json : jamais le point de départ
+const wxMoreUrl = (lat, lon) => `https://www.meteoblue.com/fr/meteo/semaine/${Math.abs(lat).toFixed(2)}${lat >= 0 ? "N" : "S"}${Math.abs(lon).toFixed(2)}${lon >= 0 ? "E" : "W"}`;
 // phrase-réponse : faut-il prévoir le vélo dehors ou le home trainer ?
 function weekendAnswer(L) {
   const D = L.filter(d => d.ok); if (!D.length) return "Pas encore de prévision pour le week-end.";
@@ -663,7 +676,7 @@ async function open() {
 }
 
 window.Synthese = { open, render, _: { theilSen, rampPoints, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
-  trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
+  trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, wxHoursHtml, wxMoreUrl, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });
 if (window.Nav && window.Nav.curTab() === "synthese") open();
