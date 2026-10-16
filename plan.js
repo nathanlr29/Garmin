@@ -13,7 +13,7 @@ const dayIndex = (d, mon) => Math.round((new Date(d.getFullYear(), d.getMonth(),
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? " " + pad(m % 60) : ""}` : `${m} min`;
 const W5 = v => Math.round(v / 5) * 5;
-const store2 = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
+const store2 = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} window.PlanSync?.touch(); }, del(k) { try { localStorage.removeItem(k); } catch (e) {} window.PlanSync?.touch(); } };
 const dShort = d => d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 
 const GOAL0 = { ftp: 300, vo2: 65.5, date: "2026-12-31" };
@@ -1091,7 +1091,7 @@ async function open() {
   if (!ok) return;
   render();
 }
-window.Plan = { open, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });

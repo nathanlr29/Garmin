@@ -1,6 +1,6 @@
 # Synchro du Plan entre appareils (Mac / téléphone)
 
-Date : 2026-10-16. Demandé par Nathan (fil « Firebase »). Statut : **à valider avant de coder**.
+Date : 2026-10-16. Demandé par Nathan (fil « Firebase »). Statut : validé par Nathan le 2026-10-16, implémenté.
 
 ## Pourquoi
 Le plan se règle et s'ajuste presque chaque jour (course ajoutée, durée changée, séance déplacée, annulation). Tout est en `localStorage` : le Mac et le téléphone affichent donc des semaines différentes. La synchro Google Sheet existe déjà (`sync.js`, `apps-script/sync.gs`) mais ne couvre que le graissage et l'allure seuil.
@@ -16,7 +16,7 @@ Un seul utilisateur, très peu de données, fusion « le plus récent gagne » d
 | `muscuLbl` | un par entrée : `muscuLbl:<clé>` | idem |
 | `planCfg`, `planRc` | un chacun, en entier | changés rarement ; le plus récent gagne |
 | `planFtp`, `bwWeight`, `bwAge` | un chacun | réglages simples |
-| `planSince` | un ; **la date la plus ancienne gagne** (mon choix) | évite qu'un appareil neuf recule l'historique |
+| `planSince` | un ; **le premier appareil synchronisé fixe la date** (mon choix) | évite qu'un appareil neuf recule l'historique |
 | `planWk:<lundi>` | un par semaine figée, seulement les 8 dernières semaines | les deux appareils montrent la même semaine figée ; limite la taille |
 
 **Pas synchronisés** : `tab`, `sport`, `synPeriod`, `synDetails` (préférences d'affichage), `soStart` et tout le contexte des boucles (**point de départ jamais publié**, même dans une Sheet privée), `runThrPace` (déjà dans `reglages`), graissage (déjà dans `chain`).
