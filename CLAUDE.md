@@ -34,6 +34,7 @@ Langue de l'interface et des échanges : **français**.
 | `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : Overpass, horaires, arrêts conseillés. Utilisé par sortie.js |
 | `fitcourse.js` | Encodeur de parcours FIT (course + course_point typés) pour les alertes « À venir » des Garmin |
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
+| `plansync.js` | Synchro du Plan entre appareils (collection `plan` de `sync.js`), chargé après `sync.js`. Voir « Synchro entre appareils ». Test : `node tests/plansync.mjs` |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
 | `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
 | `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT (vélo et course) → `data/streams/<id>.json` + `index.json` |
@@ -124,6 +125,12 @@ Langue de l'interface et des échanges : **français**.
 - Test local : faux Apps Script (serveur Python qui exécute le vrai `sync.gs` via `osascript -l JavaScript`, redirection 302 comme Google), deux « appareils » = `localhost` et `127.0.0.1` (localStorage séparés).
 - Clés localStorage : `syncCfg`, `syncQ` (file d'attente par collection), `syncAt`, `syncInit:<collection>`, `chainKmAt`.
 - Collection `reglages` (course.js) : élément `id: "runThrPace"`, `v` = allure seuil en s/km, **`null` horodaté = suppression** (« Revenir à Garmin »). Le plus récent gagne (`ts` = clé locale `runThrPaceAt`) ; une valeur hors 180-480 est ignorée. Sans synchro, tout reste local.
+- Collection `plan` (plansync.js, conception : `docs/superpowers/specs/2026-10-16-synchro-plan-design.md`) : le Plan se synchronise par **éléments fins**, un par jour modifié (`planOv:<lundi>:<jour>`), par annulation (`planUndo:<lundi>:<id>`), par étiquette muscu (`muscuLbl:<clé>`), plus `planCfg`, `planRc`, `planFtp`, `bwWeight`, `bwAge`, `planSince` et `planWk:<lundi>` (8 dernières semaines seulement). Jeudi modifié sur un appareil et vendredi sur l'autre : les deux sont gardés ; même élément modifié des deux côtés : le plus récent gagne. Suppression = `v: null` horodaté.
+  - `plan.js` appelle `window.PlanSync?.touch()` après chaque `store2.set/del` (sans `plansync.js`, rien ne change). `touch` compare le localStorage du Plan au dernier instantané (`planSyncSnap`), horodate ce qui a changé (`planSyncTs`) et pousse seulement ces éléments. À la réception (`apply`), les valeurs sont validées (`okValue`), écrites directement dans le localStorage (pas de ré-envoi) puis `Plan.refresh()` redessine l'onglet (différé tant qu'un champ du Plan a le focus, pour ne pas effacer une saisie). Seuls les éléments des 8 dernières semaines sont suivis ; un élément qui sort de la fenêtre n'est jamais pris pour une suppression.
+  - **Migration** : au premier passage, l'existant est la base (ts 0) ; le premier appareil synchronisé impose son plan, les autres l'adoptent. **Configurer le Mac d'abord**, attendre ✓, puis le téléphone. `planSince` : le premier appareil synchronisé fixe la date.
+  - **Jamais synchronisés** : préférences d'affichage (`tab`, `sport`, `synPeriod`, `synDetails`), `soStart` et tout le contexte des boucles (point de départ), `runThrPace` (collection `reglages`), graissage (`chain`). Un élément de plus de 40 000 caractères n'est pas envoyé.
+  - La Synthèse (« séance prévue ce soir ») n'est pas redessinée en direct après une réception : elle suit au prochain changement d'onglet.
+  - Test local à deux appareils : `localhost` et `127.0.0.1` (localStorage séparés), faux Apps Script qui exécute le vrai `sync.gs`.
 - À réutiliser pour le journal muscu : nouvelle collection, rien à changer dans `sync.gs`.
 
 ## Profil course (scripts/recovery.py, `profile.run`)

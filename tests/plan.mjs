@@ -396,6 +396,15 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
 }
 console.log("ok plan (course) : modes, volumes, plafonds, placement, liens validés, réglages à partir du lundi suivant, courses faites");
 
+// ---- 3.12 synchro : chaque écriture du Plan dans le localStorage prévient plansync.js (sans lui, rien ne change)
+{
+  const h = load(), seen = []; h.win.PlanSync = { touch: () => seen.push(1) };
+  h.Plan._run.setRc(cfgRun(CFGS.cinq, { 0: ["alt", 45] }, 2, "auto"));
+  assert.ok(seen.length >= 1, "store2.set appelle PlanSync.touch");
+  const h2 = load(); h2.Plan._run.setRc(cfgRun(CFGS.cinq, { 0: ["alt", 45] }, 2, "auto"));   // pas de PlanSync : aucune erreur
+  console.log("ok plan (synchro) : le crochet PlanSync.touch est appelé, et facultatif");
+}
+
 // ======================================================================= 4. ajustements quotidiens de la course (étape 5b)
 // Semaine de référence (lundi 2 novembre, config « cinq ») avec course lundi « à la place », mardi « en plus », jeudi et vendredi « à la place »,
 // 3 courses en progression : lun Seuil course 40 min (à la place), mar footing 40 min (midi), mer VO2 vélo (clé), jeu Legs + endurance,
