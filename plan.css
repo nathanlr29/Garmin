@@ -228,3 +228,4 @@ html.bm-open{overflow:hidden}
 #plan .design{border-left:3px solid var(--accent);background:var(--accent-soft)}
 #plan .design .tdmsg{margin:0}
 #plan .design a{color:var(--accent-ink)}
+.pg-ans{font-size:14.5px;line-height:1.45;color:var(--ink);margin:0 0 8px}
