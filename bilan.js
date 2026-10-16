@@ -421,34 +421,91 @@ function chart(box, st, cmp) {
 // Profil de puissance de Coggan (hommes, W/kg) : de « débutant » à « classe mondiale »
 const COG = { "5": [10.17, 24.04], "60": [5.64, 11.5], "300": [2.33, 7.6], "1200": [1.86, 6.4] };
 const COGL = ["débutant", "moyen", "correct", "bon", "très bon", "excellent", "exceptionnel", "classe mondiale"];
+// Repères de lecture de la carte (aucun calcul de sélection ici : mêmes séances qu'avant)
+const PG = { win: 42 * 864e5, near: .02, efFlat: .02, dec: 5, decGood: .6, decMid: .3 };
+const nb = s => s.replace(/(\d) (W|%|bpm)/g, "$1\u00a0$2").replace(/ × /g, "\u00a0×\u00a0");   // pas de retour à la ligne entre un nombre et son unité
+const pgDate = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+// 1. séances retenues pour la FTP estimée (meilleur 20 min × 95 %, au moins 80 % de la FTP, 4 mois)
+function ftpPts(R, ftp, now) { const cut = now - 120 * 864e5; return R.filter(a => a.dt.getTime() >= cut && a.pc && a.pc["1200"] && a.pc["1200"] * .95 >= .8 * ftp).map(a => ({ t: a.dt.getTime(), v: a.pc["1200"] * .95, a })); }
+// 2. séances régulières pour l'efficacité aérobie (home trainer, intensité modérée)
+function efPts(R, ftp, now) { const cut = now - 120 * 864e5; return R.filter(a => a.dt.getTime() >= cut && isIndoor(a) && a.np > 0 && a.w > 0 && a.hr > 0 && a.mt >= 1800 && a.np / a.w <= 1.07 && a.np / ftp >= .5 && a.np / ftp <= .85).map(a => ({ t: a.dt.getTime(), v: a.np / a.hr, a })); }
+// meilleur effort des 6 dernières semaines à l'instant t (null s'il n'y en a pas)
+function bestAt(P, t, win = PG.win) { let b = null; P.forEach(p => { if (p.t <= t && p.t > t - win && (!b || p.v > b.v)) b = p; }); return b; }
+// courbe en marches du meilleur sur 6 semaines : [t, v | null] à chaque séance et à chaque sortie de fenêtre
+function bestSteps(P, now, win = PG.win) {
+  const T = [...new Set(P.flatMap(p => [p.t, p.t + win]).filter(t => t <= now).concat(P.length ? [now] : []))].sort((a, b) => a - b);
+  return T.map(t => { const b = bestAt(P, t, win); return [t, b ? b.v : null]; });
+}
+const lastHist = h => h && h.length ? h[h.length - 1][1] : null;
+// phrase-réponse de la FTP estimée
+function ftpAnswer({ best, ftp, garmin, goal }) {
+  let s;
+  if (!best) s = `Aucun effort de 20 min soutenu ces 6 dernières semaines : rien ne vient confirmer ta FTP de travail (${nf(ftp)} W), le test rampe la mesurera.`;
+  else {
+    const d = best.v - ftp, head = `Ton meilleur effort de 20 min des 6 dernières semaines vaut <b>${nf(best.v)} W</b> (${nf(best.v / .95)} W × 95 %)`;
+    s = Math.abs(d) <= PG.near * ftp ? `${head}, au niveau de ta FTP de travail (${nf(ftp)} W) : tes séances la confirment.`
+      : d > 0 ? `${head}, ${nf(d)} W au-dessus de ta FTP de travail (${nf(ftp)} W) : elle est sans doute sous-estimée, un test rampe la confirmerait.`
+      : `${head}, ${nf(-d)} W sous ta FTP de travail (${nf(ftp)} W) : tes séances ne sont pas des efforts à fond, c'est un plancher ; le test rampe donne la vraie valeur.`;
+  }
+  const g = [];
+  if (garmin && Math.round(garmin) !== Math.round(ftp)) g.push(`Garmin l'estime à ${nf(garmin)} W`);
+  if (goal) g.push(ftp >= goal ? `objectif ${nf(goal)} W atteint` : `objectif ${nf(goal)} W : encore ${nf(goal - ftp)} W à gagner`);
+  return nb(g.length ? `${s} ${g.join(" ; ").replace(/^./, c => c.toUpperCase())}.` : s);
+}
+// tendance de l'efficacité : moyenne des 4 dernières semaines contre les 4 précédentes
+function efTrend(P, now) {
+  const w4 = now - 28 * 864e5, a1 = P.filter(p => p.t >= w4), a0 = P.filter(p => p.t < w4 && p.t >= w4 - 28 * 864e5), m = A => A.reduce((s, p) => s + p.v, 0) / A.length;
+  if (!a1.length || !a0.length) return null;
+  return { m1: m(a1), m0: m(a0), n1: a1.length, n0: a0.length, pct: m(a1) / m(a0) - 1 };
+}
+function efAnswer(tr, P) {
+  if (!tr) { const S2 = P.slice().sort((a, b) => a.t - b.t), l = S2[S2.length - 1], avg = P.reduce((s, p) => s + p.v, 0) / P.length;
+    return nb(`Ta dernière séance régulière : <b>${nf(l.v, 2)} W par battement</b> (moyenne de tes séances : ${nf(avg, 2)}). La tendance apparaîtra avec quelques semaines de séances.`); }
+  const v = `(${nf(tr.m1, 2)} contre ${nf(tr.m0, 2)} W par battement)`, p = nf(Math.abs(tr.pct) * 100, 1);
+  return nb(tr.pct >= PG.efFlat ? `À cardio égal, tu pousses <b>${p} % de watts en plus</b> que les 4 semaines d'avant ${v} : ton moteur aérobie progresse.`
+    : tr.pct <= -PG.efFlat ? `À cardio égal, tu pousses <b>${p} % de watts en moins</b> que les 4 semaines d'avant ${v} : fatigue, chaleur ou séances plus intenses ?`
+    : `À cardio égal, tu pousses autant de watts que les 4 semaines d'avant ${v} : moteur aérobie stable.`);
+}
+// endurance de base : part des séances sous 5 % de dérive
+function decAnswer(rows) {
+  const n = rows.length, k = rows.filter(r => r.dec < PG.dec).length; if (!n) return "";
+  const head = k === n ? `${n > 1 ? `Tes <b>${n} dernières séances</b> régulières sont toutes` : "Ta dernière séance régulière est"} sous ${PG.dec} % de dérive cardiaque`
+    : `<b>${k} séance${k > 1 ? "s" : ""} sur ${n}</b> sous ${PG.dec} % de dérive cardiaque`;
+  const f = k / n;
+  return nb(head + (f >= PG.decGood ? " : ta base aérobie tient." : f >= PG.decMid ? " : ta base tient sur une partie des séances, pas encore toutes." : " : le cardio monte en fin de séance, les sorties longues en zone 2 renforceront ta base."));
+}
+// profil de coureur : type et points fort / faible (sc = position 0-1 sur l'échelle de Coggan, 4 durées)
+function profileType(sc) {
+  if (["5", "60", "300", "1200"].some(k => sc[k] == null)) return null;
+  const sp = (sc["5"] + sc["60"]) / 2, en = (sc["300"] + sc["1200"]) / 2, diff = sp - en;
+  const type = diff > .12 ? "plutôt puncheur / sprinteur" : diff < -.12 ? "plutôt rouleur / diesel" : "polyvalent";
+  const K = Object.keys(sc), weak = K.reduce((a, b) => sc[b] < sc[a] ? b : a), strong = K.reduce((a, b) => sc[b] > sc[a] ? b : a);
+  return { type, weak, strong };
+}
 async function progress(el, opt = {}) {
   if (!el) return;
   const seq = ++B.prog, ftp = opt.ftp || ftpNow(), now = Date.now(), R = (S.all || []).filter(a => RIDE_TYPES.has(a.t));
-  // 1. FTP estimée séance par séance (meilleur 20 min × 95 %)
-  const cut = now - 120 * 864e5, pts = R.filter(a => a.dt.getTime() >= cut && a.pc && a.pc["1200"] && a.pc["1200"] * .95 >= .8 * ftp).map(a => ({ t: a.dt.getTime(), v: a.pc["1200"] * .95, a }));
-  // 2. efficacité aérobie sur les séances régulières (home trainer, intensité modérée)
-  const ef = R.filter(a => a.dt.getTime() >= cut && isIndoor(a) && a.np > 0 && a.w > 0 && a.hr > 0 && a.mt >= 1800 && a.np / a.w <= 1.07 && a.np / ftp >= .5 && a.np / ftp <= .85).map(a => ({ t: a.dt.getTime(), v: a.np / a.hr, a }));
+  const pts = ftpPts(R, ftp, now), ef = efPts(R, ftp, now);
   // 3. profil de coureur sur 90 jours
   const c90 = now - 90 * 864e5, best = {}; R.filter(a => a.dt.getTime() >= c90 && a.pc).forEach(a => ["5", "60", "300", "1200"].forEach(k => { const v = a.pc[k]; if (v && (!best[k] || v > best[k].v)) best[k] = { v, a }; }));
-  const kg = kgNow(), goal = opt.goal || { ftp: 300 };
+  const kg = kgNow(), goal = opt.goal || { ftp: 300 }, hist = (opt.profile && opt.profile.ftpHist) || prof().ftpHist;
+  const bNow = bestAt(pts, now), tr = ef.length >= 2 ? efTrend(ef, now) : null;
   let html = `<div class="pg-grid">`;
-  html += `<div class="pg-box"><h4>FTP estimée <small>tes efforts de 20 min × 95 %</small></h4>${pts.length ? `<div id="pgFtp"></div>` : `<p class="note">Pas encore d'effort soutenu de 20 min (au moins 80 % de ta FTP) ces 4 derniers mois.</p>`}</div>`;
-  html += `<div class="pg-box"><h4>Efficacité aérobie <small>W par battement, séances régulières</small></h4>${ef.length >= 2 ? `<div id="pgEf"></div><p class="bm-p" id="pgEfTxt"></p>` : `<p class="note">Il faut au moins 2 séances régulières sur MyWhoosh (endurance, tempo, sweet spot) pour suivre ta progression.</p>`}</div>`;
+  html += `<div class="pg-box"><h4>FTP estimée <small>tes efforts de 20 min × 95 %</small></h4><p class="pg-ans">${ftpAnswer({ best: bNow, ftp, garmin: lastHist(hist), goal: goal.ftp })}</p>${pts.length ? `<div id="pgFtp"></div>` : `<p class="note">Pas encore d'effort soutenu de 20 min (au moins 80 % de ta FTP) ces 4 derniers mois.</p>`}</div>`;
+  html += `<div class="pg-box"><h4>Watts par battement de cœur <small>séances régulières en home trainer</small></h4>${ef.length >= 2 ? `<p class="pg-ans">${efAnswer(tr, ef)}</p><div id="pgEf"></div><p class="note">Puissance ÷ cardio moyen sur tes séances d'endurance, tempo et sweet spot : plus c'est haut, mieux c'est (plus de watts pour le même cardio).</p>` : `<p class="note">Il faut au moins 2 séances régulières sur MyWhoosh (endurance, tempo, sweet spot) pour suivre ta progression.</p>`}</div>`;
   html += `<div class="pg-box pg-wide"><h4>Profil de coureur <small>meilleures valeurs des 90 derniers jours${kg ? ` · ${nf(kg, 1)} kg` : ""}</small></h4>${profileHtml(best, kg)}</div>`;
   html += `<div class="pg-box pg-wide"><h4>Endurance de base <small>dérive cardiaque des dernières séances régulières</small></h4><div id="pgDec"><p class="note">Analyse des séances…</p></div></div></div>`;
   if (seq !== B.prog) return;
   el.innerHTML = html;
-  if (pts.length) dots(document.getElementById("pgFtp"), pts, { unit: "W", goal: goal.ftp, hist: (opt.profile && opt.profile.ftpHist) || prof().ftpHist, d: 0, best: true });
-  if (ef.length >= 2) {
-    dots(document.getElementById("pgEf"), ef, { unit: "W/bpm", d: 2, trend: true });
-    const w4 = now - 28 * 864e5, a1 = ef.filter(p => p.t >= w4), a0 = ef.filter(p => p.t < w4 && p.t >= w4 - 28 * 864e5), m = A => A.reduce((s, p) => s + p.v, 0) / A.length;
-    document.getElementById("pgEfTxt").innerHTML = a1.length && a0.length ? `Sur les 4 dernières semaines : <b>${m(a1) >= m(a0) ? "+" : "−"}${nf(Math.abs(m(a1) / m(a0) - 1) * 100, 1)} %</b> par rapport aux 4 précédentes${m(a1) > m(a0) * 1.02 ? " : à cardio égal, tu pousses plus de watts." : m(a1) < m(a0) * .98 ? " : fatigue, chaleur ou séances plus intenses ?" : "."}` : "La tendance apparaîtra avec quelques semaines de séances.";
-  }
+  if (pts.length) dots(document.getElementById("pgFtp"), pts, { unit: "W", axis: "W", d: 0, goal: goal.ftp, ref: ftp, hist, best: true, cur: bNow,
+    tip: p => `<b>${pgDate(p.t)}</b> · ${esc(p.a.n)}<br>meilleures 20 min : ${nf(p.v / .95)} W<br>× 95 % = <b>${nf(p.v)} W</b>, ${p.v >= ftp ? `${nf(p.v - ftp)} W au-dessus` : `${nf(ftp - p.v)} W sous`} ta FTP de travail (${nf(ftp)} W)` });
+  if (ef.length >= 2) dots(document.getElementById("pgEf"), ef, { unit: "W par battement", axis: "W/batt.", d: 2, trend: true,
+    tip: p => `<b>${pgDate(p.t)}</b> · ${esc(p.a.n)}<br><b>${nf(p.v, 2)} W par battement</b><br>${nf(p.a.np)} W ÷ ${nf(p.a.hr)} bpm de cardio moyen` });
   // dérive cardiaque : les 6 dernières séances régulières de 45 min et plus qui ont leur détail
   const cand = R.filter(a => a.mt >= 2700 && a.np > 0 && a.hr > 0 && (now - a.dt) <= 42 * 864e5).slice(-12).reverse(), rows = [];
   for (const a of cand) { if (rows.length >= 6) break; const st = await stream(a.id); if (seq !== B.prog) return; if (!st) continue; const an = analyze(a, st); if (an.dec != null && an.steady) rows.push({ a, an }); }
   const box = document.getElementById("pgDec"); if (!box) return;
-  box.innerHTML = rows.length ? `<table class="bm-tab">${rows.map(({ a, an }) => `<tr><td>${a.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</td><td><button class="lnk" data-pgb="${a.id}">${esc(a.n)}</button></td><td class="${an.dec < 5 ? "bm-ok" : an.dec < 8 ? "bm-mid" : "bm-ko"}"><b>${nf(an.dec, 1)} %</b><small>${hms(an.moving)} · ${nf(an.np)} W</small></td></tr>`).join("")}</table><p class="note">Moins de 5 % de dérive sur une séance régulière d'une heure ou plus : ta base aérobie tient l'effort.</p>`
+  box.innerHTML = rows.length ? `<p class="pg-ans">${decAnswer(rows.map(r => ({ dec: r.an.dec })))}</p><table class="bm-tab">${rows.map(({ a, an }) => `<tr><td>${pgDate(a.dt.getTime())}</td><td><button class="lnk" data-pgb="${a.id}">${esc(a.n)}</button></td><td class="${an.dec < 5 ? "bm-ok" : an.dec < 8 ? "bm-mid" : "bm-ko"}"><b>${nf(an.dec, 1)} %</b><small>${hms(an.moving)} · ${nf(an.np)} W</small></td></tr>`).join("")}</table><p class="note">Dérive cardiaque : hausse du cardio entre la 1re et la 2de moitié d'une séance à effort égal. Moins de 5 % (vert) : ta base aérobie tient l'effort ; 5 à 8 % : correct ; au-delà : à travailler.</p>`
     : `<p class="note">Pas encore de séance régulière de 45 min ou plus avec son détail (endurance, tempo, sweet spot sur MyWhoosh).</p>`;
   box.querySelectorAll("[data-pgb]").forEach(b => b.onclick = () => open(+b.dataset.pgb));
 }
@@ -458,37 +515,54 @@ function profileHtml(best, kg) {
   const sc = {};
   const rows = L.map(([k, nm, d]) => { const b = best[k]; if (!b) return `<div class="pf-row"><span>${nm} <small>${d}</small></span><div class="pf-bar"></div><span class="pf-v">–</span></div>`;
     const v = k === "1200" ? b.v * .95 : b.v, wkg = kg ? v / kg : null, f = wkg ? clamp((wkg - COG[k][0]) / (COG[k][1] - COG[k][0]), 0, 1) : null; if (f != null) sc[k] = f;
-    return `<div class="pf-row"><span>${nm} <small>${d}${k === "1200" ? " × 95 %" : ""}</small></span><div class="pf-bar">${f != null ? `<div style="width:${Math.max(3, f * 100)}%"></div>` : ""}</div><span class="pf-v"><b>${nf(v)} W</b>${wkg ? `<small>${nf(wkg, 2)} W/kg · ${COGL[Math.min(7, Math.floor(f * 8))]}</small>` : ""}</span></div>`; }).join("");
+    return `<div class="pf-row"><span>${nm} <small>${d}${k === "1200" ? " ×\u00a095\u00a0%" : ""}</small></span><div class="pf-bar">${f != null ? `<div style="width:${Math.max(3, f * 100)}%"></div>` : ""}</div><span class="pf-v"><b>${nf(v)} W</b>${wkg ? `<small>${nf(wkg, 2)} W/kg · ${COGL[Math.min(7, Math.floor(f * 8))]}</small>` : ""}</span></div>`; }).join("");
   let txt = "";
-  if (Object.keys(sc).length === 4) {
-    const sp = (sc["5"] + sc["60"]) / 2, en = (sc["300"] + sc["1200"]) / 2, diff = sp - en;
-    const type = diff > .12 ? "plutôt puncheur / sprinteur" : diff < -.12 ? "plutôt rouleur / diesel" : "polyvalent";
-    const names = { "5": "le sprint", "60": "l'effort d'une minute", "300": "la VO2max (5 min)", "1200": "le seuil (20 min)" };
-    const weak = Object.keys(sc).reduce((a, b) => sc[b] < sc[a] ? b : a), strong = Object.keys(sc).reduce((a, b) => sc[b] > sc[a] ? b : a);
-    txt = `<p class="bm-p">Profil <b>${type}</b> : point fort ${names[strong]}, point faible ${names[weak]}.${weak === "5" || weak === "60" ? " Attention : tes meilleures valeurs courtes viennent surtout de séances en ERG, sans vrai sprint ; le test court (sprint, 1 min, 5 min) les mesurera vraiment." : weak === "1200" || weak === "300" ? " C'est justement ce que travaillent tes blocs seuil et VO2max." : ""}</p>`;
-  } else if (!kg) txt = `<p class="note">Indique ton poids (carte « Ton niveau ») pour situer chaque valeur sur l'échelle de Coggan.</p>`;
-  return `<div class="pf">${rows}</div>${txt}<p class="note">Échelle : tableau de profil de puissance de Coggan (hommes), du débutant à la classe mondiale.</p>`;
+  const pt = profileType(sc);
+  if (pt) {
+    const names = { "5": "le sprint", "60": "l'effort d'une minute", "300": "la VO2max (5 min)", "1200": "le seuil (20 min)" }, weak = pt.weak;
+    txt = `<p class="pg-ans">Profil <b>${pt.type}</b> : point fort ${names[pt.strong]}, point faible ${names[weak]}.${weak === "5" || weak === "60" ? " Attention : tes meilleures valeurs courtes viennent surtout de séances en ERG, sans vrai sprint ; le test court (sprint, 1 min, 5 min) les mesurera vraiment." : weak === "1200" || weak === "300" ? " C'est justement ce que travaillent tes blocs seuil et VO2max." : ""}</p>`;
+  } else if (!kg) txt = `<p class="pg-ans">Indique ton poids (carte « Tes performances ») pour situer chaque valeur sur l'échelle de Coggan.</p>`;
+  return `${txt}<div class="pf">${rows}</div><p class="note">Échelle : tableau de profil de puissance de Coggan (hommes), du débutant à la classe mondiale.</p>`;
+}
+// étiquettes au bout des lignes, dans la marge de droite, écartées pour ne pas se chevaucher
+function spreadLabels(L, top, bot, gap = 13) {
+  const S2 = L.slice().sort((a, b) => a.y - b.y);
+  S2.forEach((l, i) => { l.ly = Math.max(l.y, i ? S2[i - 1].ly + gap : top); });
+  for (let i = S2.length - 1; i >= 0; i--) { const lim = i === S2.length - 1 ? bot : S2[i + 1].ly - gap; if (S2[i].ly > lim) S2[i].ly = lim; }
+  return S2;
 }
 function dots(box, P, o) {
   if (!box) return;
-  const W = Math.max(280, box.clientWidth || 400), H = 170, m = { l: 40, r: 10, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const W = Math.max(280, box.clientWidth || 400), H = 180, m = { l: 40, r: 92, t: 18, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const t0 = Math.min(...P.map(p => p.t)), t1 = Math.max(Date.now(), ...P.map(p => p.t));
-  const vals = P.map(p => p.v).concat(o.goal ? [o.goal] : []), lo0 = Math.min(...vals), hi0 = Math.max(...vals), padv = (hi0 - lo0) * .15 || hi0 * .05, lo = lo0 - padv, hi = hi0 + padv;
-  const x = t => m.l + (t - t0) / Math.max(1, t1 - t0) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img"><g class="axis">`;
-  const tk = niceTicks(hi - lo, 3)[1] || 1; for (let v = Math.ceil(lo / tk) * tk; v <= hi; v += tk) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 5}" y="${y(v) + 4}" text-anchor="end">${nf(v, o.d)}</text>`;
-  const d0 = new Date(t0); for (let k = 1; k < 14; k++) { const f = new Date(d0.getFullYear(), d0.getMonth() + k, 1); if (f.getTime() > t1) break; s += `<text x="${x(f.getTime())}" y="${H - 5}" text-anchor="middle">${MONTHS[f.getMonth()]}</text>`; }
+  const H2 = o.hist && o.hist.length ? o.hist.map(([d, v]) => [new Date(d).getTime(), v]).filter(([t]) => t >= t0 - 60 * 864e5) : [];
+  const vals = P.map(p => p.v).concat(o.goal ? [o.goal] : [], o.ref ? [o.ref] : [], H2.map(h => h[1])), lo0 = Math.min(...vals), hi0 = Math.max(...vals), padv = (hi0 - lo0) * .15 || hi0 * .05, lo = lo0 - padv, hi = hi0 + padv;
+  const x = t => m.l + (t - t0) / Math.max(1, t1 - t0) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih, f = v => v.toFixed(1), xe = W - m.r;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.unit)} séance par séance"><g class="axis">`;
+  const tk = niceTicks(hi - lo, 4)[1] || 1; for (let v = Math.ceil(lo / tk) * tk; v <= hi; v += tk) s += `<line class="gridline" x1="${m.l}" x2="${xe}" y1="${f(y(v))}" y2="${f(y(v))}"/><text x="${m.l - 5}" y="${f(y(v) + 4)}" text-anchor="end">${nf(v, o.d)}</text>`;
+  if (o.axis) s += `<text x="${m.l - 5}" y="${m.t - 6}" text-anchor="end">${esc(o.axis)}</text>`;
+  const d0 = new Date(t0); for (let k = 1; k < 14; k++) { const fm = new Date(d0.getFullYear(), d0.getMonth() + k, 1); if (fm.getTime() > t1) break; s += `<text x="${f(x(fm.getTime()))}" y="${H - 5}" text-anchor="middle">${MONTHS[fm.getMonth()]}</text>`; }
   s += "</g>";
-  if (o.goal) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(o.goal)}" y2="${y(o.goal)}" stroke="var(--accent)" stroke-dasharray="5 4"/><text x="${W - m.r}" y="${y(o.goal) - 5}" text-anchor="end" font-size="11" font-weight="700" fill="var(--accent)">objectif ${o.goal} W</text>`;
-  if (o.hist && o.hist.length) { const H2 = o.hist.map(([d, v]) => [new Date(d).getTime(), v]).filter(([t]) => t >= t0 - 60 * 864e5); let d = ""; H2.forEach(([t, v], i) => { const xx = x(Math.max(t, t0)); d += (i ? `L${xx},${y(H2[i - 1][1])}L` : "M") + `${xx},${y(v)}`; }); if (H2.length) d += `L${x(t1)},${y(H2[H2.length - 1][1])}`; s += `<path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.5"/>`; }
-  if (o.best && P.length >= 2) { const S2 = P.slice().sort((a, b) => a.t - b.t), bestAt = t => Math.max(...S2.filter(q => q.t <= t && q.t > t - 42 * 864e5).map(q => q.v));
-    let d = "", prev = null; S2.forEach(p => { const v = bestAt(p.t); d += prev == null ? `M${x(p.t).toFixed(1)},${y(v).toFixed(1)}` : `L${x(p.t).toFixed(1)},${y(prev).toFixed(1)}L${x(p.t).toFixed(1)},${y(v).toFixed(1)}`; prev = v; });
-    s += `<path d="${d}L${x(t1).toFixed(1)},${y(prev).toFixed(1)}" fill="none" stroke="var(--accent)" stroke-width="2"/>`; }
-  if (o.trend && P.length >= 3) { const S2 = P.slice().sort((a, b) => a.t - b.t); let d = ""; S2.forEach((p, i) => { const w = S2.filter(q => q.t <= p.t && q.t > p.t - 28 * 864e5), v = w.reduce((s2, q) => s2 + q.v, 0) / w.length; d += (i ? "L" : "M") + x(p.t).toFixed(1) + "," + y(v).toFixed(1); }); s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/>`; }
-  P.forEach((p, i) => s += `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="4" fill="var(--accent)" fill-opacity=".75" stroke="var(--card)" stroke-width="1.5" data-i="${i}" style="cursor:pointer"/>`);
-  box.innerHTML = s + "</svg>" + (o.hist ? `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>efforts de 20 min${o.best ? " (meilleur sur 6 semaines)" : ""}</span><span><i style="background:var(--muted)"></i>FTP Garmin</span></div>` : "");
+  const L = [];   // étiquettes de bout de ligne : {y, txt, val, col, b}
+  if (o.goal) { s += `<line x1="${m.l}" x2="${xe}" y1="${f(y(o.goal))}" y2="${f(y(o.goal))}" stroke="var(--accent)" stroke-dasharray="5 4"/>`; L.push({ y: y(o.goal), txt: "objectif", val: `${nf(o.goal)} W`, col: "var(--accent-ink)" }); }
+  if (o.ref) { s += `<line x1="${m.l}" x2="${xe}" y1="${f(y(o.ref))}" y2="${f(y(o.ref))}" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="2 3"/>`; L.push({ y: y(o.ref), txt: "travail", val: `${nf(o.ref)} W`, col: "var(--ink)" }); }
+  if (H2.length) { let d = ""; H2.forEach(([t, v], i) => { const xx = f(x(Math.max(t, t0))); d += (i ? `L${xx},${f(y(H2[i - 1][1]))}L` : "M") + `${xx},${f(y(v))}`; }); const lv = H2[H2.length - 1][1]; d += `L${f(xe)},${f(y(lv))}`;
+    s += `<path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.5"/>`; L.push({ y: y(lv), txt: "Garmin", val: `${nf(lv)} W`, col: "var(--muted)" }); }
+  if (o.best && P.length) { const st = bestSteps(P, t1); let d = "", prev = null, end = null;
+    st.forEach(([t, v]) => { if (v == null) { if (prev != null) { d += `L${f(x(t))},${f(y(prev))}`; end = [t, prev]; } prev = null; return; }
+      d += prev == null ? `M${f(x(t))},${f(y(v))}` : `L${f(x(t))},${f(y(prev))}L${f(x(t))},${f(y(v))}`; prev = v; end = [t, v]; });
+    s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>`;
+    if (o.cur) L.push({ y: y(o.cur.v), txt: "20 min", val: `${nf(o.cur.v)} W`, col: "var(--accent-ink)", b: 1 });
+    else if (end) s += `<text x="${f(x(end[0]))}" y="${f(y(end[1]) + 15)}" text-anchor="end" font-size="11" fill="var(--muted)">plus rien depuis 6 sem.</text>`; }
+  if (o.trend && P.length >= 3) { const S2 = P.slice().sort((a, b) => a.t - b.t); let d = "", lv = null;
+    S2.forEach((p, i) => { const w = S2.filter(q => q.t <= p.t && q.t > p.t - 28 * 864e5); lv = w.reduce((s2, q) => s2 + q.v, 0) / w.length; d += (i ? "L" : "M") + f(x(p.t)) + "," + f(y(lv)); });
+    d += `L${f(xe)},${f(y(lv))}`; s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>`; L.push({ y: y(lv), txt: "moy. 4 sem.", val: nf(lv, o.d), col: "var(--accent-ink)", b: 1 }); }
+  P.forEach((p, i) => { const c = o.cur && p === o.cur;
+    s += `<circle cx="${f(x(p.t))}" cy="${f(y(p.v))}" r="${c ? 6 : 4}" fill="var(--accent)" fill-opacity="${c ? 1 : o.cur ? .45 : .75}" stroke="var(--card)" stroke-width="1.5" data-i="${i}" style="cursor:pointer"/>`; });
+  spreadLabels(L, m.t + 4, m.t + ih + 4).forEach(l => s += `<text x="${xe + 6}" y="${f(l.ly + 4)}" font-size="11.5" fill="${l.col}">${esc(l.txt)} <tspan font-weight="700">${esc(l.val)}</tspan></text>`);
+  box.innerHTML = s + "</svg>";
   const svg = box.querySelector("svg");
-  svg.addEventListener("pointermove", e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = P[+c.dataset.i]; showTip(e, `<b>${p.a.dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</b> · ${esc(p.a.n)}<br>${nf(p.v, o.d)} ${o.unit}`); });
+  svg.addEventListener("pointermove", e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = P[+c.dataset.i]; showTip(e, o.tip ? o.tip(p) : `<b>${pgDate(p.t)}</b> · ${esc(p.a.n)}<br>${nf(p.v, o.d)} ${o.unit}`); });
   svg.addEventListener("pointerleave", hideTip);
   svg.addEventListener("click", e => { const c = e.target.closest("circle[data-i]"); if (c) open(P[+c.dataset.i].a.id); });
 }
@@ -502,5 +576,5 @@ document.addEventListener("click", e => {
   e.preventDefault(); open(id);
 }, true);
 document.addEventListener("velo:loaded", () => { B.idx = null; B.cache = {}; });
-window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
+window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor, _prog: { ftpPts, efPts, bestAt, bestSteps, ftpAnswer, efTrend, efAnswer, decAnswer, profileType, profileHtml, spreadLabels, PG }, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
 })();

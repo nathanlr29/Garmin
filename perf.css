@@ -1,0 +1,22 @@
+/* Carte « Tes performances » (onglet Plan, perf.js). Réutilise .crtiles / .tile (theme.css), .crtile (course.css), .pg-grid / .pg-box / .rkform / .lnk (plan.css) */
+.perf .pf-tiles{margin:14px 0 18px;border-left:0;border-right:0;border-radius:0}   /* bandeau à filets : pas de carte dans la carte */
+.perf .pf-recs{display:grid}
+.perf .pf-rec{display:grid;grid-template-columns:52px minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.2fr);gap:2px 12px;align-items:baseline;padding:9px 0;border-top:1px solid var(--line)}
+.perf .pf-rec:first-child{border-top:0}
+.perf .pf-d{font-size:13.5px;font-weight:600;color:var(--muted)}
+.perf .pf-rec b{font:700 19px/1.1 var(--font-num);color:var(--ink);white-space:nowrap}
+.perf .pf-rec small{display:block;font-size:12px;color:var(--muted);line-height:1.3}
+.perf .pf-delta.pf-up b,.perf .pf-delta.pf-up small{color:var(--good)}
+.perf .pf-delta.pf-dn b,.perf .pf-delta.pf-dn small{color:var(--bad)}
+.perf .pf-best .lnk{font-size:13px}
+@media (max-width:520px){
+  .perf .pf-rec{grid-template-columns:48px minmax(0,1fr) minmax(0,1fr)}
+  .perf .pf-best{grid-column:2/-1;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+  .perf .pf-best small{display:inline}
+}
+.perf .pf-curve{margin-top:4px}
+.perf .pf-rank{margin-top:14px}
+.perf .pf-form{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.perf .pf-priv{margin-top:6px}
+.perf .pf-tiles .tile .s{white-space:normal}
+@media (max-width:520px){.perf .pf-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.perf .pf-tiles .tile{padding:12px}}

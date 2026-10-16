@@ -941,26 +941,8 @@ function renderToday(form, ready, W) {
     <p class="note">Charge en TSS, calculée avec ta puissance (home trainer) ou ta fréquence cardiaque (dehors) : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100.</p></section>`;
 }
 
-// ------------------------------------------------------------------ Classement selon la FTP (W/kg)
-const ZWIFT = [[0, 0], [1.5, 2], [2, 6], [2.5, 13], [3.2, 42], [4, 85], [4.6, 95], [5.2, 99], [6.5, 100]];  // % cumulé des coureurs
+// Tranches d'âge acceptées (carte « Tes performances » de perf.js, import d'un lien #plan=)
 const AFY = { "<30": [4.95, 5.77], "30-39": [4.3, 5.59], "40-49": [4, 4.88], "50-59": [3.63, 4.38], "60+": [3.23, 4.18] };  // médiane, top 10 % (hommes)
-const cdfPts = x => { if (x <= 0) return 0; for (let i = 1; i < ZWIFT.length; i++) if (x <= ZWIFT[i][0]) { const [a, b] = ZWIFT[i - 1], [c, d] = ZWIFT[i]; return b + (d - b) * (x - a) / (c - a); } return 100; };
-const erf = x => { const t = 1 / (1 + .3275911 * Math.abs(x)), y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - .284496736) * t + .254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; };
-const topOf = c => Math.max(1, Math.round(100 - c));
-function renderRank(prof, c) {
-  const kg = +store2.get("bwWeight") || 0, age = store2.get("bwAge") || "30-39", G = c.goal;
-  const form = `<div class="rkform"><label>Poids <input id="pKg" type="number" min="35" max="150" step="0.1" value="${kg || ""}" placeholder="kg"> kg</label>
-    <label>Âge <select id="pAge">${Object.keys(AFY).map(k => `<option ${k === age ? "selected" : ""}>${k}</option>`).join("")}</select></label></div>`;
-  if (!kg) return `<section class="card span12 rank"><h2>Ton niveau</h2><p class="tdmsg">Indique ton poids pour calculer tes watts par kilo et te situer parmi les cyclistes. Il reste uniquement sur cet appareil.</p>${form}</section>`;
-  const wkg = prof.ftp / kg, top = topOf(cdfPts(wkg)), goal = G.ftp / kg, topG = topOf(cdfPts(goal));
-  const [med, p90] = AFY[age] || AFY["30-39"], sd = (p90 - med) / 1.2816, topA = topOf(100 * .5 * (1 + erf((wkg - med) / sd / Math.SQRT2)));
-  return `<section class="card span12 rank"><h2>Ton niveau <small>FTP ${prof.ftp} W · ${String(kg).replace(".", ",")} kg</small></h2>
-    <div class="rkrow"><div class="tdv"><b>${wkg.toFixed(2).replace(".", ",")}</b><span>W/kg</span></div><div class="rktop">Top <b>${top} %</b><span>des cyclistes qui s'entraînent</span></div></div>
-    <div class="rkbar"><div style="width:${100 - top}%"></div><i style="left:${100 - topG}%" title="objectif ${G.ftp} W"></i></div>
-    <p class="tdmsg">À ${G.ftp} W tu serais à ${goal.toFixed(2).replace(".", ",")} W/kg : top ${topG} %. Parmi des sportifs testés en laboratoire (hommes ${age} ans), tu es dans le top ${topA} %.</p>
-    ${form}
-    <p class="note">Repères indicatifs : 1 616 coureurs d'une course Zwift (L'Étape du Tour 2020, 20 min × 95 %) et 1 517 hommes testés par A Faster You (2026). Les deux populations sont plus entraînées que la moyenne des cyclistes.</p></section>`;
-}
 
 // ------------------------------------------------------------------ Logique de page
 function ctxFor(mon, form, ready) { const rc = rcFor(mon); return { form, ready, prev: prevCtx(mon), rc, ...(rc ? { run: runCtx(mon) } : {}) }; }
@@ -983,8 +965,10 @@ function render() {
   const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, c, ctxFor(PS.mon, form, ready)));
   PS.W = W; PS.Wc = Wc;
   box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderAvail(c)}${renderDesign()}
-    <section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><div id="pProgBody"><p class="note">${window.Bilan ? "Analyse en cours…" : ""}</p></div></section>${renderRank(prof, c)}</div>`;
+    <section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><div id="pProgBody"><p class="note">${window.Bilan ? "Analyse en cours…" : ""}</p></div></section>${window.Zones ? Zones.html({ profile: prof, acts: S.all, now: Date.now() }) : ""}${window.Perf ? Perf.html({ profile: prof, ftp: prof.ftp, goal: c.goal, acts: S.all }) : ""}</div>`;
   bind(c, prof);
+  if (window.Zones) Zones.bind(box);
+  if (window.Perf) Perf.bind(box.querySelector(".perf"));
   if (window.Bilan) Bilan.progress($("pProgBody"), { ftp: prof.ftp, goal: c.goal, profile: prof }).catch(() => {});
 }
 function bind(c, prof) {
