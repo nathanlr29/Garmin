@@ -61,9 +61,11 @@ function okValue(id, v) {
 // Premier passage sur un appareil : l'existant devient la base (ts 0 / 1), pour qu'il ne batte pas ce qui est déjà dans la Sheet.
 function scan(now = Date.now()) {
   const cur = collect(), snap = ls.get(K_SNAP, null), tsm = ls.get(K_TS, {}), changed = [];
-  const next = {}; for (const [id, v] of Object.entries(cur)) next[id] = JSON.stringify(v);
+  const next = {}; for (const [id, v] of Object.entries(cur)) if (inWindow(id)) next[id] = JSON.stringify(v);   // hors fenêtre : on ne suit plus (et ce n'est pas une suppression)
+  for (const id of Object.keys(tsm)) if (!inWindow(id)) delete tsm[id];
   if (snap) {
     for (const id of new Set([...Object.keys(next), ...Object.keys(snap)])) {
+      if (!inWindow(id)) continue;
       if (next[id] === snap[id]) continue;
       const v = id in cur ? cur[id] : null;
       tsm[id] = id === "planSince" ? 1 : Math.max(now, (tsm[id] || 0) + 1); changed.push({ id, ts: tsm[id], v });
@@ -97,7 +99,13 @@ function apply(items) {
     changed = true;
   }
   ls.set(K_TS, tsm); ls.set(K_SNAP, snap);
-  if (changed) { try { window.Plan?.refresh?.(); } catch (e) { console.error(e); } }
+  if (changed) refresh();
+}
+// Redessine l'onglet, mais pas pendant une saisie : on attend que le champ perde le focus (sinon le texte tapé disparaît).
+function refresh() {
+  const a = typeof document !== "undefined" ? document.activeElement : null;
+  if (a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest?.("#plan")) { document.addEventListener("focusout", () => setTimeout(refresh, 0), { once: true }); return; }
+  try { window.Plan?.refresh?.(); } catch (e) { console.error(e); }
 }
 // Appelé par plan.js après chaque écriture dans le localStorage.
 function touch() { const items = scan().filter(ready); if (items.length) SY?.push("plan", items); }

@@ -12,7 +12,8 @@ function device(name, pre = {}) {
   const ls = { getItem: k => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; }, get length() { return Object.keys(store).length; }, key: i => Object.keys(store)[i] };
   const Sync = { register: (n, c) => { cols[n] = c; }, push: (n, items) => { for (const it of items) queue[it.id] = it; } };
   const win = { Sync, Plan: { refresh: () => refreshed.push(1) } };
-  const ctx = { window: win, localStorage: ls, console, JSON, Date, Math, Object, Array, Set, RegExp, Number, String };
+  const doc = { activeElement: null, listeners: [], addEventListener(n, f) { this.listeners.push(f); } };
+  const ctx = { window: win, document: doc, setTimeout: f => f(), localStorage: ls, console, JSON, Date, Math, Object, Array, Set, RegExp, Number, String };
   vm.createContext(ctx); vm.runInContext(src, ctx);
   const get = k => store[k] === undefined ? undefined : JSON.parse(store[k]);
   const set = (k, v) => { store[k] = JSON.stringify(v); win.PlanSync.touch(); };    // ce que fait store2.set de plan.js
@@ -23,7 +24,7 @@ function device(name, pre = {}) {
     for (const it of sent) { const s = server.get(it.id); if (!s || it.ts > s.ts) server.set(it.id, { ts: it.ts, v: it.v }); delete queue[it.id]; }
     cols.plan.apply([...server].map(([id, o]) => ({ id, ts: o.ts, v: o.v })));
   };
-  return { name, store, get, set, del, sync, queue, refreshed, P: win.PlanSync._ };
+  return { name, store, get, set, del, sync, queue, refreshed, doc, P: win.PlanSync._ };
 }
 const mon = "2026-10-12";   // lundi de la semaine de test (date système = 16/10/2026 : dans la fenêtre)
 let t = Date.now(); const realNow = Date.now; Date.now = () => (t += 5);   // horloge qui avance : deux écritures n'ont jamais le même ts
@@ -112,6 +113,21 @@ let t = Date.now(); const realNow = Date.now; Date.now = () => (t += 5);   // ho
   const d = device("x", { soStart: "[48.1,-1.6]", tab: '"plan"', syncCfg: '{"key":"secret"}' });
   const ids = Object.keys(d.P.collect()); assert.deepEqual(ids, []);
   d.set("planFtp", 250); assert.deepEqual(Object.keys(d.P.collect()), ["planFtp"]);
+}
+// ---------------------------------------------------------------- 8. pas de redessin pendant une saisie ; vieilles semaines oubliées sans être « supprimées »
+{
+  server.clear();
+  const mac = device("mac"), tel = device("tel"); mac.sync(); tel.sync();
+  tel.doc.activeElement = { tagName: "INPUT", closest: s => s === "#plan" ? {} : null };   // l'utilisateur tape dans un champ du Plan
+  mac.set("planFtp", 280); mac.sync(); tel.sync();
+  assert.equal(tel.get("planFtp"), 280, "la valeur est bien reçue"); assert.equal(tel.refreshed.length, 0, "mais l'onglet n'est pas redessiné pendant la saisie");
+  tel.doc.activeElement = null; tel.doc.listeners.forEach(f => f());                      // le champ perd le focus
+  assert.equal(tel.refreshed.length, 1, "redessiné ensuite");
+  const old = "planWk:2026-01-05";
+  tel.set(old, { v: 2, items: [] }); tel.set("planFtp", 281);
+  assert.ok(!(old in JSON.parse(tel.store.planSyncSnap)), "semaine hors fenêtre : plus suivie");
+  delete tel.store[old]; tel.set("planFtp", 282);
+  assert.equal(server.get(old), undefined, "retirer une vieille semaine localement n'envoie aucune suppression");
 }
 Date.now = realNow;
 console.log("plansync : OK");
