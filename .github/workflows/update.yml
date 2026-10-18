@@ -49,6 +49,13 @@ jobs:
           FULL_SYNC: ${{ inputs.full && '1' || '0' }}
         run: python scripts/fetch_garmin.py
 
+      # points d'arrêt OpenStreetMap préparés à l'avance (quelques carreaux par passage) ; un échec ne bloque rien
+      - name: Préparer les points d'arrêt
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 6
+        run: python scripts/fetch_poi.py
+
       - name: Sauvegarder les données dans le dépôt
         id: save
         if: success() || failure()   # garde les jetons renouvelés même si la récup a échoué

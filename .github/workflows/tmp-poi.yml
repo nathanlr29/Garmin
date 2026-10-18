@@ -1,0 +1,20 @@
+name: tmp test POI
+on:
+  push:
+    branches: [claude/project-thread-yr4fv2]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: |
+          cd scripts && python - <<'PY'
+          import time, json, fetch_poi as f
+          for t in ["48.0_-2.0", "48.0_-4.5", "47.0_-2.0", "49.0_-5.5"]:
+              t0 = time.time(); els = f.fetch(t)
+              s = json.dumps(els, ensure_ascii=False, separators=(",", ":")) if els is not None else ""
+              import gzip
+              print(t, "éléments", None if els is None else len(els), "octets", len(s), "gzip", len(gzip.compress(s.encode())), f"{time.time()-t0:.1f}s")
+          PY
