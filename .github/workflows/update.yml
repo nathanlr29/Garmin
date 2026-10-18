@@ -53,7 +53,7 @@ jobs:
       - name: Préparer les points d'arrêt
         if: ${{ !cancelled() }}
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 8
         run: python scripts/fetch_poi.py
 
       - name: Sauvegarder les données dans le dépôt

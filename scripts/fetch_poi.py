@@ -20,7 +20,7 @@ INDEX = OUT / "index.json"
 TILE = 0.5
 # shortcut: Bretagne et ses marges en dur (Brest → Laval, Nantes → Avranches), à élargir si les sorties vont plus loin
 BBOX = (46.5, -5.5, 49.5, 0.5)  # sud, ouest, nord, est
-PER_RUN, BUDGET_S, MAX_AGE = 6, 150, 14
+PER_RUN, BUDGET_S, MAX_AGE = 6, 120, 14  # un carreau prend 30 à 50 s (mesuré le 18/10/2026) : 3 ou 4 par passage
 URL = "https://overpass-api.de/api/interpreter"
 UA = "BreizhWatts/1.0 (https://nathanlr29.github.io/Garmin/)"  # overpass-api.de refuse les agents anonymes (406 / 429)
 # mêmes filtres que query() dans arrets.js (vérifié par tests/test_garmin.py), « À voir » compris
@@ -63,12 +63,12 @@ def compact(e):
             "t": {k: tags[k] for k in KEEP_T if k in tags}}
 
 
-def fetch(name, tries=3):
+def fetch(name, tries=2):
     body = urllib.parse.urlencode({"data": query(name)}).encode()
     for n in range(tries):
         try:
             req = urllib.request.Request(URL, data=body, headers={"User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=150) as r:
+            with urllib.request.urlopen(req, timeout=120) as r:
                 j = json.load(r)
             if "runtime error" in (j.get("remark") or ""):
                 raise RuntimeError(j["remark"])  # délai dépassé : réponse incomplète, on ne la garde pas
