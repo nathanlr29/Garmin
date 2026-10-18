@@ -59,11 +59,25 @@ assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de
   assert.deepEqual(calls, Array(3).fill(calls[0]), "2 refus 429 puis réponse, toujours le 1er serveur"); }
 // 2 quinquies) longue trace : requête coupée en morceaux de 15 rectangles, doublons fusionnés
 { const C = A._corridor(P), n = C.split("|").length, bodies = [];
-  ctx.fetch = (url, o) => { const id = bodies.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 7, lat: 48.2, lon: -1.68, tags: { amenity: "drinking_water" } }, { type: "node", id, lat: 48.3, lon: -1.68, tags: { shop: "bakery" } }] }) }); };
+  ctx.fetch = (url, o) => { if (!o) return Promise.resolve({ ok: false, status: 404 }); const id = bodies.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 7, lat: 48.2, lon: -1.68, tags: { amenity: "drinking_water" } }, { type: "node", id, lat: 48.3, lon: -1.68, tags: { shop: "bakery" } }] }) }); };
   const els = await A._fetchPois(C, false);
   assert.equal(bodies.length, Math.ceil(n / 15), `${n} rectangles : ${Math.ceil(n / 15)} requêtes`);
   assert.ok(bodies.every(b => b.split("amenity").length - 1 <= 15), "15 rectangles au plus par requête");
   assert.equal(els.length, 1 + bodies.length, "le point présent dans chaque réponse n'est gardé qu'une fois"); }
+// 2 sexies) carreaux préparés (data/poi) : lus localement, Overpass seulement pour les rectangles hors des carreaux
+{ const C = A._corridor(P), B = C.split("|"), posts = [], gets = [];
+  const tiles = { "48.0_-2.0": [{ id: "n1", lat: 48.3, lon: -1.68, t: { amenity: "drinking_water" } }, { id: "n2", lat: 48.3, lon: -1.9, t: { amenity: "drinking_water" } },
+    { id: "n3", lat: 48.4, lon: -1.68, t: { historic: "castle", wikidata: "Q1" } }] };
+  ctx.fetch = (url, o) => { if (o) { posts.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 9, lat: 48.7, lon: -1.68, tags: { shop: "bakery" } }, { type: "node", id: 1, lat: 48.3, lon: -1.68, tags: { amenity: "drinking_water" } }] }) }); }
+    gets.push(url); const m = url.match(/poi\/(.+)\.json$/), j = m[1] === "index" ? { "48.0_-2.0": "2026-10-18" } : tiles[m[1]];
+    return Promise.resolve(j ? { ok: true, status: 200, json: async () => j } : { ok: false, status: 404 }); };
+  const els = await A._fetchPois(C, false), ids = els.map(e => e.id).sort().join();
+  assert.equal(ids, "n1,n9", "point d'eau du carreau (une fois, aussi rendu par Overpass), boulangerie d'Overpass ; hors couloir et « À voir » écartés");
+  const far = B.filter(b => +b.split(",")[2] >= 48.5);
+  assert.equal(posts.length, Math.ceil(far.length / 15), "Overpass seulement pour les rectangles qui dépassent 48,5° N (carreau absent)");
+  assert.ok(posts.every(q => !q.includes("(48.1")), "aucun rectangle couvert par les carreaux n'est envoyé");
+  assert.ok(!gets.some(u => u.includes("48.5_")), "carreau absent de l'index : pas demandé");
+  assert.ok((await A._fetchPois(A._corridor(P, 300), true)).some(e => e.id === "n3"), "Pause découverte : le château du carreau est gardé"); }
 // 3) Pause découverte : seulement les lieux avec une fiche, anecdote de 1 à 2 phrases sans ajout
 assert.equal(A._voirKind({ historic: "castle" }), null, "pas de fiche : écarté");
 assert.equal(A._voirKind({ historic: "archaeological_site", archaeological_site: "megalith", wikidata: "Q1" }), "megalith");

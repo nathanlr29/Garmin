@@ -20,6 +20,7 @@ except ImportError:  # les tests de lecture n'ont pas besoin de la vraie bibliot
     sys.modules["garminconnect"] = m
 import fetch_garmin as fg  # noqa: E402
 import recovery as rc  # noqa: E402
+import fetch_poi as fp  # noqa: E402
 
 rc.time.sleep = lambda s: None   # pas d'attente entre deux appels factices
 
@@ -339,6 +340,28 @@ class MyWhooshIdentity(unittest.TestCase):
     def test_edge_540(self):
         h = self.run_as("edge540")
         self.assertEqual((h["file_id"]["manufacturer"], h["file_id"]["product"], h["file_id"]["serial_number"]), (1, 4061, 3_456_789_012))
+
+
+# ---------------------------------------------------------------- Points d'arrêt préparés (data/poi)
+class PoiTiles(unittest.TestCase):
+    def test_memes_filtres_et_champs_que_le_site(self):
+        js = (Path(__file__).resolve().parent.parent / "arrets.js").read_text(encoding="utf-8")
+        for f in fp.FILTERS:
+            self.assertIn(f"A('{f}')", js)
+        self.assertIn(", ".join(f'"{k}"' for k in fp.KEEP_T), js.replace("\n", " "))
+
+    def test_grille(self):
+        t = fp.tiles()
+        self.assertEqual(len(t), 6 * 12)
+        self.assertIn("48.0_-2.0", t)   # Rennes
+        self.assertIn("48.0_-5.0", t)   # Brest
+        self.assertIn("48.0,-2.0,48.5,-1.5", fp.query("48.0_-2.0"))
+
+    def test_compact(self):
+        self.assertEqual(fp.compact({"type": "way", "id": 5, "center": {"lat": 48.123456, "lon": -1.7}, "tags": {"landuse": "cemetery", "x": 1}}),
+                         {"id": "w5", "lat": 48.12346, "lon": -1.7, "t": {"landuse": "cemetery"}})
+        self.assertIsNone(fp.compact({"type": "node", "id": 1, "lat": 48, "lon": -1, "tags": {"tourism": "viewpoint"}}))
+        self.assertIsNone(fp.compact({"type": "way", "id": 2, "tags": {}}))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 "use strict";
-// Points d'arrêt le long d'une sortie (eau, ravitaillement, toilettes, réparation) : OpenStreetMap via Overpass.
-// Requêtes par morceaux de trace (rectangles le long du tracé), gardées en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
+// Points d'arrêt le long d'une sortie (eau, ravitaillement, toilettes, réparation) : OpenStreetMap.
+// En Bretagne, lus dans data/poi/ (préparés par le workflow, scripts/fetch_poi.py) ; hors de la zone, Overpass par morceaux de trace
+// (rectangles le long du tracé), gardés en cache, 3 serveurs ; si aucun ne répond, la sortie s'affiche sans les arrêts.
 // Les 400 premiers et derniers mètres de la trace ne sont jamais envoyés (le point de départ reste sur l'appareil).
 (() => {
 const $ = id => document.getElementById(id);
@@ -140,18 +141,32 @@ function overpass(q) {
     next();
   });
 }
+// Carreaux de 0,5° nommés par leur coin sud-ouest (« 48.0_-2.0 »), comme dans scripts/fetch_poi.py
+const TILE = 0.5, TL = { idx: null, t: new Map() };
+const tileOf = (la, lo) => `${(Math.floor(la / TILE) * TILE).toFixed(1)}_${(Math.floor(lo / TILE) * TILE).toFixed(1)}`;
+const getJ = u => fetch(u).then(r => r.ok ? r.json() : null).catch(() => null);
+function tilesOf(b) { const [s, w, n, e] = b.split(",").map(Number), out = []; for (let la = Math.floor(s / TILE) * TILE; la <= n; la += TILE) for (let lo = Math.floor(w / TILE) * TILE; lo <= e; lo += TILE) out.push(tileOf(la, lo)); return out; }
+async function poiIndex() { if (!TL.idx) TL.idx = await getJ("data/poi/index.json"); return TL.idx || {}; }  // index absent : redemandé la fois suivante
+function tileEls(t) { if (!TL.t.has(t)) TL.t.set(t, getJ(`data/poi/${t}.json`).then(j => { if (!j) TL.t.delete(t); return j; })); return TL.t.get(t); }
 async function fetchPois(L, voir) {
   const key = hash(POI_V + "|" + voir + "|" + L), cache = LS.get(K_POI, {});
   if (cache[key] && Date.now() - cache[key].at < POI_TTL) return cache[key].els;
   if (ST.inflight.has(key)) return ST.inflight.get(key);
   const pr = (async () => {
+    const B = L.split("|"), all = new Map(), add = e => all.set(e.id, e);
+    // carreaux préparés : un rectangle n'est lu localement que si tous ses carreaux sont là
+    const idx = await poiIndex(), need = [...new Set(B.flatMap(b => tilesOf(b).filter(t => idx[t])))];
+    const got = Object.fromEntries(await Promise.all(need.map(async t => [t, await tileEls(t)])));
+    const local = B.filter(b => tilesOf(b).every(t => got[t])), far = B.filter(b => !local.includes(b)), box = local.map(b => b.split(",").map(Number));
+    local.flatMap(tilesOf).forEach(t => got[t].forEach(e => { if (box.some(([s, w, n, x]) => e.lat >= s && e.lat <= n && e.lon >= w && e.lon <= x)) add(e); }));
     // Une longue trace dépasse le délai d'Overpass en une requête (mesuré : 300 km ou 120 km avec « À voir ») : morceaux de 15 rectangles, 2 à la fois (2 places par IP sur overpass-api.de).
-    const B = L.split("|"), parts = [], all = new Map(); let k = 0;
-    for (let i = 0; i < B.length; i += CHUNK) parts.push(B.slice(i, i + CHUNK).join("|"));
-    const worker = async () => { while (k < parts.length) (await overpass(query(parts[k++], voir))).elements?.forEach(e => all.set(e.type + e.id, e)); };
+    const parts = []; let k = 0;
+    for (let i = 0; i < far.length; i += CHUNK) parts.push(far.slice(i, i + CHUNK).join("|"));
+    const worker = async () => { while (k < parts.length) (await overpass(query(parts[k++], voir))).elements?.forEach(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
+      add({ id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }); }); };
     await Promise.all([worker(), worker()]);
-    const els = [...all.values()].map(e => { const t = {}; KEEP_T.forEach(k => { if (e.tags && e.tags[k] != null) t[k] = e.tags[k]; });
-      return { id: e.type[0] + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, t }; }).filter(e => e.lat != null && (kindOf(e.t) || voirKind(e.t)));
+    // les carreaux portent aussi les lieux « À voir » : écartés si la Pause découverte n'est pas cochée
+    const els = [...all.values()].filter(e => e.lat != null && (kindOf(e.t) || (voir && voirKind(e.t))));
     const c = LS.get(K_POI, {}); c[key] = { at: Date.now(), els };
     Object.keys(c).sort((a, b) => c[b].at - c[a].at).slice(4).forEach(k => delete c[k]);  // 4 traces gardées au plus
     if (!LS.set(K_POI, c)) LS.set(K_POI, { [key]: c[key] });
