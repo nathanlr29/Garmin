@@ -440,12 +440,12 @@ const lastHist = h => h && h.length ? h[h.length - 1][1] : null;
 // phrase-réponse de la FTP estimée
 function ftpAnswer({ best, ftp, garmin, goal }) {
   let s;
-  if (!best) s = `Aucun effort de 20 min soutenu ces 6 dernières semaines : rien ne vient confirmer ta FTP de travail (${nf(ftp)} W), le test rampe la mesurera.`;
+  if (!best) s = `Aucun effort de 20 min soutenu ces 6 dernières semaines : rien ne vient confirmer ta FTP de travail (${nf(ftp)} W), le test de 20 min la mesurera.`;
   else {
     const d = best.v - ftp, head = `Ton meilleur effort de 20 min des 6 dernières semaines vaut <b>${nf(best.v)} W</b> (${nf(best.v / .95)} W × 95 %)`;
     s = Math.abs(d) <= PG.near * ftp ? `${head}, au niveau de ta FTP de travail (${nf(ftp)} W) : tes séances la confirment.`
-      : d > 0 ? `${head}, ${nf(d)} W au-dessus de ta FTP de travail (${nf(ftp)} W) : elle est sans doute sous-estimée, un test rampe la confirmerait.`
-      : `${head}, ${nf(-d)} W sous ta FTP de travail (${nf(ftp)} W) : tes séances ne sont pas des efforts à fond, c'est un plancher ; le test rampe donne la vraie valeur.`;
+      : d > 0 ? `${head}, ${nf(d)} W au-dessus de ta FTP de travail (${nf(ftp)} W) : elle est sans doute sous-estimée, un test de 20 min la confirmerait.`
+      : `${head}, ${nf(-d)} W sous ta FTP de travail (${nf(ftp)} W) : tes séances ne sont pas des efforts à fond, c'est un plancher ; le test de 20 min donne la vraie valeur.`;
   }
   const g = [];
   if (garmin && Math.round(garmin) !== Math.round(ftp)) g.push(`Garmin l'estime à ${nf(garmin)} W`);
