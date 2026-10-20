@@ -40,6 +40,8 @@ const CFGS = {
   cinq: { v: 2, goal: { ftp: 300, vo2: 65.5, date: "2026-12-31" }, start: "2026-10-05", days: [dayCfg("none", 60, true), dayCfg("mw", 60, true), dayCfg("mw", 75, false), dayCfg("mw", 90, true), dayCfg("none", 60, false), dayCfg("out", 180, true), dayCfg("out", 210, true)] },
   six: { v: 2, goal: { ftp: 280, vo2: 64, date: "2026-11-16" }, start: "2026-10-05", days: [dayCfg("mw", 60, false), dayCfg("mw", 75, true), dayCfg("out", 90, false), dayCfg("mw", 60, true), dayCfg("any", 90, false), dayCfg("any", 120, false), dayCfg("mw", 60, false)] },
   trois: { v: 2, goal: { ftp: 310, vo2: 66, date: "2027-01-31" }, start: "2026-10-19", days: [dayCfg("none", 60, true), dayCfg("any", 60, true), dayCfg("none", 60, true), dayCfg("any", 90, true), dayCfg("none", 60, true), dayCfg("any", 150, true), dayCfg("none", 60, true)] },
+  // semaine type du 20/10/2026 : trois soirs MyWhoosh, groupe le samedi, sortie longue le dimanche
+  groupe: { v: 2, goal: { ftp: 300, vo2: 65.5, date: "2026-12-31" }, start: "2026-10-05", days: [dayCfg("none", 60, true), dayCfg("mw", 75, true), dayCfg("mw", 75, false), dayCfg("mw", 75, true), dayCfg("none", 60, true), dayCfg("grp", 150, false), dayCfg("out", 240, false)] },
 };
 const SIT = {
   frais: { form: { ctl: 70, atl: 55, tsb: 15, lastHard: 3, km7: 120, h7: 6, n7: 4, c7: 0 }, ready: { today: 82, last: 80, avg3: 78 } },
@@ -47,7 +49,7 @@ const SIT = {
   rdy44: { form: { ctl: 70, atl: 70, tsb: 0, lastHard: 2, km7: 150, h7: 7, n7: 5, c7: 0 }, ready: { today: 40, last: 40, avg3: 50 } },
   rdy34: { form: { ctl: 70, atl: 75, tsb: -5, lastHard: 2, km7: 150, h7: 7, n7: 5, c7: 0 }, ready: { today: 30, last: 30, avg3: 35 } },
 };
-const PREV = [{ legsSun: false, musSun: null, hardSun: false }, { legsSun: true, musSun: "legs", hardSun: true }];
+const PREV = [{ legsSun: false, musSun: null, hardSun: false }, { legsSun: true, musSun: "legs", hardSun: true }, { legsSun: false, musSun: null, hardSun: true, grpSat: true }];
 // séances « faites » factices : une clé le lundi, de la muscu, de l'endurance, une sortie longue, un trajet
 let aid = 1;
 const mk = (mon, di, h, o) => { const dt = new Date(mon); dt.setDate(dt.getDate() + di); dt.setHours(h, 0, 0, 0); return { id: aid++, n: "Séance", t: "Ride", dt, d: `${ymd(dt)}T${pad(h)}:00:00`, mt: 3600, km: 30, np: 0, w: 0, te: 2, hr: 140, ...o }; };
@@ -91,7 +93,7 @@ const t0 = performance.now();
 const cases = runAll(planA, H.clock, H.store, CFGS, acts);
 const tAll = performance.now() - t0;
 // types de séance vélo : contenu inchangé
-const BIKE = ["vo2", "vo2r", "vo2s", "thr", "ss", "tempo", "end", "long", "longplus", "rec", "test", "testc"];
+const BIKE = ["vo2", "vo2r", "vo2s", "thr", "ss", "tempo", "end", "long", "grp", "longplus", "rec", "test", "testc"];
 const PH = [{ wk: 1, deload: false }, { wk: 3, deload: false }, { wk: 4, deload: true }];
 BIKE.forEach(t => [45, 75, 120, 210].forEach(d => PH.forEach((ph, i) => { cases[`build|${t}|${d}|${i}`] = sha(planA._build(t, d, ph)); })));
 // temps de génération : pire cas des appels directs à _gen (meilleur de 5 essais pour chaque cas)
@@ -129,6 +131,45 @@ const old = CFGS.cinq, ctxOld = { ...SIT.frais, prev: PREV[0] };
 }
 
 console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas identiques à la référence, _gen pire cas ${worst.toFixed(2)} ms (référence ${ref.genMaxMs} ms), ${(tAll / 1000).toFixed(1)} s de calcul`);
+
+// ======================================================================= 2 bis. tri des séances et semaine type (20/10/2026)
+{
+  const P = planA, TY = P.TYPES, kept = Object.keys(TY).filter(k => !TY[k].sport && !TY[k].old);
+  same(kept, ["vo2r", "thr", "ss", "tempo", "end", "long", "grp", "rec", "test"], "menu vélo : 9 séances, les anciennes masquées");
+  // aucune séance retirée n'est générée, quelle que soit la semaine, la config ou la forme
+  for (let w = 0; w < 8; w++) for (const cfg of Object.values(CFGS)) for (const s of Object.values(SIT)) for (const prev of PREV) {
+    const g = P._gen(monday(w), cfg, { ...s, prev });
+    g.items.forEach(it => { if (it.bike) assert.ok(!TY[it.bike.t].old, `séance retirée générée : ${it.bike.t}`); });
+  }
+  // semaine type : groupe le samedi = la séance dure ; l'autre clé travaille la FTP ; mardi en endurance après un gros week-end
+  const wk = (w, prev, sit = SIT.frais) => P._gen(monday(w), CFGS.groupe, { ...sit, prev }).items.map(it => it.bike ? it.bike.t : "-").join(" ");
+  const ph0 = P._phase(monday(0), CFGS.groupe);
+  assert.ok(!ph0.deload, "semaine de charge");
+  const lourd = wk(0, PREV[2]), g0 = P._gen(monday(0), CFGS.groupe, { ...SIT.frais, prev: PREV[2] });
+  assert.match(lourd, /^- end (ss|thr) (tempo|rec) - grp long$/, "après groupe + longue : mardi endurance, clé FTP mercredi : " + lourd);
+  assert.ok(g0.items[3].bike.t === "tempo" || g0.items[3].muscu === "legs", "jeudi : endurance + tempo, sauf jambes le matin");
+  const sansMuscu = { ...CFGS.groupe, days: CFGS.groupe.days.map(d => ({ ...d, muscu: false })) };
+  assert.equal(P._gen(monday(0), sansMuscu, { ...SIT.frais, prev: PREV[2] }).items.map(it => it.bike ? it.bike.t : "-").join(" ").split(" ")[3], "tempo", "sans muscu : tempo le lendemain de la clé");
+  const leger = wk(0, PREV[0]);
+  assert.ok(!/ (vo2r)/.test(leger), "avec un groupe, pas de VO2max en plus : " + leger);
+  const typesW = [0, 1].map(w => wk(w, PREV[2]).split(" ")[2]);
+  assert.notEqual(typesW[0], typesW[1], "sweet spot et seuil long alternent d'une semaine à l'autre : " + typesW);
+  // semaine allégée : pas de groupe, une séance clé au plus
+  const dl = [0, 1, 2, 3, 4, 5, 6, 7].find(w => P._phase(monday(w), CFGS.groupe).deload);
+  const g = P._gen(monday(dl), CFGS.groupe, { ...SIT.frais, prev: PREV[0] });
+  assert.ok(!g.items.some(it => it.bike && it.bike.t === "grp"), "pas de sortie de groupe en semaine allégée");
+  // test de 20 min : 20 min libres (pas d'ERG) ; pas de test rampe ; sortie longue sans tempo, au cardio
+  const t = P._build("test", 75, { wk: 4, deload: true });
+  assert.ok(t.steps.some(st => st.free && st.d === 1200), "test : 20 min libres"); assert.match(t.title, /20 min/);
+  const L = P._build("long", 240, { wk: 2, deload: false });
+  assert.ok(L.steps.every(st => st.free || st.hi <= .75), "sortie longue : rien au-dessus de la zone 2"); assert.match(L.goal, /bpm/);
+  const tp = P._build("tempo", 75, { wk: 2, deload: false });
+  assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 2); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
+  // plus de séance de moins de 45 min : une ancienne config à 30 min passe à 45
+  const h = load(); h.store.set("planCfg", JSON.stringify({ ...CFGS.cinq, days: CFGS.cinq.days.map((d, i) => i === 1 ? { ...d, dur: 30 } : d) }));
+  assert.equal(h.Plan._cfg().days[1].dur, 45);
+  console.log(`ok plan (tri des séances) : semaine type ${lourd}, alternance ${typesW.join(" / ")}`);
+}
 
 // ======================================================================= 3. course (étape 5a)
 const P = planA, RUN = P._run, TY = P.TYPES;

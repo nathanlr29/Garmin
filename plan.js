@@ -20,21 +20,23 @@ const GOAL0 = { ftp: 300, vo2: 65.5, date: "2026-12-31" };
 const START0 = "2026-10-05";  // lundi : début du premier bloc
 const DAYN = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const dl = d => DAYN[d].toLowerCase();
-const DURS = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 270, 300];
+const DURS = [45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 270, 300];
 const TYPES = {
   // couleur = zone dominante de la séance, comme sur MyWhoosh / Zwift (gris Z1, bleu Z2, vert Z3, jaune Z4, orange Z5, rouge Z6)
-  vo2: { l: "VO2max", c: "#ff6a2a", hard: 1 },
+  // old : séance retirée le 20/10/2026 (tri des séances) ; gardée pour afficher les semaines déjà générées, jamais proposée
+  vo2: { l: "VO2max", c: "#ff6a2a", hard: 1, old: 1 },
   vo2r: { l: "VO2max 30/15", c: "#ff2e2e", hard: 1 },
-  vo2s: { l: "VO2max 30/30", c: "#f04a2a", hard: 1 },
+  vo2s: { l: "VO2max 30/30", c: "#f04a2a", hard: 1, old: 1 },
   thr: { l: "Seuil", c: "#ffc21a", hard: 1 },
   ss: { l: "Sweet spot", c: "#c9c21f", hard: 1 },
-  tempo: { l: "Tempo", c: "#3fbf5f" },
+  tempo: { l: "Endurance + tempo", c: "#3fbf5f" },
   end: { l: "Endurance", c: "#2e8bff" },
   long: { l: "Sortie longue", c: "#1f63d6" },
-  longplus: { l: "Longue + seuil", c: "#1f63d6", hard: 1 },
+  grp: { l: "Sortie de groupe", c: "#ff6a2a", hard: 1 },   // dehors, intense : compte comme la séance dure de la semaine
+  longplus: { l: "Longue + seuil", c: "#1f63d6", hard: 1, old: 1 },
   rec: { l: "Récupération", c: "#8e8e93" },
-  test: { l: "Test FTP", c: "#a855f7", hard: 1 },
-  testc: { l: "Test court", c: "#a855f7", hard: 1 },
+  test: { l: "Test FTP 20 min", c: "#a855f7", hard: 1 },
+  testc: { l: "Test court", c: "#a855f7", hard: 1, old: 1 },
   // course à pied (sport "run") : teintes propres, hors des zones vélo ; durs = rthr, rvo2 ; aucune n'est une séance clé vélo
   rfoot: { l: "Footing", c: "#17a2a2", sport: "run" },
   rstrides: { l: "Footing + lignes droites", c: "#2bb5c9", sport: "run" },
@@ -45,8 +47,11 @@ const TYPES = {
 };
 const isKey = t => !!(t && TYPES[t] && TYPES[t].hard && !TYPES[t].sport && t !== "longplus");
 const isLong = t => t === "long" || t === "longplus";
-// séances clés selon le bloc (0 = dernier bloc avant l'objectif … 3 = base)
-const POOLS = [["vo2", "thr", "vo2r"], ["vo2r", "ss", "vo2"], ["thr", "vo2r", "ss"], ["ss", "thr", "tempo"]];
+// séances clés selon le bloc (0 = dernier bloc avant l'objectif … 3 = base) ; avec une sortie de groupe, elle tient lieu de VO2max :
+// l'autre séance clé travaille la FTP (sweet spot et seuil long en alternance d'une semaine à l'autre, GRP_POOL)
+const POOLS = [["vo2r", "thr"], ["vo2r", "ss"], ["thr", "vo2r"], ["ss", "thr"]];
+const GRP_POOL = wi => wi % 2 ? ["thr", "ss"] : ["ss", "thr"];
+const FTP0 = 230;  // FTP de travail du 20/10/2026 (meilleur 20 min de l'année : 228 W), remplace les 250-260 W des tests rampe
 const MUSCU = { push: { l: "Push", d: "pecs, épaules, triceps" }, pull: { l: "Pull", d: "dos, biceps" }, legs: { l: "Legs", d: "jambes" }, upper: { l: "Upper", d: "haut du corps" } };
 const MORDER = ["push", "pull", "legs", "upper"];  // ordre du programme ; avec moins de 4 matins on garde les premières
 const ZONES = [[.56, "Z1", "#8e8e93"], [.76, "Z2", "#2e8bff"], [.88, "Z3", "#3fbf5f"], [1.05, "Z4", "#ffc21a"], [1.2, "Z5", "#ff6a2a"], [9, "Z6", "#ff2e2e"]];   // couleurs de zones MyWhoosh / Zwift
@@ -60,18 +65,18 @@ const isMuscu = a => a.t === "strength_training";
 function profile() {
   const p = (window.Recup && Recup.data && Recup.data.profile) || {};
   const own = store2.get("planFtp");
-  const est = estimateFtp(), det = detectFtp(), auto = Math.max(p.ftp || 0, det ? det.ftp : 0);
-  const ftp = own || auto || est || 250;
-  const ftpSrc = own ? "saisie" : det && det.ftp > (p.ftp || 0) ? `détectée : ${det.l} à ${det.w} W le ${dShort(det.a.dt)}` : p.ftp ? `Garmin${p.ftpDate ? " · " + dShort(new Date(p.ftpDate)) : ""}` : est ? "estimée sur tes séances" : "par défaut";
+  // la FTP Garmin vient des tests rampe, qui te surestiment : un effort tenu de 20 min ou 1 h passe avant
+  const est = estimateFtp(), det = detectFtp(), auto = det ? det.ftp : p.ftp || 0;
+  const ftp = own || auto || est || FTP0;
+  const ftpSrc = own ? "saisie" : det ? `détectée : ${det.l} à ${det.w} W le ${dShort(det.a.dt)}` : p.ftp ? `Garmin${p.ftpDate ? " · " + dShort(new Date(p.ftpDate)) : ""}` : est ? "estimée sur tes séances" : "par défaut";
   return { ...p, ftp, ftpSrc, est, det, auto };
 }
-// FTP détectée : meilleures puissances Garmin des 60 derniers jours (20 min × 95 %, 1 h, 5 min × 78 %, test rampe : 1 min × 75 %)
-const isRamp = a => /ramp/i.test(a.n || "") && /test/i.test(a.n || "");
+// FTP détectée : meilleures puissances Garmin des 60 derniers jours (20 min × 95 %, 1 h). Plus de 5 min ni de test rampe :
+// chez toi ils surestiment la FTP (rampe 260-304 W pour un meilleur 20 min de 228 W en 2026)
 function detectFtp() {
   const cut = addDays(new Date(), -60); let best = null;
   rides().filter(a => a.dt >= cut && a.pc).forEach(a => {
-    const R = [["1200", .95, "20 min"], ["3600", 1, "1 h"], ["300", .78, "5 min"]];
-    if (isRamp(a)) R.push(["60", RAMP_F, "test rampe (meilleure minute)"]);
+    const R = [["1200", .95, "20 min"], ["3600", 1, "1 h"]];
     R.forEach(([d, f, l]) => { const w = a.pc[d]; if (w && (!best || w * f > best.ftp)) best = { ftp: Math.round(w * f), w, l, a }; });
   });
   return best;
@@ -128,6 +133,7 @@ function getCfg() {
   let c = store2.get("planCfg");
   if (!c || !Array.isArray(c.days) || c.days.length !== 7) c = defaultCfg();
   c.goal = { ...GOAL0, ...(c.goal || {}) }; c.start = c.start || START0;
+  c.days.forEach(d => { if (d && d.dur < 45) d.dur = 45; });  // plus de séance de moins de 45 min (20/10/2026) : 60-75 min, ou repos
   return c;
 }
 const saveCfg = c => store2.set("planCfg", c);
@@ -143,9 +149,10 @@ function phase(mon, c) {
   const w = Math.max(0, wi), block = Math.floor(w / 4) + 1, wk = w % 4 + 1, nb = Math.max(1, Math.ceil(W / 4));
   const kind = clamp(nb - block, 0, 3);
   const deload = wk === 4, nextFinal = +addDays(mon, 7) === +last;
-  const test = deload && !nextFinal ? (kind === 1 ? "testc" : "test") : null;
-  const FOC = ["VO2max et seuil haut, on consolide", "Bloc VO2max", "Seuil et sweet spot, premières séances VO2max", "Base : endurance, tempo et sweet spot"];
-  return { wi, block, wk, deload, final: false, kind, test, focus: deload ? (test === "testc" ? "Semaine allégée + test court (sprint, 1 min, 5 min) pour ton profil" : test ? "Semaine allégée + test FTP pour mesurer le bloc" : "Semaine allégée avant la semaine de tests") : FOC[kind] };
+  // test FTP de 20 min toutes les 8 semaines (une semaine allégée sur deux)
+  const test = deload && !nextFinal && block % 2 === 0 ? "test" : null;
+  const FOC = ["VO2max et seuil long, on consolide", "VO2max et sweet spot", "Seuil long et VO2max", "Base : sweet spot et seuil long"];
+  return { wi, block, wk, deload, final: false, kind, test, focus: deload ? (test ? "Semaine allégée + test FTP de 20 min pour mesurer les deux blocs" : nextFinal ? "Semaine allégée avant la semaine de tests" : "Semaine allégée : on récupère, pas de sortie de groupe") : FOC[kind] };
 }
 
 // ------------------------------------------------------------------ Construction de la semaine
@@ -164,13 +171,13 @@ function bikeScore(ko, K, longS, ph, prev) {
     if (longS && s.day === longS.day - 1) sc -= 4;
     if (longS && s.day === longS.day + 1) sc -= 20;                  // lendemain de la sortie longue
     if (s.day === 0 && prev && prev.legsSun) sc -= 50;               // jambes dimanche matin, séance clé lundi : non
-    else if (s.day === 0 && prev && prev.hardSun) sc -= 20;
+    // gros week-end (groupe le samedi, sortie longue ou dure le dimanche) : la séance clé attend le mercredi, mardi = endurance
+    const wl = prev ? (prev.hardSun ? 1 : 0) + (prev.grpSat ? 1 : 0) : 0;
+    if (s.day === 0) sc -= 25 * wl; else if (s.day === 1) sc -= 18 * wl;
     if (ph.test || ph.final) sc += [-6, 0, 6, 8, 4, 2, -4][s.day];   // le test en milieu de semaine, reposé
   });
   for (let i = 0; i < kd.length; i++) for (let j = i + 1; j < kd.length; j++) { const g = kd[j] - kd[i]; sc += g === 1 ? -25 : g === 2 ? 4 : 6; }
-  const want = ko.boost ? K - 1 : K;
-  if (ko.keys.length < want) sc -= 30 * (want - ko.keys.length);
-  if (ko.boost) sc -= 6;
+  if (ko.keys.length < K) sc -= 30 * (K - ko.keys.length);
   return sc;
 }
 function muscuScore(mo, ko, longS, bikeDays, ph, prev) {
@@ -203,10 +210,13 @@ function genWeek(mon, c, ctx, fixed) {
   const slots = [];
   for (let i = 0; i < 7; i++) {
     if (isFixed(i)) { const b = fixed.items[i] && fixed.items[i].bike; if (b && TYPES[b.t]) slots.push({ day: i, dur: b.dur, place: b.place, fixed: true, t: b.t }); continue; }
-    const d = c.days[i]; if (d.bike && d.bike !== "none") slots.push({ day: i, dur: d.dur, place: d.bike === "any" ? (d.dur >= 150 ? "out" : "mw") : d.bike });
+    const d = c.days[i]; if (!d.bike || d.bike === "none") continue;
+    // sortie de groupe : séance dure fixée ce jour-là ; en semaine allégée ou de tests, simple sortie dehors
+    if (d.bike === "grp" && !ph.deload && !ph.final) slots.push({ day: i, dur: d.dur, place: "out", grp: true, t: "grp" });
+    else slots.push({ day: i, dur: d.dur, place: d.bike === "any" ? (d.dur >= 150 ? "out" : "mw") : d.bike === "grp" ? "out" : d.bike });
   }
-  const fixedLong = slots.find(s => s.fixed && isLong(s.t));
-  const longS = fixedLong || slots.filter(s => !s.fixed && s.place === "out" && s.dur >= 150).sort((a, b) => b.dur - a.dur || b.day - a.day)[0] || null;
+  const fixedLong = slots.find(s => s.fixed && isLong(s.t)), hasGrp = slots.some(s => s.grp || (s.fixed && s.t === "grp"));
+  const longS = fixedLong || slots.filter(s => !s.fixed && !s.grp && s.place === "out" && s.dur >= 150).sort((a, b) => b.dur - a.dur || b.day - a.day)[0] || null;
   const n = slots.length;
   // 2 séances clés par semaine : la sortie longue est déjà une grosse journée et la muscu pèse aussi.
   // 3 seulement avec 6 séances vélo ou plus, sans sortie longue et avec 2 matins de muscu au plus.
@@ -215,28 +225,27 @@ function genWeek(mon, c, ctx, fixed) {
   if (n >= 6 && !longS && nMus <= 2 && !(ready.last != null && ready.last < 60) && form.tsb > -10) K = 3;
   const tired = (ready.avg3 != null && ready.avg3 < 45) || form.tsb < -25;
   if (ph.deload || ph.final) K = Math.min(1, n); else if (tired) K = Math.max(Math.min(1, n), K - 1);
-  const pool = ph.final ? ["test"] : ph.test ? [ph.test] : POOLS[ph.kind];
-  const fixedKeys = slots.filter(s => s.fixed && isKey(s.t)), Krem = Math.max(0, K - fixedKeys.length);
-  const cands = slots.filter(s => !s.fixed && s !== longS && s.dur >= 45);
+  const pool = ph.final ? ["test"] : ph.test ? [ph.test] : hasGrp ? GRP_POOL(ph.wi) : POOLS[ph.kind];
+  const fixedKeys = slots.filter(s => (s.fixed || s.grp) && isKey(s.t)), Krem = Math.max(0, K - fixedKeys.length);
+  const cands = slots.filter(s => !s.fixed && !s.grp && s !== longS && s.dur >= 45);
   // muscu : séances des jours passés gardées, les autres réparties sur les matins restants
   const fixedMus = []; for (let d = 0; d < upto; d++) { const m = fixed.items[d] && fixed.items[d].muscu; if (m && MUSCU[m]) fixedMus.push({ day: d, s: m }); }
   const mDays = []; for (let d = upto; d < 7; d++) if (c.days[d].muscu && !(longS && longS.day === d)) mDays.push(d);
   const total = Math.min(4, fixedMus.length + mDays.length);
   const sess = MORDER.slice(0, total).filter(s => !fixedMus.some(f => f.s === s)).slice(0, mDays.length);
   const kOpts = [];
-  combos(cands, Math.min(Krem, cands.length)).forEach(ks => kOpts.push({ keys: fixedKeys.concat(ks), boost: false }));
-  if (longS && !longS.fixed && !ph.deload && !ph.final && Krem >= 2) combos(cands, Math.min(Krem - 1, cands.length)).forEach(ks => kOpts.push({ keys: fixedKeys.concat(ks), boost: true }));
-  if (!kOpts.length) kOpts.push({ keys: fixedKeys.slice(), boost: false });
+  combos(cands, Math.min(Krem, cands.length)).forEach(ks => kOpts.push({ keys: fixedKeys.concat(ks) }));
+  if (!kOpts.length) kOpts.push({ keys: fixedKeys.slice() });
   const mOpts = muscuOptions(mDays, sess).map(mo => fixedMus.concat(mo)), bikeDays = new Set(slots.map(s => s.day));
   let best = null;
   for (const ko of kOpts) { const bs = bikeScore(ko, K, longS, ph, ctx.prev);
     for (const mo of mOpts) { const sc = bs + muscuScore(mo, ko, longS, bikeDays, ph, ctx.prev); if (!best || sc > best.sc + 1e-9) best = { sc, ko, mo }; } }
   const items = Array.from({ length: 7 }, (_, d) => isFixed(d) ? { day: d, bike: fixed.items[d].bike ? { ...fixed.items[d].bike } : null, muscu: fixed.items[d].muscu || null, ...(fixed.items[d].run ? { run: { ...fixed.items[d].run } } : {}) } : { day: d, bike: null, muscu: null });
-  slots.forEach(s => { if (!s.fixed) items[s.day].bike = { dur: s.dur, place: s.place, t: null }; });
+  slots.forEach(s => { if (!s.fixed) items[s.day].bike = { dur: s.dur, place: s.place, t: s.grp ? "grp" : null }; });
   const rest = pool.slice(); fixedKeys.forEach(f => { const k = rest.indexOf(f.t); if (k >= 0) rest.splice(k, 1); });
-  best.ko.keys.filter(s => !s.fixed).sort((a, b) => a.day - b.day).forEach((s, i) => items[s.day].bike.t = (rest.length ? rest : pool)[i % (rest.length || pool.length)]);
-  items.forEach(it => { if (!isFixed(it.day) && it.bike && it.bike.t === "test") it.bike.place = "mw"; });  // le test rampe se fait sur MyWhoosh
-  if (longS && !longS.fixed) { const L = items[longS.day].bike; L.t = best.ko.boost ? "longplus" : "long";
+  best.ko.keys.filter(s => !s.fixed && !s.grp).sort((a, b) => a.day - b.day).forEach((s, i) => items[s.day].bike.t = (rest.length ? rest : pool)[i % (rest.length || pool.length)]);
+  items.forEach(it => { if (!isFixed(it.day) && it.bike && it.bike.t === "test") it.bike.place = "mw"; });  // le test de 20 min se fait sur MyWhoosh
+  if (longS && !longS.fixed) { const L = items[longS.day].bike; L.t = "long";
     if (ph.deload) L.dur = DURS.reduce((a, x) => Math.abs(x - L.dur * .7) < Math.abs(a - L.dur * .7) ? x : a, 150); }  // semaine allégée : sortie longue raccourcie
   best.mo.forEach(x => { if (!isFixed(x.day)) items[x.day].muscu = x.s; });
   fillEasy(items, ph, tired, best.ko.keys.length, upto);
@@ -248,8 +257,10 @@ function fillEasy(items, ph, tired, nKeys, from = 0) {
   const hardAt = d => { const b = items[d] && items[d].bike; return !!(b && b.t && TYPES[b.t].hard); };
   items.forEach(it => { const b = it.bike; if (!b || b.t || it.day < from) return; const d = it.day;
     const afterHard = hardAt(d - 1), legs = it.muscu === "legs", legsBefore = items[d - 1] && items[d - 1].muscu === "legs";
-    if ((afterHard || legs) && b.dur <= 75) { b.t = "rec"; b.dur = Math.min(b.dur, 60); }
-    else if (!ph.deload && !ph.final && !tired && nKeys < 3 && b.dur >= 75 && !afterHard && !legs && !legsBefore && !hardAt(d + 1)) b.t = "tempo";
+    // lendemain d'une séance clé : endurance + tempo (2 × 12 min) ; récupération seulement les jours de jambes ou après le groupe / un test
+    const afterGrp = afterHard && ["grp", "test"].includes(items[d - 1].bike.t);
+    if ((afterGrp || legs) && b.dur <= 75) { b.t = "rec"; b.dur = Math.min(b.dur, 60); }
+    else if (!ph.deload && !ph.final && !tired && nKeys < 3 && b.dur >= 60 && afterHard && !legs && !legsBefore && !hardAt(d + 1)) b.t = "tempo";
     else b.t = "end"; });
 }
 // la semaine d'avant compte pour le lundi : jambes ou grosse séance le dimanche
@@ -259,7 +270,11 @@ function prevCtx(mon) {
   const lblMap = store2.get("muscuLbl") || {};
   const mAct = acts.find(isMuscu), planned = pw && pw.items && pw.items[6] ? pw.items[6].muscu : null;
   const musSun = mAct ? (lblMap[mAct.id] || planned || null) : (mon > new Date() && planned ? planned : null);
-  return { legsSun: musSun === "legs", musSun, hardSun: acts.some(a => hardRide(a, ftp) || (RIDE_TYPES.has(a.t) && a.mt >= 150 * 60)) || !!(pw && pw.items && pw.items[6] && pw.items[6].bike && TYPES[pw.items[6].bike.t] && TYPES[pw.items[6].bike.t].hard && mon > new Date()) };
+  const pt = d => pw && pw.items && pw.items[d] && pw.items[d].bike && TYPES[pw.items[d].bike.t] ? pw.items[d].bike.t : null, fut = mon > new Date();
+  const sat = ymd(addDays(mon, -2)), satActs = (S.all || []).filter(a => a.d.slice(0, 10) === sat && RIDE_TYPES.has(a.t));
+  return { legsSun: musSun === "legs", musSun,
+    hardSun: acts.some(a => hardRide(a, ftp) || (RIDE_TYPES.has(a.t) && a.mt >= 150 * 60)) || !!(fut && pt(6) && (TYPES[pt(6)].hard || isLong(pt(6)))),
+    grpSat: satActs.some(a => hardRide(a, ftp) || (a.te >= 3.5 && a.mt >= 3600)) || (fut && pt(5) === "grp") };
 }
 
 // ------------------------------------------------------------------ Course : réglages, volumes et placement (étape 5a)
@@ -559,7 +574,7 @@ function effective(mon, c, ctx) {
   items.forEach(it => { if (it.muscu && it.muscu.displaced && !doneS.has(it.muscu.displaced)) missedM.push({ s: it.muscu.displaced, from: it.day });
     if (it.muscu && it.muscu.st === "plan" && (it.day < td || (it.day === td && morningOver))) { it.muscu.st = "missed"; if (!doneS.has(it.muscu.s)) missedM.push({ s: it.muscu.s, from: it.day }); } });
   // --- R1 : séance clé ratée → déplacée si possible
-  items.forEach(it => { if (!it.bike || it.bike.st !== "missed" || !isKey(it.bike.t)) return;
+  items.forEach(it => { if (!it.bike || it.bike.st !== "missed" || !isKey(it.bike.t) || it.bike.t === "grp") return;  // une sortie de groupe ne se déplace pas
     const future = items.filter(x => x.day >= td && x.bike && x.bike.st === "plan" && isKey(x.bike.t)).length;
     if (hardDays + future >= plannedKeys) return;
     const from = td + (now.getHours() >= 20 ? 1 : 0), tgt = keySlot(items, from, F, ftp, { ignore: it.day });  // le vélo se fait le soir
@@ -570,7 +585,7 @@ function effective(mon, c, ctx) {
   // --- R2 : récupération basse ce matin et séance clé prévue aujourd'hui
   const T = td < 7 ? items[td] : null;
   if (isCur && T && T.bike && T.bike.st === "plan" && isKey(T.bike.t) && ready.today != null && ready.today < 45) {
-    const t = T.bike.t, tgt = keySlot(items, td + 1, F, ftp, { ignore: td }), easy = ready.today < 35 ? "rec" : "end";
+    const t = T.bike.t, tgt = t === "grp" ? null : keySlot(items, td + 1, F, ftp, { ignore: td }), easy = ready.today < 35 ? "rec" : "end";
     step(`ready-${ymd(now)}`, tgt != null ? `Récupération à ${ready.today}/100 ce matin : ${TYPES[t].l} décalée à ${dl(tgt)}, ${easy === "rec" ? "récupération" : "endurance facile"} ce soir.` : `Récupération à ${ready.today}/100 ce matin : ${TYPES[t].l} remplacée par ${easy === "rec" ? "une récupération" : "de l'endurance facile"} (pas d'autre jour possible cette semaine).`,
       () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.dur = Math.max(b.dur, 60); b.moved = td; } T.bike.t = easy; T.bike.dur = Math.min(T.bike.dur, easy === "rec" ? 45 : 60); T.bike.changed = true; });
   }
@@ -585,7 +600,7 @@ function effective(mon, c, ctx) {
   items.forEach(x => { if (x.day < td || !x.bike || x.bike.st !== "plan" || !isKey(x.bike.t)) return;
     const prevHard = x.day > 0 && x.day - 1 <= td && F[x.day - 1].rides.some(a => hardRide(a, ftp)) && !(items[x.day - 1].bike && isKey(items[x.day - 1].bike.t));
     if (!prevHard) return;
-    const t = x.bike.t, tgt = keySlot(items, x.day + 1, F, ftp, { ignore: x.day });
+    const t = x.bike.t, tgt = t === "grp" ? null : keySlot(items, x.day + 1, F, ftp, { ignore: x.day });
     step(`adj-${x.day}`, `Séance intense imprévue ${dl(x.day - 1)} : ${TYPES[t].l} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée par de l'endurance"} pour ne pas enchaîner deux jours durs.`,
       () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.moved = x.day; } x.bike.t = "end"; x.bike.changed = true; });
   });
@@ -602,10 +617,11 @@ function effective(mon, c, ctx) {
   return out;
 }
 // ------------------------------------------------------------------ Contenu des séances vélo
-const RAMP_0 = .55, RAMP_STEP = .06, RAMP_N = 18, RAMP_F = .75;  // test rampe : de 55 % à 157 % de FTP, FTP = 75 % de la meilleure minute
+const TEST_F = .95;  // test de 20 min : FTP = 95 % de la puissance moyenne des 20 min
+const lthr = () => (window.Recup && Recup.data && Recup.data.profile && Recup.data.profile.hrZones && Recup.data.profile.hrZones.lthr) || 168;
 // pas : { d: secondes, lo, hi (fraction de FTP), free?, label }
 function build(type, durMin, ph) {
-  const T = durMin * 60, S = [], p = clamp(ph.wk, 1, 3) - 1, light = ph.deload ? .8 : 1;
+  const T = durMin * 60, S = [], p = ph.deload ? 0 : clamp(ph.wk, 1, 3) - 1, light = ph.deload ? .8 : 1;  // semaine allégée : blocs les plus courts
   const ramp = (d, lo, hi, label) => S.push({ d, lo, hi, label });
   const st = (d, f, label) => S.push({ d, lo: f, hi: f, label });
   const free = (d, label) => S.push({ d, lo: 1, hi: 1, free: true, label });
@@ -646,30 +662,33 @@ function build(type, durMin, ph) {
     for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(180, .55, "Récupération"); }
     fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × ${L / 60}'`;
     goal = `${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, 3 min souples entre deux, cadence 88-95, assis. Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Le bas du sweet spot reste sous ton seuil lactique : le lactate se stabilise, donc la séance se finit. Seiler (2013) : chez des cyclistes entraînés, 30 à 40 min cumulées à une intensité tenable du début à la fin ont fait plus progresser que des intervalles plus courts et plus durs. On monte de niveau par la durée (10, 15 puis 20 min), jamais par l'intensité. Bloc fini, FC stable : palier suivant. Après 2 × 20 propre deux fois de suite : +2 % dans MyWhoosh. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${L >= 1200 ? vo2note : ""}`;
-  } else if (type === "tempo") {
-    ramp(480, .5, .7, "Échauffement"); const M = T - used() - 300, blocks = clamp(Math.floor((M - 600) / 1200), 1, 3);
-    st(Math.max(0, Math.round((M - blocks * 1200) / 2)), .68, "Endurance");
-    for (let i = 0; i < blocks; i++) { st(900, .82, `Tempo ${i + 1}/${blocks}`); st(300, .62, "Souple"); }
-    fill(300); cool(300); title = `Endurance + ${blocks} × 15' tempo`; goal = "Une base d'endurance avec quelques blocs tempo pour élargir le moteur aérobie.";
+  } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 2 × 12 min de tempo en fin de séance
+    ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 2 * 720 - 240;
+    if (M >= 120) st(M, .67, "Zone 2");
+    for (let i = 0; i < 2; i++) { st(720, .83, `Tempo ${i + 1}/2`); if (!i) st(240, .6, "Souple"); }
+    cool(clamp(T - used(), 120, 300)); title = "Endurance + 2 × 12' tempo";
+    goal = "Zone 2 à 67 %, puis 2 blocs de 12 min à 83 % en fin de séance, quand les jambes sont déjà chargées : c'est ce qui prépare à tenir des watts au bout de 200 km. Effort 5/10, respiration appuyée mais régulière, cadence 85-95. Si la séance de la veille t'a vidé, garde seulement la zone 2.";
   } else if (type === "end") {  // Z2 de la proposition du 14/10/2026 : régulière, sans relances
     ramp(420, .5, .65, "Échauffement"); fill(300, .67, "Zone 2"); cool(300); title = `Endurance ${fmtMin(durMin)}`;
     goal = "Zone 2 régulière à 67 % (65-70 %), sans relances : la base aérobie qui soutient FTP et VO2max. Tu dois pouvoir parler en phrases complètes. Dehors, au cardio : environ 120 à 138 bpm, 142 au plus sur le plat, et ne cours pas après la FC dans les bosses courtes (elle réagit avec 30 à 90 s de retard).";
   } else if (type === "rec") {
     ramp(300, .45, .55, "Mise en route"); fill(240, .5, "Très facile"); cool(240); title = `Récupération ${fmtMin(durMin)}`; goal = "Faire tourner les jambes sans fatigue. Aucune intensité.";
-  } else if (type === "long") {
-    const tempo = !ph.deload && T >= 9000;
-    ramp(900, .5, .68, "Mise en route");
-    if (tempo) { const mid = Math.round((T - 900 - 600 - 3 * 900 - 2 * 300) / 2); st(mid, .68, "Endurance"); for (let i = 0; i < 3; i++) { st(900, .8, `Tempo ${i + 1}/3`); if (i < 2) st(300, .62, "Souple"); } }
-    fill(600, .68); cool(600); title = `Sortie longue ${fmtMin(durMin)}${tempo ? " avec tempo" : ""}`; goal = `La grosse séance d'endurance de la semaine${tempo ? ", avec 3 × 15 min en tempo dans la seconde moitié" : ""}. Manger et boire régulièrement.`;
+  } else if (type === "long") {  // séance fondatrice S3 (proposée le 14/10, appliquée le 20/10/2026) : endurance au cardio, sans tempo
+    const cap = Math.round(lthr() * .83), hr0 = cap - 5;
+    ramp(900, .5, .65, "Mise en route"); fill(600, .65, "Zone 2 au cardio"); cool(600); title = `Sortie longue ${fmtMin(durMin)} au cardio`;
+    goal = `La séance qui construit la tenue sur 250-300 km : tout en zone 2, au cardio et pas à la sensation. Sous ${hr0} bpm la première heure, puis jamais plus de ${cap} bpm, même si le groupe roule plus vite : laisse partir, ou reste dans les roues. Bosses : monte en souplesse, sans dépasser ${cap + 10} bpm. Mange dès la première heure, 60 à 90 g de sucre par heure, et 500 à 750 ml d'eau par heure. Repère : ton cardio ne doit pas monter de plus de 5 % à allure égale entre la première et la dernière heure.`;
+  } else if (type === "grp") {
+    ramp(900, .5, .65, "Mise en route"); free(Math.max(600, T - used() - 600), "Sortie de groupe"); cool(600); title = `Sortie de groupe ${fmtMin(durMin)}`;
+    goal = "Ta séance dure de la semaine : elle remplace la séance VO2max. Prends des relais, suis les accélérations, mais roule à l'abri le reste du temps. Mange 60 g de sucre par heure. Le lendemain : endurance ou sortie longue au cardio, jamais une autre séance dure.";
   } else if (type === "longplus") {
     ramp(900, .5, .68, "Mise en route"); const L = [10, 12, 15][p] * 60;
     const mid = Math.round((T - 900 - 600 - 3 * L - 2 * 360) / 2); st(Math.max(600, mid), .68, "Endurance");
     for (let i = 0; i < 3; i++) { st(L, .95, `Bloc seuil ${i + 1}/3`); if (i < 2) st(360, .62, "Souple"); }
     fill(600, .68); cool(600); title = `Sortie longue ${fmtMin(durMin)} + 3 × ${L / 60}' seuil`; goal = `Ta deuxième séance clé de la semaine, intégrée à la sortie longue : 3 blocs de ${L / 60} min au seuil (zone 4 au cardio) au milieu de la sortie, sur une portion roulante.`;
-  } else if (type === "test") {  // test rampe (celui de MyWhoosh) : paliers d'1 min de +6 % de FTP jusqu'à ne plus tenir
-    ramp(300, .45, .55, "Échauffement");
-    for (let k = 0; k < RAMP_N; k++) st(60, Math.round((RAMP_0 + k * RAMP_STEP) * 100) / 100, k ? `Rampe · palier ${k + 1}` : "RAMPE : tiens chaque palier le plus longtemps possible");
-    cool(600); title = "Test FTP rampe"; goal = "Le plus simple : lance le test « FTP Ramp Test » intégré à MyWhoosh, qui calcule ta FTP à la fin. Sinon, ce fichier reproduit la rampe : paliers d'1 min qui montent de 6 % de FTP, jusqu'à ne plus pouvoir tenir la puissance. Ta FTP = 75 % de ta meilleure minute. Pas de départ trop prudent ni d'échauffement long : l'effort dure 15 à 20 min.";
+  } else if (type === "test") {  // test de 20 min (proposition du 20/10/2026) : le test rampe surestimait ta FTP de 30 à 70 W
+    ramp(600, .5, .75, "Échauffement progressif"); st(180, .9, "Montée"); st(120, .55, "Souple"); st(60, 1.1, "Ouverture"); st(240, .55, "Souple");
+    free(1200, "TEST 20 MIN : le plus fort possible, régulier"); cool(600); title = "Test FTP 20 min";
+    goal = `Le seul test qui mesure ce que tu tiens vraiment. À faire reposé (la veille facile), ventilateur à fond, en mode libre ou résistance (pas d'ERG) : le fichier laisse les 20 min libres. Pars à ta FTP actuelle les 5 premières minutes, monte un peu si ça tient, et vide-toi sur les 3 dernières. Ta FTP = ${Math.round(TEST_F * 100)} % de ta puissance moyenne sur les 20 min ; le Plan la lit tout seul après la séance.`;
   } else if (type === "testc") {
     ramp(900, .5, .75, "Échauffement progressif"); st(60, 1.05, "Ouverture"); st(240, .55, "Récup");
     free(10, "SPRINT : 6 à 8 s à fond"); st(230, .5, "Récup"); free(10, "SPRINT : 6 à 8 s à fond"); st(300, .5, "Récup");
@@ -848,15 +867,15 @@ function detailHtml(W, it, prof) {
   const b = it.bike; if (!b) return "";
   let h = `${profileSvg(b.w.steps)}<p class="sg">${b.w.goal}</p>${stepsTable(b, prof)}`;
   if (b.st !== "done") h += b.place === "mw" ? `<button class="btn2 dl" data-dl="${it.day}">Télécharger pour MyWhoosh (.zwo)</button>`
-    : `<div class="outnote">${/^vo2/.test(b.t) ? "Sans capteur de puissance, pilote les intervalles courts à la sensation : le cœur met 1 à 2 min à monter." : "Garde un œil sur le cardio : il dérive un peu à la chaleur et en fin de sortie."}</div>`;
+    : `<div class="outnote">${b.t === "grp" || b.t === "long" ? "Sans capteur de puissance, c'est le cardio qui pilote : les repères sont dans le texte ci-dessus." : /^vo2/.test(b.t) ? "Sans capteur de puissance, pilote les intervalles courts à la sensation : le cœur met 1 à 2 min à monter." : "Garde un œil sur le cardio : il dérive un peu à la chaleur et en fin de sortie."}</div>`;
   if (b.st === "done" && b.acts) h += `<div class="ddone">${b.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
-  if (b.st === "done" && b.acts && b.t === "test") {  // les séances MyWhoosh arrivent sur Garmin sans le nom du test : on lit la meilleure minute
-    const w = Math.max(0, ...b.acts.map(a => (a.pc && a.pc["60"]) || 0)), f = Math.round(w * RAMP_F);
-    if (w) h += `<p class="sg">Test rampe : meilleure minute ${w} W → <b>FTP ≈ ${f} W</b> (75 %).${f !== prof.ftp ? ` <button class="btn2" data-setftp="${f}">Utiliser ${f} W comme FTP</button>` : " C'est ta FTP actuelle."}</p>`;
+  if (b.st === "done" && b.acts && b.t === "test") {  // les séances MyWhoosh arrivent sur Garmin sans le nom du test : on lit le meilleur 20 min
+    const w = Math.max(0, ...b.acts.map(a => (a.pc && a.pc["1200"]) || 0)), f = Math.round(w * TEST_F);
+    if (w) h += `<p class="sg">Test 20 min : ${w} W de moyenne → <b>FTP ≈ ${f} W</b> (${Math.round(TEST_F * 100)} %).${f !== prof.ftp ? ` <button class="btn2" data-setftp="${f}">Utiliser ${f} W comme FTP</button>` : " C'est ta FTP actuelle."}</p>`;
   }
   if (b.st === "plan" && (W.td < 0 || it.day >= W.td)) {
     const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
-    h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).filter(([, t]) => !t.sport).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
+    h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).filter(([k, t]) => !t.sport && (!t.old || k === b.t)).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
       <select data-ov="dur" aria-label="Durée">${DURS.map(d => opt(d, b.dur, fmtMin(d))).join("")}</select><select data-ov="place" aria-label="Lieu">${opt("mw", b.place, "MyWhoosh")}${opt("out", b.place, "Dehors")}</select>
       ${b.own ? `<button class="lnk" data-ovreset="1">Revenir au plan</button>` : ""}</div>`;
   }
@@ -901,7 +920,7 @@ function renderAvail(c) {
   const nb = c.days.filter(d => d.bike !== "none").length, nm = c.days.filter(d => d.muscu).length, nr = c.days.filter(d => d.run === "alt" || d.run === "add").length;
   return `<section class="card span12 avail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles${nr ? ` · ${nr} jour${nr > 1 ? "s" : ""} de course` : ""}</small></summary>
     <div class="avg">${c.days.map((d, i) => `<div class="avrow" data-i="${i}"><b>${DAYN[i]}</b>
-      <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("any", d.bike, "Au choix")}</select>
+      <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("grp", d.bike, "Sortie de groupe")}${opt("any", d.bike, "Au choix")}</select>
       <select data-k="dur" aria-label="Durée max ${DAYN[i]}" ${d.bike === "none" ? "disabled" : ""}>${DURS.map(v => opt(v, d.dur, "jusqu'à " + fmtMin(v))).join("")}</select>
       <label class="mtog"><input type="checkbox" data-k="muscu" ${d.muscu ? "checked" : ""}> muscu le matin</label>
       <i class="avsp"></i><select data-k="run" aria-label="Course ${DAYN[i]}">${opt("none", d.run || "none", "Pas de course")}${opt("alt", d.run, "Course à la place")}${opt("add", d.run, "Course en plus")}</select>
@@ -954,9 +973,10 @@ function withWorkouts(W) {
 }
 // Proposition de séances fondatrices (page de conception, privée) : lien seulement, rien n'est appliqué au plan
 const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
+const STATE_URL = "https://claude.ai/code/artifact/70fc8fa6-f042-43da-a65f-b06d176b215f";  // état des lieux vélo du 20/10/2026 (doc Claude privé)
 function renderDesign() {
-  return `<section class="card span12 design"><p class="tdmsg">Ton plan suit les séances fondatrices : 30/15 de Rønnestad, seuil long et endurance en zone 2 régulière. La sortie longue au cardio reste à appliquer.</p>
-    <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Lire la proposition complète</a> · page privée, visible seulement avec ton compte Claude.</p></section>`;
+  return `<section class="card span12 design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie de groupe (réglage « Sortie de groupe ») compte comme la séance dure de la semaine, et après un gros week-end la séance clé attend le mercredi.</p>
+    <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Les séances fondatrices</a> · <a href="${STATE_URL}" target="_blank" rel="noopener">l'état des lieux du 20 octobre</a> · pages privées, visibles seulement avec ton compte Claude.</p></section>`;
 }
 function render() {
   const box = $("plan"); if (!box) return;
@@ -1031,7 +1051,7 @@ const isYmd = s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && ymd
 function cleanCfg(c) {
   if (!c || typeof c !== "object" || !Array.isArray(c.days) || c.days.length !== 7) return null;
   const days = c.days.map(d => { d = d && typeof d === "object" ? d : {};
-    const o = { bike: ["none", "mw", "out", "any"].includes(d.bike) ? d.bike : "none", dur: isNum(d.dur) ? clamp(Math.round(d.dur), 30, 300) : 60, muscu: d.muscu === true };
+    const o = { bike: ["none", "mw", "out", "grp", "any"].includes(d.bike) ? d.bike : "none", dur: isNum(d.dur) ? clamp(Math.round(d.dur), 45, 300) : 60, muscu: d.muscu === true };
     if (RUN_SLOTS.includes(d.run)) o.run = d.run;
     if (isNum(d.runDur)) o.runDur = clamp(Math.round(d.runDur), RUN_MIN, 120);
     return o; });
@@ -1071,10 +1091,18 @@ function plannedFor(key, sport) {
   return bike ? (run ? { ...bike, run } : bike) : run;
 }
 
+// une seule fois par appareil : une FTP saisie issue des tests rampe (245 W et plus) passe à FTP0. Une FTP plus basse
+// (un test de 20 min fait depuis, saisi sur un autre appareil et synchronisé) n'est jamais écrasée.
+function migrateFtp() {
+  if (store2.get("planFtpMig")) return;
+  const o = store2.get("planFtp"); if (!o || o >= 245) store2.set("planFtp", FTP0);
+  try { localStorage.setItem("planFtpMig", "1"); } catch (e) {}
+}
 async function open() {
   $("title").textContent = "Mon plan";
   const ok = await Recup.ensure("plan", () => open());
   if (!ok) return;
+  migrateFtp();
   render();
 }
 window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,

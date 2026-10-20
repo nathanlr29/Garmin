@@ -215,13 +215,17 @@ Premier onglet (`synthese`, titre « Ma forme »). **Défaut** : un appareil san
 - Semaine générée par recherche exhaustive (combinaisons de jours clés × permutations muscu) avec un score.
 - Muscu le **matin**, vélo le **soir**. Jambes jamais le matin d'une séance clé, ni la veille d'une clé ou de la sortie longue.
 - 2 séances clés par semaine (3 seulement si ≥6 jours vélo, pas de sortie longue et ≤2 matins muscu).
-- Blocs de 4 semaines, avec test en semaine de décharge (testc en bloc VO2, sinon test FTP).
-- Test FTP = **test rampe** (Nathan préfère celui de MyWhoosh) :
-  - paliers d'1 min de +6 % de FTP, de 55 à 157 %, jusqu'à ne plus tenir ; FTP = 75 % de la meilleure minute (`RAMP_*`) ;
-  - toujours placé sur MyWhoosh ;
-  - séance faite : la carte affiche la FTP mesurée et un bouton « Utiliser » (les séances MyWhoosh arrivent sur Garmin sans le nom du test) ;
-  - `detectFtp` compte aussi les activités nommées « … Ramp Test ».
-- Pools par bloc : [vo2,thr,vo2r] [vo2r,ss,vo2] [thr,vo2r,ss] [ss,thr,tempo].
+- Blocs de 4 semaines (la semaine allégée prend les blocs les plus courts), **test FTP de 20 min une semaine allégée sur deux** (toutes les 8 semaines).
+- **Refonte du 20/10/2026** (état des lieux, fil « Progression FTP et ultra », doc https://claude.ai/code/artifact/70fc8fa6-f042-43da-a65f-b06d176b215f, validée par Nathan) :
+  - **FTP de travail 230 W** (`FTP0`) : les tests rampe le surestimaient (260-304 W pour un meilleur 20 min de 228 W). `migrateFtp()` (une fois par appareil, clé `planFtpMig`) passe une `planFtp` ≥ 245 ou absente à 230, jamais une valeur plus basse. `detectFtp` ne lit plus que 20 min × 95 % et 1 h ; la FTP Garmin ne sert qu'en dernier recours.
+  - **Test FTP = 20 min** en mode libre (pas d'ERG), sur MyWhoosh ; FTP = 95 % de la moyenne (`TEST_F`) ; séance faite : la carte lit le meilleur 20 min et propose « Utiliser ».
+  - **Tri des séances** : menu vélo réduit à 9 (VO2max 30/15, seuil long, sweet spot, endurance + tempo, endurance, sortie longue, sortie de groupe, récupération, test 20 min). `vo2`, `vo2s`, `longplus`, `testc` sont marqués `old` : plus jamais générés ni proposés, gardés pour afficher les anciennes semaines.
+  - **Sortie de groupe** (`grp`, réglage « Sortie de groupe » d'un jour) : séance dure fixée ce jour-là, compte comme une séance clé (remplace la VO2max) ; l'autre clé alterne sweet spot / seuil long d'une semaine à l'autre (`GRP_POOL`). Jamais déplacée par R1-R3. Semaine allégée : simple sortie dehors.
+  - **Gros week-end** (`prevCtx` : groupe le samedi `grpSat`, sortie longue ou dure le dimanche `hardSun`, prévus ou faits) : la séance clé évite lundi et mardi (mardi = endurance, clé le mercredi).
+  - **Lendemain de séance clé = endurance + 2 × 12 min tempo à 83 %** (`tempo`), récupération seulement après le groupe, un test ou les jambes le matin.
+  - **Sortie longue au cardio** (S3 appliquée) : zone 2 seule, sous 83 % de `lthr` (140 bpm), alimentation 60-90 g/h, sans tempo.
+  - **Plus de séance de moins de 45 min** : 30 retiré de `DURS`, une ancienne config à 30 min passe à 45.
+- Pools par bloc (sans groupe) : [vo2r,thr] [vo2r,ss] [thr,vo2r] [ss,thr].
 - Règles quotidiennes :
   - R1 : clé manquée → déplacée ;
   - R2 : readiness <45 → clé déplacée ou remplacée ;
@@ -234,10 +238,10 @@ Premier onglet (`synthese`, titre « Ma forme »). **Défaut** : un appareil san
   - Seuil (`thr`) = **seuil long** : 2 à 3 blocs à **95 %** (fixe), de 12, 15 puis 20 min selon la semaine du bloc, 4 min de récup ; on progresse par la durée des blocs, pas par l'intensité ;
   - Endurance (`end`) : **zone 2 régulière à 67 %**, sans relances (les anciennes relances de cadence à 64 % sont retirées), repères cardio pour dehors dans le texte.
   - Sweet spot (`ss`, demande de Nathan du 20/10/2026) : **88 % fixe**, blocs de 10, 15 puis 20 min selon la semaine du bloc (2 à 3 blocs, 3 min de récup) ; on progresse par la durée, +2 % dans MyWhoosh seulement après deux 2 × 20 propres. Référence citée : Seiler et al. 2013 (temps cumulé à intensité tenable).
-  - La sortie longue (`long`, `longplus`) n'a pas changé.
+  - La sortie longue : voir la refonte du 20/10/2026 (au cardio, `longplus` retirée).
 - **Course à la main** (`planOv:<lundi>[jour].run = {t, dur}`, `0` = retirée) : bouton « + course » sur chaque jour à venir (et dans la carte Aujourd'hui), effet immédiat, y compris cette semaine et sans aucun jour de course coché ; **aucune règle de placement** (muscu et vélo le même jour possibles). Type et durée changeables, « Retirer cette course », « Revenir au plan » (course générée modifiée). Statut « ajoutée » / « modifiée ». Durées validées (`RUN_OWN_DURS`).
 - Le contenu des séances muscu n'est **pas** géré ici : on place seulement les 4 séances.
-- Carte « Trois séances fondatrices » (`renderDesign`, sous Mes disponibilités) : lien vers la proposition d'entraîneur du 14/10/2026 (`DESIGN_URL`, page Claude privée). 30/15, seuil long et zone 2 sont appliqués (voir plus haut) ; la sortie longue au cardio (S3) ne l'est pas.
+- Carte « séances fondatrices » (`renderDesign`, sous Mes disponibilités) : liens vers la proposition d'entraîneur du 14/10/2026 (`DESIGN_URL`) et l'état des lieux du 20/10/2026 (`STATE_URL`), pages Claude privées. Les quatre séances fondatrices sont appliquées.
 - Clés localStorage : `planCfg`, `planRc` (réglages course par semaine), `runThrPace` (course, voir charge.js), `planWk:<lundi>`, `planOv:<lundi>`, `planUndo:<lundi>`, `muscuLbl`, `planSince`, `planFtp`, `bwWeight`, `bwAge`.
 - API de test : `window.Plan._gen/_eff/_cfg/_phase/_build/_zwo` et `_run` (réglages, placement, contenu des séances course).
 
