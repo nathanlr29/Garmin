@@ -639,11 +639,13 @@ function build(type, durMin, ph) {
     for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
     fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil long ${reps} × ${L / 60}'`;
     goal = `Tenir longtemps près du seuil : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, cadence 85-95, assis. Effort 6-7/10, phrases courtes possibles ; la FC se stabilise après 5-6 min de bloc. Si elle monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc : ta FTP est trop haute. On progresse par la durée des blocs (12, 15 puis 20 min), pas par l'intensité.${L >= 1200 ? vo2note : ""}`;
-  } else if (type === "ss") {
-    const L = [15, 20, 20][p] * 60, pct = .9;
-    ramp(600, .5, .75, "Échauffement progressif"); const M = T - used() - 360, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 4);
-    for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
-    fill(360); cool(360); title = `Sweet spot ${reps} × ${L / 60}'`; goal = `Beaucoup de temps juste sous le seuil (88-92 %) : efficace pour faire monter la FTP sans trop de fatigue.${L >= 1200 ? vo2note : ""}`;
+  } else if (type === "ss") {  // sweet spot progressif (demande du 20/10/2026) : 88 % fixe, on allonge les blocs (10, 15 puis 20 min)
+    const L = [10, 15, 20][p] * 60, pct = .88;
+    ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
+    const M = T - used() - 360, reps = clamp(Math.floor((M + 180) / (L + 180) * light), 2, 3);
+    for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(180, .55, "Récupération"); }
+    fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × ${L / 60}'`;
+    goal = `${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, 3 min souples entre deux, cadence 88-95, assis. Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Le bas du sweet spot reste sous ton seuil lactique : le lactate se stabilise, donc la séance se finit. Seiler (2013) : chez des cyclistes entraînés, 30 à 40 min cumulées à une intensité tenable du début à la fin ont fait plus progresser que des intervalles plus courts et plus durs. On monte de niveau par la durée (10, 15 puis 20 min), jamais par l'intensité. Bloc fini, FC stable : palier suivant. Après 2 × 20 propre deux fois de suite : +2 % dans MyWhoosh. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${L >= 1200 ? vo2note : ""}`;
   } else if (type === "tempo") {
     ramp(480, .5, .7, "Échauffement"); const M = T - used() - 300, blocks = clamp(Math.floor((M - 600) / 1200), 1, 3);
     st(Math.max(0, Math.round((M - blocks * 1200) / 2)), .68, "Endurance");
