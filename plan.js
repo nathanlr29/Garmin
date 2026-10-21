@@ -52,19 +52,27 @@ const isLong = t => t === "long" || t === "longplus";
 const POOLS = [["vo2r", "thr"], ["vo2r", "ss"], ["thr", "vo2r"], ["ss", "thr"]];
 const GRP_POOL = wi => wi % 2 ? ["thr", "ss"] : ["ss", "thr"];
 // sweet spot et seuil par paliers (demande du 21/10/2026) : [blocs, durée d'un bloc (s), % de la FTP, récup (s)]
+// Programme FTP (demande du 21/10/2026), inspiré des plans de MyWhoosh (Sweetspot #1 = 3 × 8' à 86 %, « 4min FTP » = 6 × 4' à 96 %) et de Zwift
+// (FTP Builder : on démarre facile, on allonge avant d'intensifier), et de la progression seuil 3 × 8 → 3 × 12 → 2 × 20 : on ne change qu'une
+// chose à la fois (durée, puis intensité). Sweet spot / seuil : [blocs, durée d'un bloc (s), % de la FTP, récup (s)] ;
+// VO2max 30/15 : [séries, répétitions par série, % de la FTP, récup entre séries (s)]. Environ 12 semaines avec une séance de chaque tous les 7 à 10 jours.
 const STEPS = {
-  ss: [[3, 480, .98, 240], [3, 900, .88, 180], [2, 1200, .88, 180]],
-  thr: [[3, 360, .96, 240], [3, 480, .98, 240], [3, 600, .98, 300], [2, 900, .98, 300], [3, 720, 1, 300], [2, 1200, 1, 300]],
+  ss: [[3, 480, .86, 300], [3, 600, .88, 240], [3, 720, .88, 240], [3, 900, .88, 240], [2, 1200, .88, 300], [2, 1200, .9, 300]],
+  thr: [[5, 240, .95, 120], [3, 480, .95, 240], [3, 600, .96, 240], [3, 720, .97, 300], [2, 900, .98, 300], [2, 1200, .98, 300], [2, 1200, 1, 300]],
+  vo2r: [[2, 10, 1.15, 180], [2, 13, 1.15, 180], [3, 13, 1.15, 180], [3, 13, 1.18, 180], [3, 13, 1.2, 180]],
 };
-const stepL = (t, k) => { const [n, L, pct] = STEPS[t][k]; return `#${k + 1} · ${n} × ${L / 60}' à ${Math.round(pct * 100)} %`; };
-// suivi : palLog = [{ d: date de la séance, t, k: palier, ok: réussi ou à refaire }] (synchronisé). Le palier d'une séance = celui qui suit
+const STEP_NAME = { ss: "Sweet spot", thr: "Seuil", vo2r: "VO2max 30/15" };
+const stepL = (t, k) => { const [n, L, pct] = STEPS[t][k]; return `#${k + 1} · ${t === "vo2r" ? `${n} × ${L} × 30/15` : `${n} × ${L / 60}'`} à ${Math.round(pct * 100)} %`; };
+// suivi : palLog = [{ d: date de la séance, t, k: palier, ok: réussi ou à refaire, v: 2 }] (synchronisé). Le palier d'une séance = celui qui suit
 // le dernier « réussi » d'avant sa date (le même après « à refaire ») ; le sous-menu « Palier » d'un jour (planOv[jour].k) le remplace.
-const palLog = () => { const L = store2.get("palLog"); return Array.isArray(L) ? L.filter(x => x && STEPS[x.t] && /^\d{4}-\d\d-\d\d$/.test(x.d) && Number.isInteger(x.k) && x.k >= 0 && x.k < STEPS[x.t].length) : []; };
+// v : version des paliers (les entrées sans v datent des paliers du 21/10 matin, numérotés autrement : ignorées).
+const palLog = () => { const L = store2.get("palLog"); return Array.isArray(L) ? L.filter(x => x && x.v === 2 && STEPS[x.t] && /^\d{4}-\d\d-\d\d$/.test(x.d) && Number.isInteger(x.k) && x.k >= 0 && x.k < STEPS[x.t].length) : []; };
 function palFor(t, date) {
   const d = ymd(date), L = palLog().filter(x => x.t === t && x.d < d).sort((a, b) => a.d < b.d ? -1 : 1), r = L[L.length - 1];
   return r ? clamp(r.k + (r.ok ? 1 : 0), 0, STEPS[t].length - 1) : 0;
 }
-function setPal(d, t, k, ok) { const L = palLog().filter(x => !(x.d === d && x.t === t)); if (ok != null) L.push({ d, t, k, ok }); store2.set("palLog", L.sort((a, b) => a.d < b.d ? -1 : 1).slice(-80)); }
+function setPal(d, t, k, ok) { const L = palLog().filter(x => !(x.d === d && x.t === t)); if (ok != null) L.push({ d, t, k, ok, v: 2 }); store2.set("palLog", L.sort((a, b) => a.d < b.d ? -1 : 1).slice(-80)); }
+const palK = (t, ph) => Number.isInteger(ph.k) && ph.k >= 0 && ph.k < STEPS[t].length ? ph.k : ph.date ? palFor(t, ph.date) : 0;
 const FTP0 = 230;  // FTP de travail du 20/10/2026 (meilleur 20 min de l'année : 228 W), remplace les 250-260 W des tests rampe
 const MUSCU = { push: { l: "Push", d: "pecs, épaules, triceps" }, pull: { l: "Pull", d: "dos, biceps" }, legs: { l: "Legs", d: "jambes" }, upper: { l: "Upper", d: "haut du corps" } };
 const MORDER = ["push", "pull", "legs", "upper"];  // ordre du programme ; avec moins de 4 matins on garde les premières
@@ -650,26 +658,26 @@ function build(type, durMin, ph) {
     hardWarm(); const M = T - used() - 480, reps = clamp(Math.floor((M + off) / (on + off) * light), 3, [5, 6, 5][p]);
     for (let i = 0; i < reps; i++) { st(on, pct, `Intervalle ${i + 1}/${reps}`); if (i < reps - 1) st(off, .5, "Récupération"); }
     fill(480); cool(480); title = `VO2max ${reps} × ${on / 60}'`; goal = `Le cœur du travail VO2max : ${reps} efforts de ${on / 60} min à ${Math.round(pct * 100)} % de FTP. Tenir la puissance jusqu'au bout, cadence 95-105.`;
-  } else if (type === "vo2r") {  // séance fondatrice S1 (proposition du 14/10/2026, protocole de Rønnestad) : 3 × 13 × (30 s à 118 % / 15 s à 50 %), intensité fixe
-    const pct = 1.18;
+  } else if (type === "vo2r") {  // protocole de Rønnestad 30/15, par paliers (STEPS.vo2r) : d'abord le nombre de répétitions et de séries, puis l'intensité
+    const k = palK(type, ph), [nS, reps, pct, R] = STEPS.vo2r[k];
     ramp(600, .5, .7, "Échauffement progressif"); st(300, .7, "Endurance");
     for (let i = 0; i < 2; i++) { st(30, 1.2, "Activation"); st(90, .55, "Récup"); } st(120, .55, "Souple");
-    const M = T - used() - 300, sets = clamp(Math.floor((M + 180) / 765 * light), 1, 3);
-    for (let k = 0; k < sets; k++) { for (let i = 0; i < 13; i++) { st(30, pct, `Série ${k + 1} · ${i + 1}/13`); st(15, .5, "Récup"); } if (k < sets - 1) st(180, .55, "Entre deux séries"); }
-    fill(600); cool(clamp(T - used(), 300, 600)); title = `VO2max ${sets} × 13 × 30/15`;
-    goal = `Le protocole de Rønnestad : ${sets} série${sets > 1 ? "s" : ""} de 13 × (30 s à ${Math.round(pct * 100)} % / 15 s à 50 %), 3 min souples entre les séries. Effort 7-8/10 en fin de série, cadence 95-105, assis. Une répétition qui lâche : baisse de 5 % jusqu'à la fin de la série. Deux séances propres d'affilée : monte de 2 % (intensité MyWhoosh). Chez des cyclistes entraînés, ce format a fait gagner 8,7 % de VO2max contre 2,6 % pour des intervalles de 5 min.`;
+    const M = T - used() - 300, sets = clamp(Math.floor((M + R) / (reps * 45 + R) * light), 1, nS);
+    for (let j = 0; j < sets; j++) { for (let i = 0; i < reps; i++) { st(30, pct, `Série ${j + 1} · ${i + 1}/${reps}`); st(15, .5, "Récup"); } if (j < sets - 1) st(R, .55, "Entre deux séries"); }
+    fill(600); cool(clamp(T - used(), 300, 600)); title = `VO2max #${k + 1} · ${sets} × ${reps} × 30/15`; palier = k;
+    goal = `Palier ${k + 1}/${STEPS.vo2r.length}, protocole de Rønnestad : ${sets} série${sets > 1 ? "s" : ""} de ${reps} × (30 s à ${Math.round(pct * 100)} % / 15 s à 50 %), ${R / 60} min souples entre les séries. Effort 7-8/10 en fin de série, cadence 95-105, assis. Séance faite : dis si elle est réussie (toutes les répétitions tenues à la puissance demandée). Réussie, la suivante passe au palier d'après ; sinon tu refais celui-ci. Chez des cyclistes entraînés, ce format a fait gagner 8,7 % de VO2max contre 2,6 % pour des intervalles de 5 min.${sets < nS ? ` La séance est trop courte pour ${nS} séries : allonge-la pour faire le palier complet.` : ""}`;
   } else if (type === "vo2s") {
     hardWarm(); const M = T - used() - 480, sets = clamp(Math.floor((M + 300) / 900 * light), 1, 3);
     for (let k = 0; k < sets; k++) { for (let i = 0; i < 10; i++) { st(30, 1.3, `Série ${k + 1} · ${i + 1}/10`); st(30, .5, "Récup"); } if (k < sets - 1) st(300, .55, "Entre deux séries"); }
     fill(480); cool(480); title = `VO2max ${sets} × 10 × 30/30`; goal = `Des efforts courts à 130 % qui font monter la VO2 sans s'épuiser : ${sets} série${sets > 1 ? "s" : ""} de 10 × (30 s dur / 30 s facile).`;
   } else if (type === "thr" || type === "ss") {  // paliers (demande du 21/10/2026), voir STEPS et palFor
-    const S_ = STEPS[type], k = Number.isInteger(ph.k) && ph.k >= 0 && ph.k < S_.length ? ph.k : ph.date ? palFor(type, ph.date) : 0, [n, L, pct, R] = S_[k], th = type === "thr";
+    const S_ = STEPS[type], k = palK(type, ph), [n, L, pct, R] = S_[k], th = type === "thr";
     ramp(th ? 480 : 600, .5, .75, "Échauffement progressif"); st(120, th ? .85 : .8, "Montée"); st(120, .6, "Souple");
     const M = T - used() - (th ? 300 : 360), reps = clamp(Math.floor((M + R) / (L + R) * light), 2, n);
     for (let i = 0; i < reps; i++) { st(L, pct, `${th ? "Bloc seuil" : "Sweet spot"} ${i + 1}/${reps}`); if (i < reps - 1) st(R, .55, "Récupération"); }
     if (th) { fill(480); cool(clamp(T - used(), 300, 480)); } else { fill(360); cool(clamp(T - used(), 300, 360)); }
     title = `${th ? "Seuil" : "Sweet spot"} #${k + 1} · ${reps} × ${L / 60}'`; palier = k;
-    goal = `Palier ${k + 1}/${S_.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence ${th ? "85-95" : "88-95"}, assis. ${pct > .9 ? "Effort 7/10, régulier du début à la fin." : "Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Seiler (2013) : 30 à 40 min cumulées à une intensité tenable du début à la fin font progresser."} Séance faite : dis si elle est réussie (tous les blocs finis sans baisse de puissance ni effort maximal). Réussie, la suivante passe au palier d'après ; sinon tu refais celui-ci. Si ta FC monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
+    goal = `Palier ${k + 1}/${S_.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence ${th ? "85-95" : "88-95"}, assis. ${pct > .9 ? "Effort 7/10, régulier du début à la fin." : "Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Seiler (2013) : 30 à 40 min cumulées à une intensité tenable du début à la fin font progresser."} Séance faite : dis si elle est réussie (tous les blocs finis sans baisse de puissance ni effort maximal), « Palier » dans « Changer » pour en prendre un autre. Réussie, la suivante passe au palier d'après ; sinon tu refais celui-ci. Si ta FC monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
   } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 2 × 12 min de tempo en fin de séance
     ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 2 * 720 - 240;
     if (M >= 120) st(M, .67, "Zone 2");
@@ -992,6 +1000,16 @@ function renderDesign() {
   return `<section class="card span12 design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie de groupe (réglage « Sortie de groupe ») compte comme la séance dure de la semaine, et après un gros week-end la séance clé attend le mercredi.</p>
     <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Les séances fondatrices</a> · <a href="${STATE_URL}" target="_blank" rel="noopener">l'état des lieux du 20 octobre</a> · pages privées, visibles seulement avec ton compte Claude.</p></section>`;
 }
+// carte « Ton programme FTP » : où tu en es de chaque échelle de paliers (palLog)
+function renderProgram() {
+  const tm = addDays(new Date(), 1), cur = Object.fromEntries(Object.keys(STEPS).map(t => [t, palFor(t, tm)]));
+  const left = Object.keys(STEPS).reduce((a, t) => a + STEPS[t].length - cur[t], 0), done = palLog().filter(x => x.ok).length;
+  const row = t => `<li><b>${STEP_NAME[t]}</b><span class="pgsteps">${STEPS[t].map((_, k) => { const e = palLog().filter(x => x.t === t && x.k === k && x.ok).pop();
+    return `<span class="${e ? "ok" : k === cur[t] ? "cur" : ""}" title="${stepL(t, k)}">${e ? `✓ #${k + 1}` : `#${k + 1}`}<small>${e ? dShort(parseYmd(e.d)) : (k === cur[t] ? "prochaine · " : "") + stepL(t, k).slice(stepL(t, k).indexOf("·") + 2)}</small></span>`; }).join("")}</span></li>`;
+  return `<section class="card span12 pgram"><h2>Ton programme FTP <small>environ 12 semaines</small></h2>
+    <p class="tdmsg">${done ? `${done} palier${done > 1 ? "s" : ""} réussi${done > 1 ? "s" : ""}, encore ${left} à franchir.` : "Tu démarres au palier #1 de chaque séance, le plus facile."} Chaque séance réussie fait passer la suivante au palier d'après : on allonge d'abord les blocs, puis on monte l'intensité, comme les plans FTP de MyWhoosh et Zwift.</p>
+    <ul class="pgl">${Object.keys(STEPS).map(row).join("")}</ul></section>`;
+}
 function render() {
   const box = $("plan"); if (!box) return;
   if (!store2.get("planSince")) store2.set("planSince", ymd(new Date()));
@@ -1000,7 +1018,7 @@ function render() {
   const Wc = withWorkouts(effective(cur, c, ctxFor(cur, form, ready)));
   const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, c, ctxFor(PS.mon, form, ready)));
   PS.W = W; PS.Wc = Wc;
-  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderAvail(c)}${renderDesign()}
+  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${renderAvail(c)}${renderDesign()}
     <section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><div id="pProgBody"><p class="note">${window.Bilan ? "Analyse en cours…" : ""}</p></div></section>${window.Zones ? Zones.html({ profile: prof, acts: S.all, now: Date.now() }) : ""}${window.Perf ? Perf.html({ profile: prof, ftp: prof.ftp, goal: c.goal, acts: S.all }) : ""}</div>`;
   bind(c, prof);
   if (window.Zones) Zones.bind(box);

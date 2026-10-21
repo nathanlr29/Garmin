@@ -163,23 +163,25 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
   assert.ok(t.steps.some(st => st.free && st.d === 1200), "test : 20 min libres"); assert.match(t.title, /20 min/);
   const L = P._build("long", 240, { wk: 2, deload: false });
   assert.ok(L.steps.every(st => st.free || st.hi <= .75), "sortie longue : rien au-dessus de la zone 2"); assert.match(L.goal, /bpm/);
-  // sweet spot et seuil par paliers (demande du 21/10/2026) : palier = celui qui suit le dernier « réussi » d'avant la date (palLog), ou choisi (ph.k)
+  // programme FTP par paliers (demande du 21/10/2026) : palier = celui qui suit le dernier « réussi » d'avant la date (palLog, v: 2), ou choisi (ph.k)
   { const q = load(), D = d => new Date(2026, 9, d), sig = w => w.title.replace(/ ·.*/, "") + " " + w.steps.filter(st => /^(Sweet spot|Bloc seuil) \d/.test(st.label)).map(st => `${st.d / 60}@${st.lo}`).join(" ");
-    const B = (t, d, x = {}) => q.Plan._build(t, 75, { wk: 1, deload: false, date: D(d), ...x });
-    assert.equal(sig(B("ss", 21)), "Sweet spot #1 8@0.98 8@0.98 8@0.98", "sweet spot #1 : 3 × 8 à 98 %"); assert.equal(B("ss", 21).k, 0);
-    assert.ok(B("ss", 21).steps.filter(st => st.label === "Récupération").every(st => st.d === 240), "4 min de récup");
-    assert.equal(sig(B("thr", 21)), "Seuil #1 6@0.96 6@0.96 6@0.96", "seuil #1 : 3 × 6 à 96 %");
-    q.store.set("palLog", JSON.stringify([{ d: "2026-10-21", t: "ss", k: 0, ok: true }, { d: "2026-10-22", t: "thr", k: 0, ok: false }]));
-    assert.equal(sig(B("ss", 21)), "Sweet spot #1 8@0.98 8@0.98 8@0.98", "la séance du jour garde son palier");
-    assert.equal(sig(B("ss", 28)), "Sweet spot #2 15@0.88 15@0.88 15@0.88", "réussi : palier suivant");
-    assert.equal(sig(B("thr", 29)), "Seuil #1 6@0.96 6@0.96 6@0.96", "à refaire : même palier");
-    assert.equal(sig(B("ss", 28, { k: 2 })), "Sweet spot #3 20@0.88 20@0.88", "palier choisi dans le sous-menu");
-    assert.equal(sig(B("thr", 28, { k: 9 })), "Seuil #1 6@0.96 6@0.96 6@0.96", "palier choisi hors plage ignoré");
-    q.store.set("palLog", JSON.stringify([{ d: "2026-10-01", t: "thr", k: 5, ok: true }])); assert.equal(sig(B("thr", 28)), "Seuil #6 20@1 20@1", "après le dernier palier on y reste");
-    q.store.set("palLog", JSON.stringify([{ d: "2026-10-01", t: "thr", k: 4, ok: true }])); const w5 = B("thr", 28); assert.equal(sig(w5), "Seuil #6 20@1 20@1");
-    assert.equal(sig(q.Plan._build("thr", 45, { wk: 1, deload: false, k: 4 })), "Seuil #5 12@1 12@1", "séance courte : moins de blocs, jamais moins de 2");
-    q.store.set("palLog", "\"x\""); assert.equal(sig(B("ss", 28)), "Sweet spot #1 8@0.98 8@0.98 8@0.98", "suivi illisible ignoré"); }
-  const tp = P._build("tempo", 75, { wk: 2, deload: false });
+    const B = (t, d, x = {}) => q.Plan._build(t, 75, { wk: 1, deload: false, date: D(d), ...x }), v2 = a => JSON.stringify(a.map(x => ({ ...x, v: 2 })));
+    assert.equal(sig(B("ss", 21)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "sweet spot #1 : 3 × 8 à 86 % (MyWhoosh Sweetspot #1)"); assert.equal(B("ss", 21).k, 0);
+    assert.ok(B("ss", 21).steps.filter(st => st.label === "Récupération").every(st => st.d === 300), "5 min de récup");
+    assert.equal(sig(B("thr", 21)), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "seuil #1 : 5 × 4 à 95 %");
+    const vo = B("vo2r", 21); assert.match(vo.title, /^VO2max #1 · 2 × 10 × 30\/15/); assert.equal(vo.steps.filter(st => /^Série/.test(st.label)).length, 20);
+    assert.ok(vo.steps.filter(st => /^Série/.test(st.label)).every(st => st.lo === 1.15 && st.d === 30), "VO2max #1 : 2 × 10 × 30 s à 115 %");
+    q.store.set("palLog", v2([{ d: "2026-10-21", t: "ss", k: 0, ok: true }, { d: "2026-10-22", t: "thr", k: 0, ok: false }, { d: "2026-10-20", t: "vo2r", k: 3, ok: true }]));
+    assert.equal(sig(B("ss", 21)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "la séance du jour garde son palier");
+    assert.equal(sig(B("ss", 28)), "Sweet spot #2 10@0.88 10@0.88 10@0.88", "réussi : palier suivant");
+    assert.equal(sig(B("thr", 29)), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "à refaire : même palier");
+    assert.match(B("vo2r", 28).title, /^VO2max #5 · 3 × 13 × 30\/15/, "VO2max réussie : palier suivant");
+    assert.equal(sig(B("ss", 28, { k: 4 })), "Sweet spot #5 20@0.88 20@0.88", "palier choisi dans le sous-menu");
+    assert.equal(sig(B("thr", 28, { k: 9 })), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "palier choisi hors plage ignoré");
+    q.store.set("palLog", v2([{ d: "2026-10-01", t: "thr", k: 6, ok: true }])); assert.equal(sig(B("thr", 28)), "Seuil #7 20@1 20@1", "après le dernier palier on y reste");
+    q.store.set("palLog", JSON.stringify([{ d: "2026-10-01", t: "thr", k: 3, ok: true }])); assert.match(B("thr", 28).title, /^Seuil #1/, "entrée sans version (anciens paliers) ignorée");
+    const c45 = q.Plan._build("ss", 45, { wk: 1, deload: false, k: 3 }); assert.equal(sig(c45), "Sweet spot #4 15@0.88 15@0.88", "séance courte : moins de blocs, jamais moins de 2"); assert.match(c45.goal, /trop courte/);
+    q.store.set("palLog", "\"x\""); assert.equal(sig(B("ss", 28)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "suivi illisible ignoré"); }
   assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 2); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
   // plus de séance de moins de 45 min : une ancienne config à 30 min passe à 45
   const h = load(); h.store.set("planCfg", JSON.stringify({ ...CFGS.cinq, days: CFGS.cinq.days.map((d, i) => i === 1 ? { ...d, dur: 30 } : d) }));
