@@ -54,6 +54,15 @@ const GRP_POOL = wi => wi % 2 ? ["thr", "ss"] : ["ss", "thr"];
 // séance seuil : paliers [blocs, durée d'un bloc (s), % de la FTP, récup (s)], palier en cours dans la clé thrStep (synchronisée)
 const THR_STEPS = [[3, 360, .96, 240], [3, 480, .98, 240], [3, 600, .98, 300], [2, 900, .98, 300], [3, 720, 1, 300], [2, 1200, 1, 300]];
 const thrStep = () => { const k = store2.get("thrStep"); return Number.isInteger(k) ? clamp(k, 0, THR_STEPS.length - 1) : 0; };
+// sweet spot : paliers [blocs, durée d'un bloc (s), % de la FTP, récup (s)] ; on avance d'un palier par semaine, tout seul.
+// ssStep = repères [{ mon: lundi, k: palier }] posés par « Refaire ce palier » / « Revenir » : le dernier repère d'avant la semaine compte.
+const SS_STEPS = [[3, 480, .98, 240], [3, 900, .88, 180], [2, 1200, .88, 180]], SS0 = { mon: "2026-10-19", k: 0 };  // #1 la semaine du 19/10/2026
+function ssStepFor(mon) {
+  const L = store2.get("ssStep"), A = [SS0].concat(Array.isArray(L) ? L.filter(x => x && /^\d{4}-\d\d-\d\d$/.test(x.mon) && Number.isInteger(x.k)) : []).filter(x => x.mon <= ymd(mon)).sort((x, y) => x.mon < y.mon ? -1 : 1);
+  const r = A[A.length - 1]; if (!r) return 0;
+  return clamp(r.k + Math.round((mon - parseYmd(r.mon)) / (7 * 864e5)), 0, SS_STEPS.length - 1);
+}
+function setSsStep(mon, k) { const L = (store2.get("ssStep") || []).filter(x => x && x.mon !== ymd(mon)); L.push({ mon: ymd(mon), k }); store2.set("ssStep", L.sort((x, y) => x.mon < y.mon ? -1 : 1).slice(-20)); }
 const FTP0 = 230;  // FTP de travail du 20/10/2026 (meilleur 20 min de l'année : 228 W), remplace les 250-260 W des tests rampe
 const MUSCU = { push: { l: "Push", d: "pecs, épaules, triceps" }, pull: { l: "Pull", d: "dos, biceps" }, legs: { l: "Legs", d: "jambes" }, upper: { l: "Upper", d: "haut du corps" } };
 const MORDER = ["push", "pull", "legs", "upper"];  // ordre du programme ; avec moins de 4 matins on garde les premières
@@ -658,20 +667,13 @@ function build(type, durMin, ph) {
     for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(R, .55, "Récupération"); }
     fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil ${reps} × ${L / 60}'`;
     goal = `Palier ${k + 1}/${THR_STEPS.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence 85-95, assis. Effort 7/10, régulier du début à la fin. Passe au palier suivant seulement si tu finis tous les blocs sans baisse de puissance ni effort maximal ; sinon refais le même palier la fois d'après. Si ta FC monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
-  } else if (type === "ss" && !p) {  // premier palier (demande du 21/10/2026) : 3 × 8 min à 225 W (98 % de 230), 4 min de récup
-    const L = 480, pct = .98;
+  } else if (type === "ss") {  // sweet spot par paliers (demande du 21/10/2026) : #1 3 × 8 à 98 %, #2 3 × 15 à 88 %, #3 2 × 20 à 88 %
+    const k = ph.mon ? ssStepFor(ph.mon) : p || 0, [n, L, pct, R] = SS_STEPS[k];
     ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
-    const M = T - used() - 360, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 3);
-    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
-    fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × 8'`;
-    goal = `Premier palier : ${reps} blocs de 8 min à ${Math.round(pct * 100)} % (le haut du sweet spot, presque ton seuil), 4 min souples entre deux, cadence 88-95, assis. Effort 7/10 : régulier du début à la fin, sans partir trop fort. Si le premier bloc te met déjà dans le rouge, baisse de 3 % pour les suivants. Les semaines suivantes du bloc, on allonge à 88 % (3 × 15 puis 2 × 20).`;
-  } else if (type === "ss") {  // sweet spot progressif (demande du 20/10/2026) : 88 % fixe, on allonge les blocs (15 puis 20 min) ; 1re semaine = 3 × 8 ci-dessus
-    const L = [10, 15, 20][p] * 60, pct = .88;
-    ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
-    const M = T - used() - 360, reps = clamp(Math.floor((M + 180) / (L + 180) * light), 2, 3);
-    for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(180, .55, "Récupération"); }
-    fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × ${L / 60}'`;
-    goal = `${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, 3 min souples entre deux, cadence 88-95, assis. Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Le bas du sweet spot reste sous ton seuil lactique : le lactate se stabilise, donc la séance se finit. Seiler (2013) : chez des cyclistes entraînés, 30 à 40 min cumulées à une intensité tenable du début à la fin ont fait plus progresser que des intervalles plus courts et plus durs. On monte de niveau par la durée (3 × 8 plus intense en début de bloc, puis 15 et 20 min), jamais par l'intensité. Bloc fini, FC stable : palier suivant. Après 2 × 20 propre deux fois de suite : +2 % dans MyWhoosh. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${L >= 1200 ? vo2note : ""}`;
+    const M = T - used() - 360, reps = clamp(Math.floor((M + R) / (L + R) * light), 2, n);
+    for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(R, .55, "Récupération"); }
+    fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot #${k + 1} · ${reps} × ${L / 60}'`;
+    goal = `Palier ${k + 1}/${SS_STEPS.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence 88-95, assis. ${pct > .9 ? "Effort 7/10 : le haut du sweet spot, presque ton seuil, régulier du début à la fin." : "Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Seiler (2013) : 30 à 40 min cumulées à une intensité tenable du début à la fin font progresser."} Chaque semaine on passe au palier suivant ; séance ratée ou finie dans le rouge : refais ce palier la semaine prochaine. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
   } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 2 × 12 min de tempo en fin de séance
     ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 2 * 720 - 240;
     if (M >= 120) st(M, .67, "Zone 2");
@@ -876,6 +878,8 @@ function renderDay(W, ready) {
 function detailHtml(W, it, prof) {
   const b = it.bike; if (!b) return "";
   let h = `${profileSvg(b.w.steps)}<p class="sg">${b.w.goal}</p>`;
+  if (b.t === "ss") { const k = ssStepFor(W.mon), N = SS_STEPS.length, nx = addDays(W.mon, 7);
+    h += `<p class="sg">Sweet spot #${k + 1} sur ${N}. ${k < N - 1 ? `La semaine prochaine : #${ssStepFor(nx) + 1}, tout seul. Séance ratée ou finie dans le rouge ? ${ssStepFor(nx) !== k ? `<button class="btn2" data-ssstep="${ymd(nx)}:${k}">Refaire le #${k + 1} la semaine prochaine</button>` : ""}` : "Dernier palier atteint."}${k ? ` <button class="lnk" data-ssstep="${ymd(W.mon)}:${k - 1}">Revenir au #${k} cette semaine</button>` : ""}</p>`; }
   if (b.t === "thr") { const k = thrStep(), N = THR_STEPS.length;
     h += `<p class="sg">Palier ${k + 1} sur ${N}. ${k < N - 1 ? `Tous les blocs finis sans baisse de puissance ni effort maximal ? <button class="btn2" data-thrstep="${k + 1}">Passer au palier ${k + 2}</button>` : "Dernier palier atteint."}${k ? ` <button class="lnk" data-thrstep="${k - 1}">Revenir au palier ${k}</button>` : ""}</p>`; }
   h += stepsTable(b, prof);
@@ -982,7 +986,7 @@ const AFY = { "<30": [4.95, 5.77], "30-39": [4.3, 5.59], "40-49": [4, 4.88], "50
 function ctxFor(mon, form, ready) { const rc = rcFor(mon); return { form, ready, prev: prevCtx(mon), rc, ...(rc ? { run: runCtx(mon) } : {}) }; }
 function withWorkouts(W) {
   const thr = W.items.some(it => it.run) ? Charge.params().runPace : null;
-  W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, W.ph); if (it.run) it.run.w = buildRun(it.run.t, it.run.dur, thr); }); return W;
+  W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, { ...W.ph, mon: W.mon }); if (it.run) it.run.w = buildRun(it.run.t, it.run.dur, thr); }); return W;
 }
 // Proposition de séances fondatrices (page de conception, privée) : lien seulement, rien n'est appliqué au plan
 const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
@@ -1026,6 +1030,7 @@ function bind(c, prof) {
   if ($("pRedo")) $("pRedo").onclick = () => { store2.del("planUndo:" + ymd(PS.Wc.mon)); render(); };
   box.querySelectorAll("[data-bilan]").forEach(b => b.onclick = () => window.Bilan ? Bilan.open(+b.dataset.bilan) : window.open(`https://connect.garmin.com/modern/activity/${b.dataset.bilan}`, "_blank", "noopener"));
   box.querySelectorAll("[data-mlbl]").forEach(s => s.onchange = () => { const m = store2.get("muscuLbl") || {}; m[s.dataset.mlbl] = s.value; store2.set("muscuLbl", m); render(); });
+  box.querySelectorAll("[data-ssstep]").forEach(b => b.onclick = () => { const [d, k] = b.dataset.ssstep.split(":"); setSsStep(parseYmd(d), +k); render(); });
   box.querySelectorAll("[data-thrstep]").forEach(b => b.onclick = () => { store2.set("thrStep", +b.dataset.thrstep); render(); });
   box.querySelectorAll("[data-setftp]").forEach(b => b.onclick = () => { store2.set("planFtp", +b.dataset.setftp); render(); });
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const it = PS.W.items[+b.dataset.dl]; download(fileName(it.bike, it.date), zwo(it.bike, it.date, prof)); });
