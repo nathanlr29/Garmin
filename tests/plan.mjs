@@ -163,6 +163,11 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
   assert.ok(t.steps.some(st => st.free && st.d === 1200), "test : 20 min libres"); assert.match(t.title, /20 min/);
   const L = P._build("long", 240, { wk: 2, deload: false });
   assert.ok(L.steps.every(st => st.free || st.hi <= .75), "sortie longue : rien au-dessus de la zone 2"); assert.match(L.goal, /bpm/);
+  // sweet spot, 1re semaine du bloc (demande du 21/10/2026) : 3 × 8 min à 98 % de la FTP, 4 min de récup ; ensuite 3 × 15 et 2 × 20 à 88 %
+  const ss1 = P._build("ss", 75, { wk: 1, deload: false }), on1 = ss1.steps.filter(st => /^Bloc/.test(st.label));
+  assert.equal(on1.length, 3); assert.ok(on1.every(st => st.d === 480 && st.lo === .98), "sweet spot semaine 1 : 3 × 8 min à 98 %"); assert.match(ss1.title, /3 × 8'/);
+  assert.ok(ss1.steps.filter(st => st.label === "Récupération").every(st => st.d === 240), "4 min de récup entre les blocs");
+  assert.ok(P._build("ss", 75, { wk: 2, deload: false }).steps.some(st => st.d === 900 && st.lo === .88), "semaine 2 : blocs de 15 min à 88 %");
   const tp = P._build("tempo", 75, { wk: 2, deload: false });
   assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 2); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
   // plus de séance de moins de 45 min : une ancienne config à 30 min passe à 45

@@ -655,13 +655,20 @@ function build(type, durMin, ph) {
     for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
     fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil long ${reps} × ${L / 60}'`;
     goal = `Tenir longtemps près du seuil : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, cadence 85-95, assis. Effort 6-7/10, phrases courtes possibles ; la FC se stabilise après 5-6 min de bloc. Si elle monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc : ta FTP est trop haute. On progresse par la durée des blocs (12, 15 puis 20 min), pas par l'intensité.${L >= 1200 ? vo2note : ""}`;
-  } else if (type === "ss") {  // sweet spot progressif (demande du 20/10/2026) : 88 % fixe, on allonge les blocs (10, 15 puis 20 min)
+  } else if (type === "ss" && !p) {  // premier palier (demande du 21/10/2026) : 3 × 8 min à 225 W (98 % de 230), 4 min de récup
+    const L = 480, pct = .98;
+    ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
+    const M = T - used() - 360, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 3);
+    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
+    fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × 8'`;
+    goal = `Premier palier : ${reps} blocs de 8 min à ${Math.round(pct * 100)} % (le haut du sweet spot, presque ton seuil), 4 min souples entre deux, cadence 88-95, assis. Effort 7/10 : régulier du début à la fin, sans partir trop fort. Si le premier bloc te met déjà dans le rouge, baisse de 3 % pour les suivants. Les semaines suivantes du bloc, on allonge à 88 % (3 × 15 puis 2 × 20).`;
+  } else if (type === "ss") {  // sweet spot progressif (demande du 20/10/2026) : 88 % fixe, on allonge les blocs (15 puis 20 min) ; 1re semaine = 3 × 8 ci-dessus
     const L = [10, 15, 20][p] * 60, pct = .88;
     ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
     const M = T - used() - 360, reps = clamp(Math.floor((M + 180) / (L + 180) * light), 2, 3);
     for (let i = 0; i < reps; i++) { st(L, pct, `Sweet spot ${i + 1}/${reps}`); if (i < reps - 1) st(180, .55, "Récupération"); }
     fill(360); cool(clamp(T - used(), 300, 360)); title = `Sweet spot ${reps} × ${L / 60}'`;
-    goal = `${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, 3 min souples entre deux, cadence 88-95, assis. Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Le bas du sweet spot reste sous ton seuil lactique : le lactate se stabilise, donc la séance se finit. Seiler (2013) : chez des cyclistes entraînés, 30 à 40 min cumulées à une intensité tenable du début à la fin ont fait plus progresser que des intervalles plus courts et plus durs. On monte de niveau par la durée (10, 15 puis 20 min), jamais par l'intensité. Bloc fini, FC stable : palier suivant. Après 2 × 20 propre deux fois de suite : +2 % dans MyWhoosh. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${L >= 1200 ? vo2note : ""}`;
+    goal = `${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, 3 min souples entre deux, cadence 88-95, assis. Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Le bas du sweet spot reste sous ton seuil lactique : le lactate se stabilise, donc la séance se finit. Seiler (2013) : chez des cyclistes entraînés, 30 à 40 min cumulées à une intensité tenable du début à la fin ont fait plus progresser que des intervalles plus courts et plus durs. On monte de niveau par la durée (3 × 8 plus intense en début de bloc, puis 15 et 20 min), jamais par l'intensité. Bloc fini, FC stable : palier suivant. Après 2 × 20 propre deux fois de suite : +2 % dans MyWhoosh. Si ta FC monte sans plateau au-dessus de 95 % de ton seuil cardio : baisse de 3 % et finis le bloc.${L >= 1200 ? vo2note : ""}`;
   } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 2 × 12 min de tempo en fin de séance
     ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 2 * 720 - 240;
     if (M >= 120) st(M, .67, "Zone 2");
