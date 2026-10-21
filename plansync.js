@@ -46,7 +46,7 @@ function okValue(id, v) {
   const num = (a, b) => typeof v === "number" && v >= a && v <= b;
   if (id === "planFtp") return num(80, 600);
   if (id === "bwWeight") return num(35, 150);
-  if (id === "palLog") return Array.isArray(v) && v.length <= 80 && v.every(x => x && (x.t === "ss" || x.t === "thr") && typeof x.d === "string" && new RegExp(`^${DATE}$`).test(x.d) && Number.isInteger(x.k) && x.k >= 0 && x.k <= 5 && typeof x.ok === "boolean");
+  if (id === "palLog") return Array.isArray(v) && v.length <= 80 && v.every(x => x && ["ss", "thr", "vo2r"].includes(x.t) && typeof x.d === "string" && new RegExp(`^${DATE}$`).test(x.d) && Number.isInteger(x.k) && x.k >= 0 && x.k <= 9 && typeof x.ok === "boolean");
   if (id === "bwAge") return typeof v === "string" && v.length < 12;
   if (id === "planSince") return typeof v === "string" && new RegExp(`^${DATE}$`).test(v);
   if (id === "planCfg") return !!v && typeof v === "object" && Array.isArray(v.days) && v.days.length === 7;
