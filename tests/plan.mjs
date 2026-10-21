@@ -182,6 +182,7 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
     q.store.set("palLog", JSON.stringify([{ d: "2026-10-01", t: "thr", k: 3, ok: true }])); assert.match(B("thr", 28).title, /^Seuil #1/, "entrée sans version (anciens paliers) ignorée");
     const c45 = q.Plan._build("ss", 45, { wk: 1, deload: false, k: 3 }); assert.equal(sig(c45), "Sweet spot #4 15@0.88 15@0.88", "séance courte : moins de blocs, jamais moins de 2"); assert.match(c45.goal, /trop courte/);
     q.store.set("palLog", "\"x\""); assert.equal(sig(B("ss", 28)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "suivi illisible ignoré"); }
+  const tp = P._build("tempo", 75, { wk: 2, deload: false });
   assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 2); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
   // plus de séance de moins de 45 min : une ancienne config à 30 min passe à 45
   const h = load(); h.store.set("planCfg", JSON.stringify({ ...CFGS.cinq, days: CFGS.cinq.days.map((d, i) => i === 1 ? { ...d, dur: 30 } : d) }));
