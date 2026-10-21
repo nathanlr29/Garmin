@@ -19,6 +19,7 @@
   --accent-ink:#d63f00;  /* orange lisible sur blanc (liens) */
   --accent-2:#ff8a50;    /* orange clair : barres secondaires */
   --accent-soft:#fff0e8; /* fond d'un message qui te concerne */
+  --logo:#fc4c02;        /* plaque de l'icône (icon-512.png), identique jour et nuit : animation de démarrage */
   /* États (façon Garmin) */
   --good:#16a34a; --info:#1e88e5; --warn:#d98200; --bad:#e5484d;
   --teal:var(--good); --amber:var(--warn); --rose:var(--bad);
