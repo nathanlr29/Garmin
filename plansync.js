@@ -6,7 +6,7 @@
 const SY = window.Sync;
 const K_TS = "planSyncTs", K_SNAP = "planSyncSnap";   // horodatage de chaque élément ; dernier état connu (sert à voir ce qui a changé)
 const WEEKS = 8, MAX_V = 40000;                       // seules les 8 dernières semaines sont envoyées ; limite d'une cellule de la Sheet
-const SIMPLE = new Set(["planCfg", "planRc", "planFtp", "bwWeight", "bwAge", "planSince"]);
+const SIMPLE = new Set(["planCfg", "planRc", "planFtp", "bwWeight", "bwAge", "planSince", "thrStep", "ssStep"]);
 const DATE = "\\d{4}-\\d\\d-\\d\\d";
 const RE = { ov: new RegExp(`^planOv:(${DATE}):([0-6])$`), undo: new RegExp(`^planUndo:(${DATE}):([\\w-]{1,60})$`), wk: new RegExp(`^planWk:(${DATE})$`), lbl: /^muscuLbl:([\w-]{1,60})$/ };
 const ls = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
@@ -46,6 +46,8 @@ function okValue(id, v) {
   const num = (a, b) => typeof v === "number" && v >= a && v <= b;
   if (id === "planFtp") return num(80, 600);
   if (id === "bwWeight") return num(35, 150);
+  if (id === "ssStep") return Array.isArray(v) && v.length <= 20 && v.every(x => x && typeof x.mon === "string" && new RegExp(`^${DATE}$`).test(x.mon) && Number.isInteger(x.k) && x.k >= 0 && x.k <= 2);
+  if (id === "thrStep") return Number.isInteger(v) && v >= 0 && v <= 5;
   if (id === "bwAge") return typeof v === "string" && v.length < 12;
   if (id === "planSince") return typeof v === "string" && new RegExp(`^${DATE}$`).test(v);
   if (id === "planCfg") return !!v && typeof v === "object" && Array.isArray(v.days) && v.days.length === 7;
