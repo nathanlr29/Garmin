@@ -51,6 +51,9 @@ const isLong = t => t === "long" || t === "longplus";
 // l'autre séance clé travaille la FTP (sweet spot et seuil long en alternance d'une semaine à l'autre, GRP_POOL)
 const POOLS = [["vo2r", "thr"], ["vo2r", "ss"], ["thr", "vo2r"], ["ss", "thr"]];
 const GRP_POOL = wi => wi % 2 ? ["thr", "ss"] : ["ss", "thr"];
+// séance seuil : paliers [blocs, durée d'un bloc (s), % de la FTP, récup (s)], palier en cours dans la clé thrStep (synchronisée)
+const THR_STEPS = [[3, 360, .96, 240], [3, 480, .98, 240], [3, 600, .98, 300], [2, 900, .98, 300], [3, 720, 1, 300], [2, 1200, 1, 300]];
+const thrStep = () => { const k = store2.get("thrStep"); return Number.isInteger(k) ? clamp(k, 0, THR_STEPS.length - 1) : 0; };
 const FTP0 = 230;  // FTP de travail du 20/10/2026 (meilleur 20 min de l'année : 228 W), remplace les 250-260 W des tests rampe
 const MUSCU = { push: { l: "Push", d: "pecs, épaules, triceps" }, pull: { l: "Pull", d: "dos, biceps" }, legs: { l: "Legs", d: "jambes" }, upper: { l: "Upper", d: "haut du corps" } };
 const MORDER = ["push", "pull", "legs", "upper"];  // ordre du programme ; avec moins de 4 matins on garde les premières
@@ -648,13 +651,13 @@ function build(type, durMin, ph) {
     hardWarm(); const M = T - used() - 480, sets = clamp(Math.floor((M + 300) / 900 * light), 1, 3);
     for (let k = 0; k < sets; k++) { for (let i = 0; i < 10; i++) { st(30, 1.3, `Série ${k + 1} · ${i + 1}/10`); st(30, .5, "Récup"); } if (k < sets - 1) st(300, .55, "Entre deux séries"); }
     fill(480); cool(480); title = `VO2max ${sets} × 10 × 30/30`; goal = `Des efforts courts à 130 % qui font monter la VO2 sans s'épuiser : ${sets} série${sets > 1 ? "s" : ""} de 10 × (30 s dur / 30 s facile).`;
-  } else if (type === "thr") {  // séance fondatrice S2 (proposition du 14/10/2026) : seuil long à 95 %, on allonge les blocs, pas l'intensité
-    const L = [12, 15, 20][p] * 60, pct = .95;
+  } else if (type === "thr") {  // seuil par paliers (demande du 21/10/2026) : on passe au palier suivant à la main, quand le précédent est réussi
+    const k = thrStep(), [n, L, pct, R] = THR_STEPS[k];
     ramp(480, .5, .75, "Échauffement progressif"); st(120, .85, "Montée"); st(120, .6, "Souple");
-    const M = T - used() - 300, reps = clamp(Math.floor((M + 240) / (L + 240) * light), 2, 3);
-    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(240, .55, "Récupération"); }
-    fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil long ${reps} × ${L / 60}'`;
-    goal = `Tenir longtemps près du seuil : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} %, cadence 85-95, assis. Effort 6-7/10, phrases courtes possibles ; la FC se stabilise après 5-6 min de bloc. Si elle monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc : ta FTP est trop haute. On progresse par la durée des blocs (12, 15 puis 20 min), pas par l'intensité.${L >= 1200 ? vo2note : ""}`;
+    const M = T - used() - 300, reps = clamp(Math.floor((M + R) / (L + R) * light), 2, n);
+    for (let i = 0; i < reps; i++) { st(L, pct, `Bloc seuil ${i + 1}/${reps}`); if (i < reps - 1) st(R, .55, "Récupération"); }
+    fill(480); cool(clamp(T - used(), 300, 480)); title = `Seuil ${reps} × ${L / 60}'`;
+    goal = `Palier ${k + 1}/${THR_STEPS.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence 85-95, assis. Effort 7/10, régulier du début à la fin. Passe au palier suivant seulement si tu finis tous les blocs sans baisse de puissance ni effort maximal ; sinon refais le même palier la fois d'après. Si ta FC monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
   } else if (type === "ss" && !p) {  // premier palier (demande du 21/10/2026) : 3 × 8 min à 225 W (98 % de 230), 4 min de récup
     const L = 480, pct = .98;
     ramp(600, .5, .75, "Échauffement progressif"); st(120, .8, "Montée"); st(120, .6, "Souple");
@@ -872,7 +875,10 @@ function renderDay(W, ready) {
 }
 function detailHtml(W, it, prof) {
   const b = it.bike; if (!b) return "";
-  let h = `${profileSvg(b.w.steps)}<p class="sg">${b.w.goal}</p>${stepsTable(b, prof)}`;
+  let h = `${profileSvg(b.w.steps)}<p class="sg">${b.w.goal}</p>`;
+  if (b.t === "thr") { const k = thrStep(), N = THR_STEPS.length;
+    h += `<p class="sg">Palier ${k + 1} sur ${N}. ${k < N - 1 ? `Tous les blocs finis sans baisse de puissance ni effort maximal ? <button class="btn2" data-thrstep="${k + 1}">Passer au palier ${k + 2}</button>` : "Dernier palier atteint."}${k ? ` <button class="lnk" data-thrstep="${k - 1}">Revenir au palier ${k}</button>` : ""}</p>`; }
+  h += stepsTable(b, prof);
   if (b.st !== "done") h += b.place === "mw" ? `<button class="btn2 dl" data-dl="${it.day}">Télécharger pour MyWhoosh (.zwo)</button>`
     : `<div class="outnote">${b.t === "grp" || b.t === "long" ? "Sans capteur de puissance, c'est le cardio qui pilote : les repères sont dans le texte ci-dessus." : /^vo2/.test(b.t) ? "Sans capteur de puissance, pilote les intervalles courts à la sensation : le cœur met 1 à 2 min à monter." : "Garde un œil sur le cardio : il dérive un peu à la chaleur et en fin de sortie."}</div>`;
   if (b.st === "done" && b.acts) h += `<div class="ddone">${b.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
@@ -1020,6 +1026,7 @@ function bind(c, prof) {
   if ($("pRedo")) $("pRedo").onclick = () => { store2.del("planUndo:" + ymd(PS.Wc.mon)); render(); };
   box.querySelectorAll("[data-bilan]").forEach(b => b.onclick = () => window.Bilan ? Bilan.open(+b.dataset.bilan) : window.open(`https://connect.garmin.com/modern/activity/${b.dataset.bilan}`, "_blank", "noopener"));
   box.querySelectorAll("[data-mlbl]").forEach(s => s.onchange = () => { const m = store2.get("muscuLbl") || {}; m[s.dataset.mlbl] = s.value; store2.set("muscuLbl", m); render(); });
+  box.querySelectorAll("[data-thrstep]").forEach(b => b.onclick = () => { store2.set("thrStep", +b.dataset.thrstep); render(); });
   box.querySelectorAll("[data-setftp]").forEach(b => b.onclick = () => { store2.set("planFtp", +b.dataset.setftp); render(); });
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const it = PS.W.items[+b.dataset.dl]; download(fileName(it.bike, it.date), zwo(it.bike, it.date, prof)); });
   if ($("pZip")) $("pZip").onclick = () => { const L = PS.W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (PS.W.td < 0 || it.day >= PS.W.td)); downloadAll(L, prof).catch(() => toast("Téléchargement groupé impossible : télécharge les séances une par une.")); };
