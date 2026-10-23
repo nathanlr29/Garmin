@@ -781,7 +781,7 @@ function stepsTable(b, prof) {
     : `<tr><td>${dot(r.on)}${cleanDur(r.on.d)}</td><td>${base(r.on.label)}</td><td class="tg">${tgt(r.on)}</td></tr>`).join("")}</tbody></table>`;
 }
 // ------------------------------------------------------------------ Affichage de l'onglet
-const PS = { mon: null, open: {}, avail: false, goalEdit: false, W: null, Wc: null };
+const PS = { mon: null, open: {}, avail: false, goalEdit: false, W: null, Wc: null, past: false, pgAll: false };
 function weekTarget() { const t = new Date(), mon = mondayOf(t); return (t.getDay() === 0 || t.getDay() === 6) ? addDays(mon, 7) : mon; }
 function toast(t) { const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 4000); }
 const placeL = p => p === "mw" ? "MyWhoosh" : "dehors";
@@ -796,7 +796,7 @@ function renderHead(prof, form, ready, ph, c) {
   const r = ready.today ?? ready.last, rc = r == null ? "var(--muted)" : r >= 75 ? "var(--good)" : r >= 55 ? "var(--info)" : r >= 40 ? "var(--warn)" : "var(--bad)";
   const tsbTxt = form.tsb > 5 ? "frais" : form.tsb > -10 ? "équilibré" : form.tsb > -25 ? "chargé" : "très chargé";
   const until = end.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-  return `
+  const goalH = `
   <section class="card hud span12 goalcard">
     <div class="gc">
       <div class="g"><div class="gl">FTP</div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts"><span>W</span><span class="arrow">→ ${G.ftp} W</span></div>
@@ -808,8 +808,8 @@ function renderHead(prof, form, ready, ph, c) {
     </div>
     <div class="gedit">${PS.goalEdit ? `<form id="pGoalF"><label>FTP visée <input type="number" id="gFtp" min="100" max="600" value="${G.ftp}"> W</label><label>VO2max visée <input type="number" id="gVo2" min="30" max="90" step="0.5" value="${G.vo2}"></label><label>Pour le <input type="date" id="gDate" value="${G.date}" min="${ymd(addDays(new Date(), 14))}"></label><button class="btn2 primary">Enregistrer</button><button type="button" class="btn2 ghost" id="gCancel">Annuler</button></form>`
       : `<span>Objectif au ${until}</span><button class="lnk" id="gEdit">Modifier</button>`}</div>
-  </section>
-  <section class="card span12">
+  </section>`;
+  const formH = `<section class="card span12 formc">
     <div class="formrow">
       <div class="fi"><div class="l">Récupération</div><div class="v" style="color:${rc}">${r ?? "–"}<small>/100</small></div><div class="s">${ready.today == null && r != null ? "dernier score connu" : ready.avg3 != null ? `moy. 3 j : ${Math.round(ready.avg3)}` : "onglet Récup"}</div></div>
       <div class="fi"><div class="l">Forme (charge en TSS)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
@@ -818,6 +818,7 @@ function renderHead(prof, form, ready, ph, c) {
       <div class="fi wide"><div class="l">Cycle d'entraînement</div><div class="v sm">${ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4`}${ph.deload && !ph.final ? " (allégée)" : ""}</div><div class="s">${esc(ph.focus)}</div></div>
     </div>
   </section>`;
+  return { goal: goalH, form: formH };
 }
 
 function bikeStatus(b) {
@@ -870,7 +871,7 @@ function renderDay(W, ready) {
     : rn && rn.slot === "alt" ? runBtn : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
   const undoN = (store2.get("planUndo:" + ymd(W.mon)) || []).length;
   const last = rides().filter(isTraining).slice(-1)[0];
-  return `<section class="card span6 dayc"><h2>Aujourd'hui <small>${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}${r != null ? ` · récup ${r}/100` : ""}</small></h2>
+  return `<section class="card span6 dayc" id="pDay"><h2>Aujourd'hui <small>${new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}${r != null ? ` · récup ${r}/100` : ""}</small></h2>
     <div class="drow"><span class="dk">Matin</span><div>${morning}</div></div>
     ${rn && rn.slot === "add" ? `<div class="drow"><span class="dk">Midi</span><div>${runBtn}</div></div>` : !rn ? `<div class="drow"><span class="dk">Course</span><div>${addRunBtn(it)}</div></div>` : ""}
     <div class="drow"><span class="dk">${b && isLong(b.t) ? "Sortie" : "Soir"}</span><div>${evening}</div></div>
@@ -913,6 +914,24 @@ function weekRow(W, it, prof) {
     <div class="wmus">${it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
     <div class="wbike">${bikeH}${runH}${extra}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}${!rn && editable(W, it) ? addRunBtn(it) : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(W, it) : ""}`;
 }
+// semaine en cours : les jours déjà passés tiennent en une ligne (« Lun → jeu : 4 séances faites »), dépliable ;
+// dépliés d'office si l'un d'eux a son détail ouvert
+function pastFold(W, prof) {
+  const past = W.isCur && W.td > 0 ? W.items.slice(0, W.td) : [], rows = it => weekRow(W, it, prof);
+  const open = PS.past || past.some(it => PS.open[ymd(it.date)] || PS.open[ymd(it.date) + ":r"]);
+  if (!past.length || open) return (past.length ? `<button class="wpast" data-past="0" aria-expanded="true"><span>Replier les jours passés</span></button>` : "") + W.items.map(rows).join("");
+  let ok = 0, ko = 0, pal = 0;
+  past.forEach(it => {
+    [it.bike, it.run].forEach(x => { if (x && x.st === "done") ok++; else if (x && x.st === "missed") ko++; });
+    if (it.muscu) { if (it.muscu.st === "done" || it.muscu.st === "swapped") ok++; else if (it.muscu.st === "missed") ko++; }
+    if (it.muscuExtra) ok++;
+    ok += it.extra.length;
+    const b = it.bike; if (b && b.st === "done" && STEPS[b.t] && !palLog().some(x => x.d === ymd(it.date) && x.t === b.t)) pal++;
+  });
+  const lbl = past.length === 1 ? DAYN[0] : `${DAYN[0].slice(0, 3)} → ${DAYN[W.td - 1].slice(0, 3).toLowerCase()}`;
+  return `<button class="wpast" data-past="1" aria-expanded="false"><b>${lbl}</b><span>${ok ? `${ok} séance${ok > 1 ? "s" : ""} faite${ok > 1 ? "s" : ""} ✓` : "rien de fait"}${ko ? ` · ${ko} non faite${ko > 1 ? "s" : ""}` : ""}${pal ? ` · <em>${pal} palier${pal > 1 ? "s" : ""} à valider</em>` : ""}</span><small>Afficher</small></button>`
+    + W.items.slice(W.td).map(rows).join("");
+}
 function renderWeek(W, prof) {
   const thisMon = mondayOf(new Date()), ph = W.ph;
   const plannedT = W.items.reduce((s, it) => s + (it.bike && it.bike.st !== "missed" ? it.bike.w.tss : 0) + (it.run && it.run.st !== "missed" ? it.run.w.tss : 0), 0);
@@ -920,9 +939,9 @@ function renderWeek(W, prof) {
   const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
-  return `<section class="card span12 wkc"><h2>La semaine <small>${cyc} · ≈ ${plannedT} TSS prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
+  return `<section class="card span12 wkc" id="pWeek"><h2>La semaine <small>${cyc} · ≈ ${plannedT} TSS prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
     <p class="pnote">${esc(ph.focus)}.${W.tired ? " Version allégée : fatigue détectée." : ""}${W.td < 0 ? " Aperçu : la semaine se fige lundi, puis s'ajuste chaque jour." : ""} Muscu le matin, vélo le soir ; jamais les jambes le jour ou la veille d'une séance clé.</p>
-    <div class="wk">${W.items.map(it => weekRow(W, it, prof)).join("")}</div>${runNote}
+    <div class="wk">${pastFold(W, prof)}</div>${runNote}
     ${mw.length ? `<div class="factions">${mw.length > 1 ? `<button class="btn2 primary" id="pZip">Télécharger les ${mw.length} séances MyWhoosh (.zip)</button>` : ""}</div>
     <details class="howto"><summary>Importer dans MyWhoosh</summary><ol>
       <li>Va sur <a href="https://workout.mywhoosh.com" target="_blank" rel="noopener">workout.mywhoosh.com</a> et connecte-toi.</li>
@@ -940,7 +959,7 @@ function runAutoText(c) {
 function renderAvail(c) {
   const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
   const nb = c.days.filter(d => d.bike !== "none").length, nm = c.days.filter(d => d.muscu).length, nr = c.days.filter(d => d.run === "alt" || d.run === "add").length;
-  return `<section class="card span12 avail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles${nr ? ` · ${nr} jour${nr > 1 ? "s" : ""} de course` : ""}</small></summary>
+  return `<section class="card span12 avail" id="pAvail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles${nr ? ` · ${nr} jour${nr > 1 ? "s" : ""} de course` : ""}</small></summary>
     <div class="avg">${c.days.map((d, i) => `<div class="avrow" data-i="${i}"><b>${DAYN[i]}</b>
       <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("grp", d.bike, "Sortie de groupe")}${opt("any", d.bike, "Au choix")}</select>
       <select data-k="dur" aria-label="Durée max ${DAYN[i]}" ${d.bike === "none" ? "disabled" : ""}>${DURS.map(v => opt(v, d.dur, "jusqu'à " + fmtMin(v))).join("")}</select>
@@ -953,6 +972,7 @@ function renderAvail(c) {
     <p class="note">${runAutoText(c)} S'applique à partir du lundi suivant ; la semaine en cours n'est jamais régénérée.</p>
     <p class="note">Le plan choisit les jours des séances clés et place Push, Pull, Legs et Upper sur 4 de tes matins de muscu : jamais les jambes le matin d'une séance clé, ni la veille d'une séance clé ou de la sortie longue. Avec moins de 4 matins, Upper saute en premier. Une sortie « dehors » de 2 h 30 ou plus devient la sortie longue.</p>
     <div class="factions"><button class="btn2" id="pShare">Copier le lien pour mon autre appareil</button><button class="btn2 ghost" id="pHabits">Vélo selon mes habitudes</button></div><div id="pShareOut"></div>
+    ${renderDesign()}
   </details></section>`;
 }
 
@@ -997,8 +1017,8 @@ function withWorkouts(W) {
 const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
 const STATE_URL = "https://claude.ai/code/artifact/70fc8fa6-f042-43da-a65f-b06d176b215f";  // état des lieux vélo du 20/10/2026 (doc Claude privé)
 function renderDesign() {
-  return `<section class="card span12 design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie de groupe (réglage « Sortie de groupe ») compte comme la séance dure de la semaine, et après un gros week-end la séance clé attend le mercredi.</p>
-    <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Les séances fondatrices</a> · <a href="${STATE_URL}" target="_blank" rel="noopener">l'état des lieux du 20 octobre</a> · pages privées, visibles seulement avec ton compte Claude.</p></section>`;
+  return `<div class="design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie de groupe (réglage « Sortie de groupe ») compte comme la séance dure de la semaine, et après un gros week-end la séance clé attend le mercredi.</p>
+    <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Les séances fondatrices</a> · <a href="${STATE_URL}" target="_blank" rel="noopener">l'état des lieux du 20 octobre</a> · pages privées, visibles seulement avec ton compte Claude.</p></div>`;
 }
 // carte « Ton programme FTP » : où tu en es de chaque échelle de paliers (palLog)
 function renderProgram() {
@@ -1006,9 +1026,13 @@ function renderProgram() {
   const left = Object.keys(STEPS).reduce((a, t) => a + STEPS[t].length - cur[t], 0), done = palLog().filter(x => x.ok).length;
   const row = t => `<li><b>${STEP_NAME[t]}</b><span class="pgsteps">${STEPS[t].map((_, k) => { const e = palLog().filter(x => x.t === t && x.k === k && x.ok).pop();
     return `<span class="${e ? "ok" : k === cur[t] ? "cur" : ""}" title="${stepL(t, k)}">${e ? `✓ #${k + 1}` : `#${k + 1}`}<small>${e ? dShort(parseYmd(e.d)) : (k === cur[t] ? "prochaine · " : "") + stepL(t, k).slice(stepL(t, k).indexOf("·") + 2)}</small></span>`; }).join("")}</span></li>`;
-  return `<section class="card span12 pgram"><h2>Ton programme FTP <small>environ 12 semaines</small></h2>
+  const bar = t => { const N = STEPS[t].length, ok = k => palLog().some(x => x.t === t && x.k === k && x.ok);
+    return `<li><b>${STEP_NAME[t]}</b><span class="pgseg" role="img" aria-label="palier ${cur[t] + 1} sur ${N}">${STEPS[t].map((_, k) => `<i class="${ok(k) ? "ok" : k === cur[t] ? "cur" : ""}"></i>`).join("")}</span>
+      <span class="pgnext">${cur[t] + 1}/${N} · ${stepL(t, cur[t]).slice(stepL(t, cur[t]).indexOf("·") + 2)}</span></li>`; };
+  return `<section class="card span12 pgram" id="pPgram"><h2>Ton programme FTP <small>environ 12 semaines</small></h2>
     <p class="tdmsg">${done ? `${done} palier${done > 1 ? "s" : ""} réussi${done > 1 ? "s" : ""}, encore ${left} à franchir.` : "Tu démarres au palier #1 de chaque séance, le plus facile."} Chaque séance réussie fait passer la suivante au palier d'après : on allonge d'abord les blocs, puis on monte l'intensité, comme les plans FTP de MyWhoosh et Zwift.</p>
-    <ul class="pgl">${Object.keys(STEPS).map(row).join("")}</ul></section>`;
+    <ul class="pgbars">${Object.keys(STEPS).map(bar).join("")}</ul>
+    <details class="pgall"${PS.pgAll ? " open" : ""}><summary>Voir tous les paliers</summary><ul class="pgl">${Object.keys(STEPS).map(row).join("")}</ul></details></section>`;
 }
 function render() {
   const box = $("plan"); if (!box) return;
@@ -1018,12 +1042,74 @@ function render() {
   const Wc = withWorkouts(effective(cur, c, ctxFor(cur, form, ready)));
   const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, c, ctxFor(PS.mon, form, ready)));
   PS.W = W; PS.Wc = Wc;
-  box.innerHTML = `<div class="grid">${renderHead(prof, form, ready, W.ph, c)}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${renderAvail(c)}${renderDesign()}
-    <section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><div id="pProgBody"><p class="note">${window.Bilan ? "Analyse en cours…" : ""}</p></div></section>${window.Zones ? Zones.html({ profile: prof, acts: S.all, now: Date.now() }) : ""}${window.Perf ? Perf.html({ profile: prof, ftp: prof.ftp, goal: c.goal, acts: S.all }) : ""}</div>`;
+  if (!$("pTop")) box.innerHTML = `<nav class="psum" aria-label="Sommaire du plan">${SUM.map(([id, l]) => `<button class="chip" data-sum="${id}">${l}</button>`).join("")}</nav>
+    <div class="grid" id="pTop"></div><div class="grid" id="pAna"></div>`;
+  const H = renderHead(prof, form, ready, W.ph, c);
+  $("pTop").innerHTML = `${H.goal}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${H.form}${renderAvail(c)}`;
+  renderAna(c, prof);
   bind(c, prof);
+  spy();
+}
+// ------------------------------------------------------------------ Navigation dans l'onglet
+// Sommaire collant : un clic fait défiler jusqu'à la carte, la puce de la carte à l'écran est mise en avant
+const SUM = [["pDay", "Aujourd'hui"], ["pWeek", "Semaine"], ["pPgram", "Paliers"], ["pAvail", "Dispos"], ["pAna", "Analyses"]];
+let spyObs = null;
+function spy() {
+  const nav = document.querySelector("#plan .psum"); if (!nav) return;
+  nav.querySelectorAll("[data-sum]").forEach(b => b.onclick = () => {
+    const el = $(b.dataset.sum); if (!el) return;
+    if (b.dataset.sum === "pAvail") { const d = $("pAvailD"); if (d && !d.open) { d.open = true; PS.avail = true; } }
+    el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  });
+  if (spyObs) spyObs.disconnect();
+  if (!("IntersectionObserver" in window)) return;
+  const vis = new Map();
+  spyObs = new IntersectionObserver(es => {
+    es.forEach(e => vis.set(e.target.id, e.isIntersecting));
+    const cur = SUM.map(x => x[0]).filter(id => vis.get(id)).pop() || null;
+    nav.querySelectorAll("[data-sum]").forEach(b => b.setAttribute("aria-pressed", b.dataset.sum === cur));
+  }, { rootMargin: "-30% 0px -60% 0px" });
+  SUM.forEach(([id]) => { const el = $(id); if (el) spyObs.observe(el); });
+}
+// Analyses (Progression, Zones cardio, Tes performances) : repliées par défaut, la phrase-réponse reste visible.
+// Elles ne sont reconstruites que si leurs données changent (FTP, objectif, poids, âge, activités), pas à chaque clic dans la semaine,
+// et la Progression (qui lit les flux) n'est calculée qu'à l'ouverture. Cartes ouvertes : clé planFold (préférence d'appareil, non synchronisée).
+const FOLD = { progc: "prog", hrz: "hrz", perf: "perf" };
+const foldGet = () => { try { return JSON.parse(localStorage.getItem("planFold")) || {}; } catch (e) { return {}; } };
+const foldSet = o => { try { localStorage.setItem("planFold", JSON.stringify(o)); } catch (e) {} };
+let anaCtx = null, anaObs = null;
+function renderAna(c, prof) {
+  const box = $("pAna"), acts = S.all || [], last = acts[acts.length - 1];
+  const sig = JSON.stringify([prof.ftp, c.goal, store2.get("bwWeight"), store2.get("bwAge"), acts.length, last && last.id]);
+  anaCtx = { c, prof };
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.innerHTML = `<section class="card span12 progc" id="pProg"><h2>Progression <small>tes séances analysées</small></h2><p class="note foldsum">FTP estimée, endurance, profil de puissance : ouvre pour analyser tes séances.</p><div id="pProgBody"></div></section>${window.Zones ? Zones.html({ profile: prof, acts, now: Date.now() }) : ""}${window.Perf ? Perf.html({ profile: prof, ftp: prof.ftp, goal: c.goal, acts }) : ""}`;
   if (window.Zones) Zones.bind(box);
-  if (window.Perf) Perf.bind(box.querySelector(".perf"));
-  if (window.Bilan) Bilan.progress($("pProgBody"), { ftp: prof.ftp, goal: c.goal, profile: prof }).catch(() => {});
+  if (!anaObs || anaObs.box !== box) { if (anaObs) anaObs.disconnect(); anaObs = new MutationObserver(() => foldify(box)); anaObs.box = box; anaObs.observe(box, { childList: true }); }
+  foldify(box);
+}
+function foldKey(sec) { return Object.keys(FOLD).find(k => sec.classList.contains(k)); }
+function foldify(box) {
+  const st = foldGet();
+  box.querySelectorAll(":scope > section.card").forEach(sec => {
+    const k = foldKey(sec), h = sec.querySelector("h2"); if (!k || !h || h.querySelector(".foldt")) return;
+    const ans = sec.querySelector(".hrz-ans, .tdmsg");
+    if (ans && !sec.querySelector(".foldsum")) { const p = document.createElement("p"); p.className = "tdmsg foldsum"; p.textContent = ans.textContent; h.after(p); }
+    const t = document.createElement("button"); t.className = "foldt"; t.type = "button";
+    while (h.firstChild) t.appendChild(h.firstChild);
+    h.appendChild(t); sec.classList.add("fold");
+    t.onclick = () => { const o = foldGet(); o[FOLD[k]] = !sec.classList.contains("open"); if (!o[FOLD[k]]) delete o[FOLD[k]]; foldSet(o); setFold(sec, k, !!o[FOLD[k]]); };
+    setFold(sec, k, !!st[FOLD[k]]);
+  });
+}
+function setFold(sec, k, open) {
+  sec.classList.toggle("open", open); sec.querySelector(".foldt").setAttribute("aria-expanded", open);
+  if (!open || sec.dataset.ready) return;
+  sec.dataset.ready = "1";
+  const { c, prof } = anaCtx;
+  if (k === "perf" && window.Perf) Perf.bind(sec);
+  if (k === "progc" && window.Bilan) { $("pProgBody").innerHTML = `<p class="note">Analyse en cours…</p>`; Bilan.progress($("pProgBody"), { ftp: prof.ftp, goal: c.goal, profile: prof }).catch(() => {}); }
 }
 function bind(c, prof) {
   const box = $("plan");
@@ -1063,6 +1149,8 @@ function bind(c, prof) {
   box.querySelectorAll("[data-ovrdel]").forEach(b => b.onclick = () => { const date = b.closest(".dmod").dataset.date; ovRun(date, o => { o.run = 0; }); delete PS.open[date + ":r"]; render(); });
   box.querySelectorAll("[data-ovrreset]").forEach(b => b.onclick = () => { ovRun(b.closest(".dmod").dataset.date, o => { delete o.run; }); render(); });
   const ad = $("pAvailD"); if (ad) ad.ontoggle = () => { PS.avail = ad.open; };
+  box.querySelectorAll("[data-past]").forEach(b => b.onclick = () => { PS.past = b.dataset.past === "1"; if (!PS.past) Object.keys(PS.open).forEach(k => { if (k < ymd(new Date())) delete PS.open[k]; }); render(); });
+  const pa = box.querySelector(".pgall"); if (pa) pa.ontoggle = () => { PS.pgAll = pa.open; };
   box.querySelectorAll(".avrow").forEach(r => r.onchange = e => { const i = +r.dataset.i, k = e.target.dataset.k; if (!k) return;
     c.days[i][k] = k === "muscu" ? e.target.checked : k === "dur" || k === "runDur" ? +e.target.value : e.target.value;
     if (k === "bike" && e.target.value === "any" && c.days[i].dur < 60) c.days[i].dur = 60;
@@ -1142,6 +1230,6 @@ window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) rend
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
-let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) render(); }, 200); });
+let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) { const a = $("pAna"); if (a) delete a.dataset.sig; render(); } }, 200); });
 if (Nav.curTab() === "plan") open();
 })();
