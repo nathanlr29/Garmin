@@ -84,5 +84,17 @@ function loadPart(dt, acts = all()) {
   return { ratio, km, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6), 0, 100)) };
 }
 
-window.Charge = { RUN_TYPES, RUN_CLIMB, RUN_PACE_RANGE, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, ymd };
+// Fatigue des 4 jours précédents `dt` (J-1 à J-4, poids 1 · ¾ · ½ · ¼) rapportée à ta charge habituelle des 28 jours d'avant (J-5 à J-32).
+// Remplace loadPart dans le score de récup : un gros week-end compte encore le mardi (loadPart l'avait presque oublié).
+const FAT_W = [1, .75, .5, .25];
+function fatiguePart(dt, acts = all()) {
+  const p = params(), loads = dayLoads(acts, p), dl = k => loads[ymd(addDays(dt, -k))] || 0;
+  const days = FAT_W.map((w, i) => dl(i + 1)), acute = days.reduce((s, l, i) => s + FAT_W[i] * l, 0);
+  let chronic = 0; for (let k = 5; k <= 32; k++) chronic += dl(k); chronic = chronic / 28 * FAT_W.reduce((a, b) => a + b, 0);
+  if (!(chronic > 0)) return null;
+  const ratio = acute / chronic, total = days.reduce((a, b) => a + b, 0);
+  return { ratio, total, days, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6), 0, 100)) };
+}
+
+window.Charge = { RUN_TYPES, RUN_CLIMB, RUN_PACE_RANGE, FAT_W, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, fatiguePart, ymd };
 })();

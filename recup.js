@@ -1,10 +1,11 @@
 "use strict";
-// Onglet « Récup » : sommeil, VFC, fréquence cardiaque, Body Battery, lune et facteurs externes.
+// Onglet « Récup » : score du matin (sommeil, VFC, cœur au repos, charge des 4 jours, récupération Garmin), nuit, tendances et facteurs du sommeil.
 (() => {
 const RC = { env: null, data: null, days: [], nights: [], period: 30, night: -1, factSeed: 0, sig: null };
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
 const hm = mins => `${Math.floor(mins / 60)} h ${pad(Math.round(mins % 60))}`;
+const hmin = mins => Math.round(mins) < 60 ? `${Math.round(mins)} min` : hm(mins);   // écarts : « 26 min » plutôt que « 0 h 26 »
 const durS = s => hm(s / 60);
 const clock = dt => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 const STAGES = { deep: ["Profond", "var(--deep)"], light: ["Léger", "var(--light)"], rem: ["Paradoxal", "var(--rem)"], awake: ["Éveil", "var(--awake)"] };
@@ -76,13 +77,15 @@ function renderRecup() {
   </div>
   <div class="grid">
     <section class="card span12"><div class="mnav"><span class="navn"><button id="rMPrev" aria-label="Jour précédent">‹</button><input type="date" id="rDate" aria-label="Choisir un jour"><button id="rMNext" aria-label="Jour suivant">›</button></span><button class="linkbtn" id="rToday">Dernier jour</button></div><div class="morning" id="rMorning"></div></section>
-    <section class="card span8"><h2>La nuit <span class="navn"><button id="rPrev" aria-label="Nuit précédente">‹</button><span id="rNightLbl"></span><button id="rNext" aria-label="Nuit suivante">›</button></span></h2><div id="rHyp"></div><div id="rStages"></div></section>
-    <section class="card span4"><h2>Contexte de la nuit</h2><div class="ctx" id="rCtx"></div></section>
-    <section class="card span6"><h2>Cœur pendant la nuit <small id="rHrInfo"></small></h2><div id="rHr"></div><div class="note" id="rHrNote"></div></section>
-    <section class="card span6"><h2>VFC pendant la nuit <small id="rHrvInfo"></small></h2><div id="rHrv"></div><div class="note" id="rHrvNote"></div></section>
-    <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><div id="rSleep"></div></section>
-    <section class="card span6"><h2>Heures de coucher et de lever <small id="rRegInfo"></small></h2><div id="rReg"></div></section>
+    <section class="card span8"><h2>La nuit <span class="navn"><button id="rPrev" aria-label="Nuit précédente">‹</button><span id="rNightLbl"></span><button id="rNext" aria-label="Nuit suivante">›</button></span></h2><p class="rans" id="rNightAns"></p><div id="rHyp"></div><div id="rStages"></div></section>
+    <section class="card span4"><h2>Contexte de la nuit</h2><p class="rans" id="rCtxAns"></p><div class="ctx" id="rCtx"></div></section>
+    <section class="card span6"><h2>Cœur pendant la nuit <small id="rHrInfo"></small></h2><p class="rans" id="rHrAns"></p><div id="rHr"></div><div class="note" id="rHrNote"></div></section>
+    <section class="card span6"><h2>VFC pendant la nuit <small id="rHrvInfo"></small></h2><p class="rans" id="rHrvAns"></p><div id="rHrv"></div><div class="note" id="rHrvNote"></div></section>
+    <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><p class="rans" id="rSleepAns"></p><div id="rSleep"></div></section>
+    <section class="card span6"><h2>Heures de coucher et de lever <small id="rRegInfo"></small></h2><p class="rans" id="rRegAns"></p><div id="rReg"></div></section>
     <section class="card span12"><h2>Fréquence cardiaque au repos <small id="rRhrInfo"></small></h2><p class="rans" id="rRhrAns"></p><div id="rRhr"></div></section>
+    <section class="card span12"><h2>Tendance de la VFC <small id="rHrvTInfo"></small></h2><p class="rans" id="rHrvTAns"></p><div id="rHrvT"></div>
+      <p class="note">Trait orange : moyenne de tes 7 dernières nuits ; points gris : chaque nuit ; bande verte : ta zone normale, calculée par Garmin sur tes dernières semaines. Une mauvaise nuit compte peu : c'est quand la moyenne sort de la zone qu'il faut lever le pied.</p></section>
     <section class="card span12"><h2>Ce qui joue sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><p class="rans" id="rCmpAns"></p><div class="cmp" id="rCmp"></div>
       <p class="note">Tes nuits comparées entre elles (score de sommeil, durée, VFC). Seuls les facteurs dont l'écart est net, pas dû au hasard, sont gardés (5 au plus, 6 nuits concernées au moins) : ce sont des tendances observées, pas des causes prouvées.</p></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
@@ -96,7 +99,7 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderSleep(P); renderReg(P); renderRhr(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderRhr(P); renderHrvTrend(P); renderCmp(); renderFacts();
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -124,7 +127,7 @@ function afterNote(n) {
 }
 function renderMorning() {
   const n = RC.pick[RC.sel] || {}, latest = isLatest(n);
-  const R = recoScore(n), s = R.score;
+  const R = recoScore(n), s = R.score, rem = recovLeft(n);
   const r = 70, C = 2 * Math.PI * r;
   const ring = s != null ? `<div class="ring"><svg viewBox="0 0 168 168"><circle cx="84" cy="84" r="${r}" fill="none" stroke="var(--h0)" stroke-width="14"/>
       <circle cx="84" cy="84" r="${r}" fill="none" stroke="${scoreColor(s)}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 84 84)" id="rRingArc"/></svg>
@@ -138,7 +141,7 @@ function renderMorning() {
     k("Coucher → lever", n.bedDt ? `${clock(n.bedDt)}` : "–", n.wakeDt ? ` → ${clock(n.wakeDt)}` : "", ""),
     k("VFC", n.hrv ?? "–", n.hrv ? "ms" : "", n.hrvSt ? (HRV_ST[n.hrvSt] || n.hrvSt.toLowerCase()) + (n.hrvLo ? ` · zone ${n.hrvLo}–${n.hrvUp}` : "") : ""),
     k("FC au repos", n.rhr ?? n.srhr ?? "–", "bpm", n.hrMin ? `min. ${n.hrMin} bpm sur 24 h` : ""),
-    k("Body Battery", n.bbch != null ? `+${n.bbch}` : "–", "", n.bbHi ? `max. ${n.bbHi} ${today ? "aujourd'hui" : "ce jour-là"}` : "cette nuit"),
+    k("Récup restante", rem != null ? (rem > 0 ? `~${nf(rem)}` : "0") : "–", rem != null ? " h" : "", rem != null ? `à ${REC.at} h, selon Garmin` : ""),
     k("Respiration", n.resp ?? "–", n.resp ? "/min" : "", n.sstress != null ? `stress nocturne ${n.sstress}` : ""),
   ].join("");
   const factors = R.parts.map(p => `<div class="f"><span>${p.label}</span><div class="tr"><div style="width:${p.score}%;background:${scoreColor(p.score)}"></div></div><span class="num">${p.score}</span><small>${p.detail}</small></div>`).join("");
@@ -162,6 +165,14 @@ function baseline(d, key, floor) {
   const m = prev.reduce((a, b) => a + b, 0) / prev.length, sd = Math.sqrt(prev.reduce((a, b) => a + (b - m) ** 2, 0) / prev.length);
   return { m, sd: Math.max(sd, floor) };
 }
+// Temps de récupération Garmin (minutes, mesuré au réveil) qu'il restera à REC.at heures, l'heure des séances du soir.
+// 0 h → 100, REC.full h ou plus → 0 ; plafonds du score : ≥ 6 h restantes → 64 au plus, ≥ 18 h → 44 au plus (sous le seuil de 45 du Plan).
+const REC = { at: 18, full: 24, caps: [[18, 44], [6, 64]] };
+function recovLeft(d) {
+  if (d.recov == null || !d.dt) return null;
+  const wake = d.wakeDt && Charge.ymd(d.wakeDt) === d.d ? d.wakeDt.getHours() + d.wakeDt.getMinutes() / 60 : 7;
+  return Math.max(0, d.recov / 60 - Math.max(0, REC.at - wake));
+}
 function recoScore(d) {
   const parts = [];
   const add = (key, label, w, score, detail, good, bad) => { if (score != null && !isNaN(score)) parts.push({ key, label, w, score: Math.round(clamp(score)), detail, good, bad }); };
@@ -177,25 +188,31 @@ function recoScore(d) {
   const rh = v => v.rhr ?? v.srhr, br = baseline(d, rh, 1.5);
   if (rh(d) && br) { const z = (rh(d) - br.m) / br.sd, dv = rh(d) - br.m;
     add("rhr", "Cœur au repos", 15, 55 - 22 * z, `${rh(d)} bpm, ${dv >= 0 ? "+" : "−"}${nf(Math.abs(dv), 1)} vs ta moyenne 30 j (${nf(br.m, 1)})`, "cœur au repos plus bas que d'habitude", "cœur au repos plus haut que d'habitude"); }
-  if (S.all && S.all.length) {
-    const lp = Charge.loadPart(d.dt);
-    if (lp) add("load", "Charge récente", 20, lp.score, `${lp.km ? `${nf(lp.km)} km la veille · ` : "repos la veille · "}${nf(lp.ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces deux derniers jours");
+  if (S.all && S.all.length && d.dt) {
+    const fp = Charge.fatiguePart(d.dt);
+    if (fp) add("load", "Charge des 4 jours", 20, fp.score, `${fp.total ? `${nf(fp.total)} de charge sur 4 jours (${fp.days[0] ? `${nf(fp.days[0])} la veille` : "repos la veille"})` : "repos ces 4 jours"} · ${nf(fp.ratio, 1)}× ta charge habituelle`, "charge des derniers jours légère", "grosse charge ces derniers jours");
   }
+  const rem = recovLeft(d);
+  if (rem != null) add("recov", "Récup Garmin", 20, 100 - rem / REC.full * 100, rem > 0 ? `encore ~${nf(rem)} h de récupération à ${REC.at} h selon Garmin` : `récupéré avant ${REC.at} h selon Garmin`, "récupération terminée", "récupération pas finie");
   if (parts.length < 2) return { score: null, parts };
-  const W = parts.reduce((a, p) => a + p.w, 0), score = Math.round(parts.reduce((a, p) => a + p.score * p.w, 0) / W);
+  const W = parts.reduce((a, p) => a + p.w, 0), raw = Math.round(parts.reduce((a, p) => a + p.score * p.w, 0) / W);
+  // Plafond : tant que Garmin compte de la récupération à l'heure de ta séance, le sommeil ne suffit pas à afficher « en forme »
+  const cap = rem == null ? null : REC.caps.find(([h]) => rem >= h), score = cap ? Math.min(raw, cap[1]) : raw;
   const label = score >= 80 ? "Bien récupéré" : score >= 65 ? "Plutôt en forme" : score >= 50 ? "Récupération moyenne" : score >= 35 ? "Fatigue probable" : "Grosse fatigue";
   const pos = parts.filter(p => p.score >= 70).sort((a, b) => b.score * b.w - a.score * a.w).slice(0, 2).map(p => p.good);
   const neg = parts.filter(p => p.score < 45).sort((a, b) => a.score * b.w - b.score * a.w).slice(0, 2).map(p => p.bad);
-  const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
-  const text = [pos.length ? `${cap(pos.join(" et "))}.` : "", neg.length ? `À surveiller : ${neg.join(", ")}.` : ""].filter(Boolean).join(" ");
-  return { score, label, parts, text };
+  const up1 = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const capTxt = cap && raw > score ? `Garmin compte encore ~${nf(rem)} h de récupération à ${REC.at} h : score ramené de ${raw} à ${score}, ${score < 45 ? "pas de séance dure aujourd'hui" : "garde la séance dure pour un jour plus frais si tu peux"}.` : "";
+  const text = [pos.length ? `${up1(pos.join(" et "))}.` : "", neg.length ? `À surveiller : ${neg.join(", ")}.` : "", capTxt].filter(Boolean).join(" ");
+  return { score, raw, label, parts, text, rem };
 }
 
 // ------------------------------------------------------------------ La nuit (hypnogramme + contexte)
 function renderNight() {
   const n = RC.pick[RC.sel];
-  if (!n) { $("rHyp").innerHTML = `<div class="empty">Aucune nuit enregistrée</div>`; return; }
+  if (!n) { $("rHyp").innerHTML = `<div class="empty">Aucune nuit enregistrée</div>`; $("rNightAns").textContent = ""; return; }
   $("rNightLbl").textContent = n.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+  $("rNightAns").innerHTML = nightAnswer(n);
   if (!n.sl) { $("rHyp").innerHTML = `<div class="note">Pas de sommeil enregistré cette nuit-là.</div>`; $("rStages").innerHTML = ""; renderCtx(n); return; }
   const box = $("rHyp");
   if (n.hyp && n.hyp.length) {
@@ -224,6 +241,15 @@ function renderNight() {
     <div class="slegend">${["deep", "light", "rem", "awake"].map(k => `<div><i style="background:${STAGES[k][1]}"></i>${STAGES[k][0]}<b>${hm((n[k] || 0) / 60)}</b>${Math.round((n[k] || 0) / tot * 100)} %</div>`).join("")}</div>`;
   renderCtx(n);
 }
+// Phrase-réponse de la nuit : durée et score, comparés à tes 30 nuits d'avant ; part de profond + paradoxal, éveils
+function nightAnswer(n) {
+  if (!n.sl) return "";
+  const i = RC.days.indexOf(n), prev = RC.days.slice(Math.max(0, i - 30), i).filter(x => x.sl), avg = prev.length >= 7 ? prev.reduce((a, x) => a + x.sl, 0) / prev.length : null;
+  const dm = avg != null ? Math.round((n.sl - avg) / 60) : null, tot = (n.deep || 0) + (n.light || 0) + (n.rem || 0), aw = Math.round((n.awake || 0) / 60);
+  const cmp = dm == null ? "" : Math.abs(dm) < 10 ? `, comme d'habitude (${hm(avg / 60)} en moyenne sur tes 30 nuits d'avant)` : `, ${hmin(Math.abs(dm))} de ${dm > 0 ? "plus" : "moins"} que d'habitude (${hm(avg / 60)})`;
+  const ph = tot ? ` Profond + paradoxal : ${Math.round(((n.deep || 0) + (n.rem || 0)) / tot * 100)} % du sommeil (bon au-dessus de 40 %), ${aw >= 10 ? `${aw} min éveillé` : "presque aucun réveil"}.` : "";
+  return `<b>${hm(n.sl / 60)}</b> de sommeil${n.score != null ? `, score Garmin <b>${n.score}</b>` : ""}${cmp}.${ph}`;
+}
 function dayActivities(day) { // sorties du jour qui précède la nuit
   const prev = new Date(day.dt); prev.setDate(prev.getDate() - 1);
   const key = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`;
@@ -240,6 +266,9 @@ function renderCtx(n) {
   const it = (l, v, u) => `<div class="it"><div class="l">${l}</div><div class="v">${v}${u ? `<small> ${u}</small>` : ""}</div></div>`;
   const nfo = nightFacts(n), dst = dstNight(n.dt);
   const sport = nfo.acts.length ? `${nf(nfo.km, 0)} km${nfo.gapH != null ? ` <small>fini ${nfo.gapH < 0 ? "après" : `${nf(nfo.gapH, 1)} h avant`} le coucher</small>` : ""}` : "repos";
+  const why = [nfo.acts.length ? `${nfo.km >= 1 ? `${nf(nfo.km)} km` : "une séance"} la veille${nfo.late ? ", fini moins de 3 h avant le coucher (ça peut retarder l'endormissement)" : ""}` : "repos la veille",
+    w.tMin != null && w.tMin >= 18 ? `nuit chaude (${nf(w.tMin)} °C au plus frais)` : "", dst ? "changement d'heure" : ""].filter(Boolean);
+  $("rCtxAns").textContent = `Ce qui a pu jouer : ${why.join(", ")}.`;
   $("rCtx").innerHTML = `<div class="moonrow">${moonSvg(m, 22)}<span>Lune : <b>${m.name.toLowerCase()}</b> · ${Math.round(m.illum * 100)} %</span></div>
     ${it("Température la nuit", w.tMin != null ? `${nf1(w.tMin, 1)} → ${nf1(w.tAvg, 1)}` : "–", "°C min → moy.")}
     ${it("Humidité", nf1(w.hum), "%")}
@@ -298,22 +327,29 @@ function renderNightHr() {
   if (st) {
     $("rHrInfo").textContent = `moy. ${nf(st.avg)} · min. ${st.mn[1]} · max. ${st.mx[1]} bpm`;
     const prev = prevNights(d, "nhr"), ref = prev.length >= 3 ? prev.reduce((a, x) => a + avgPts(x.nhr), 0) / prev.length : null;
-    const minAt = clock(new Date(d.bedDt.getTime() + st.mn[0] * 6e4));
-    $("rHrNote").innerHTML = `Point le plus bas à ${minAt}${ref != null ? ` · moyenne de la nuit <b>${Math.abs(st.avg - ref) < .5 ? "identique à" : `${nf(Math.abs(st.avg - ref), 1)} bpm ${st.avg < ref ? "sous" : "au-dessus de"}`}</b> tes ${prev.length} nuits précédentes` : ""}. Les bandes colorées suivent les phases de sommeil.`;
+    const minAt = clock(new Date(d.bedDt.getTime() + st.mn[0] * 6e4)), dv = ref != null ? st.avg - ref : null;
+    $("rHrAns").innerHTML = `Cœur à <b>${nf(st.avg)} bpm</b> en moyenne cette nuit${dv == null ? "." : Math.abs(dv) < 1 ? `, comme tes ${prev.length} nuits précédentes : rien d'anormal.` : `, ${nf(Math.abs(dv), 1)} bpm ${dv < 0 ? "sous" : "au-dessus de"} tes ${prev.length} nuits précédentes (${nf(ref)}) : ${dv < 0 ? "le corps récupère bien." : dv >= 3 ? "signe de fatigue, de chaleur ou d'un effort tardif." : "léger écart, rien d'inquiétant."}`}`;
+    $("rHrNote").innerHTML = `Point le plus bas : ${st.mn[1]} bpm à ${minAt}. Les bandes colorées suivent les phases de sommeil.`;
   } else {
-    $("rHrInfo").textContent = "";
+    $("rHrInfo").textContent = ""; $("rHrAns").textContent = "";
     $("rHrNote").innerHTML = `${d.hrMin ? `Sur la journée : min. <b>${d.hrMin}</b> · moy. <b>${d.hrAvg ?? "–"}</b> · max. <b>${d.hrMax ?? "–"}</b> bpm. ` : ""}La courbe de nuit détaillée est disponible pour les 21 dernières nuits.`;
   }
+}
+function hrvNightAnswer(d) {
+  if (!d.hrv) return "";
+  const bh = baseline(d, x => x.hrv, 4), dv = bh ? d.hrv - bh.m : null;
+  const zone = d.hrvLo ? (d.hrv < d.hrvLo ? `, sous ta zone habituelle (${d.hrvLo}–${d.hrvUp})` : d.hrv > d.hrvUp ? `, au-dessus de ta zone habituelle (${d.hrvLo}–${d.hrvUp})` : `, dans ta zone habituelle (${d.hrvLo}–${d.hrvUp})`) : "";
+  return `VFC de <b>${d.hrv} ms</b> cette nuit${dv == null ? "" : Math.abs(dv) < 2 ? `, comme ta moyenne des 30 jours (${nf(bh.m)})` : `, ${nf(Math.abs(dv))} ms ${dv > 0 ? "au-dessus" : "en dessous"} de ta moyenne des 30 jours (${nf(bh.m)})`}${zone}.`;
 }
 function renderNightHrv() {
   const d = RC.pick[RC.sel]; if (!d) return;
   const st = nightChart("rHrv", d, "nhrv", { title: "VFC pendant la nuit", color: "var(--accent)", unit: "ms", band: [d.hrvLo, d.hrvUp] });
   if (st) {
     $("rHrvInfo").textContent = `moy. ${nf(st.avg)} · pic ${st.mx[1]} ms`;
-    const bh = baseline(d, x => x.hrv, 4);
-    $("rHrvNote").innerHTML = `${d.hrv ? `Garmin retient <b>${d.hrv} ms</b> pour la nuit` : ""}${bh ? ` (ta moyenne 30 j : ${nf(bh.m)} ms)` : ""}. ${d.hrvLo ? `Zone verte : ta plage habituelle ${d.hrvLo}–${d.hrvUp} ms.` : ""}`;
+    $("rHrvAns").innerHTML = hrvNightAnswer(d);
+    $("rHrvNote").innerHTML = `${d.hrvLo ? `Zone verte : ta plage habituelle ${d.hrvLo}–${d.hrvUp} ms. ` : ""}Pointillé : moyenne de la courbe.`;
   } else {
-    $("rHrvInfo").textContent = "";
+    $("rHrvInfo").textContent = ""; $("rHrvAns").innerHTML = d.hrv ? hrvNightAnswer(d) : "";
     $("rHrvNote").innerHTML = `${d.hrv ? `VFC moyenne de la nuit : <b>${d.hrv} ms</b>${d.hrvLo ? ` (zone habituelle ${d.hrvLo}–${d.hrvUp})` : ""}. ` : "Pas de VFC pour cette nuit. "}La courbe détaillée est disponible pour les 21 dernières nuits.`;
   }
 }
@@ -357,7 +393,9 @@ const avgOf = (arr, k) => { const v = arr.map(d => d[k]).filter(x => x != null);
 
 function renderSleep(P) {
   const box = $("rSleep"), N = P.filter(d => d.sl);
-  if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; return; }
+  if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; $("rSleepAns").textContent = ""; return; }
+  const avgS = N.reduce((a, d) => a + d.sl, 0) / N.length / 60, short = N.filter(d => d.sl < 7 * 3600).length, gap = Math.round(480 - avgS);
+  $("rSleepAns").innerHTML = `Tu dors <b>${hm(avgS)}</b> en moyenne sur la période, ${Math.abs(gap) < 10 ? "pile l'objectif de 8 h" : `${hmin(Math.abs(gap))} ${gap > 0 ? "sous" : "au-dessus de"} l'objectif de 8 h`} ; ${short ? `${short} nuit${short > 1 ? "s" : ""} sur ${N.length} sous 7 h.` : "aucune nuit sous 7 h."}`;
   const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(280, Math.max(190, W * .48))), m = { l: 30, r: 6, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const tot = d => ((d.deep || 0) + (d.light || 0) + (d.rem || 0) + (d.awake || 0)) / 3600;
   const max = Math.max(9, ...N.map(tot)), gw = iw / N.length, bw = Math.max(1.5, Math.min(18, gw * .7)), y = h => m.t + ih - h / max * ih;
@@ -374,10 +412,11 @@ function renderSleep(P) {
     showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${hm(d.sl / 60)} de sommeil${d.score != null ? ` · score ${d.score}` : ""}<br>` + ["deep", "light", "rem", "awake"].map(k => `${STAGES[k][0]} ${hm((d[k] || 0) / 60)}`).join(" · ")); });
   box.querySelector("svg").addEventListener("pointerleave", hideTip);
 }
+const REG_OK = 30, REG_MID = 45;   // écart type du coucher (min) : régulier / assez régulier
 function minsFrom18(dt) { let v = dt.getHours() * 60 + dt.getMinutes() - 18 * 60; if (v < 0) v += 1440; return v; }
 function renderReg(P) {
   const box = $("rReg"), N = P.filter(d => d.bedDt && d.wakeDt);
-  if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; return; }
+  if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; $("rRegAns").textContent = ""; return; }
   const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(280, Math.max(190, W * .48))), m = { l: 40, r: 6, t: 8, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const bs = N.map(d => minsFrom18(d.bedDt)), ws = N.map(d => minsFrom18(d.wakeDt));
   const lo = Math.floor((Math.min(...bs) - 30) / 60) * 60, hi = Math.ceil((Math.max(...ws) + 30) / 60) * 60, y = v => m.t + (v - lo) / (hi - lo) * ih;
@@ -394,7 +433,9 @@ function renderReg(P) {
   box.innerHTML = s + "</svg>";
   const fmt = v => `${pad(Math.floor((18 * 60 + v) / 60) % 24)}:${pad(Math.round(v % 60))}`;
   const sd = arr => { const a = arr.reduce((x, y) => x + y, 0) / arr.length; return Math.sqrt(arr.reduce((x, y) => x + (y - a) ** 2, 0) / arr.length); };
-  $("rRegInfo").textContent = `coucher moyen ${fmt(ab)} · lever ${fmt(aw)} · écart type ${Math.round(sd(bs))} min`;
+  const sdb = Math.round(sd(bs));
+  $("rRegInfo").textContent = `coucher moyen ${fmt(ab)} · lever ${fmt(aw)} · écart type ${sdb} min`;
+  $("rRegAns").innerHTML = `Couché vers <b>${fmt(ab)}</b>, levé vers <b>${fmt(aw)}</b> : horaires ${sdb <= REG_OK ? "réguliers" : sdb <= REG_MID ? "assez réguliers" : "irréguliers, un coucher plus régulier aide la récupération"} (ton coucher varie de ± ${sdb} min ; régulier sous ${REG_OK} min).`;
   box.querySelector("svg").addEventListener("pointermove", e => { const r = e.target.closest("rect[data-i]"); if (!r) return hideTip(); const d = N[+r.dataset.i];
     showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${clock(d.bedDt)} → ${clock(d.wakeDt)}`); });
   box.querySelector("svg").addEventListener("pointerleave", hideTip);
@@ -430,6 +471,35 @@ function renderRhr(P) {
   box.querySelector("svg").addEventListener("pointermove", e => { const r = e.target.closest("rect[data-i]"); if (!r) return hideTip(); const d = N[+r.dataset.i], b = rhrBase(d);
     showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b><br>${rhrOf(d)} bpm au repos${b != null ? `<br>moyenne des 30 jours d'avant : ${nf(b, 1)}` : ""}`); });
   box.querySelector("svg").addEventListener("pointerleave", hideTip);
+}
+
+// Tendance de la VFC : moyenne sur 7 nuits (hrv7) comparée à la zone normale Garmin (hrvLo–hrvUp) et à il y a 4 semaines
+const HRV_T = { back: 28, stablePct: 3 };
+function hrvTrend(days) {
+  const ok = d => d.hrv7 != null && d.hrvLo != null && d.hrvUp != null, i = days.map(ok).lastIndexOf(true);
+  if (i < 0) return null;
+  const last = days[i], v = last.hrv7, cut = new Date(last.dt); cut.setDate(cut.getDate() - HRV_T.back);
+  const past = days.slice(0, i).filter(d => d.hrv7 != null && d.dt <= cut).pop() || null;
+  let below = 0; for (let k = i; k >= 0 && ok(days[k]) && days[k].hrv7 < days[k].hrvLo; k--) below++;
+  const zone = v < last.hrvLo ? "below" : v > last.hrvUp ? "above" : "in", pct = past ? (v - past.hrv7) / past.hrv7 * 100 : null;
+  return { last, v, lo: last.hrvLo, up: last.hrvUp, zone, below, past, pct, trend: pct == null ? null : Math.abs(pct) < HRV_T.stablePct ? "stable" : pct > 0 ? "up" : "down" };
+}
+function hrvTrendAnswer(t) {
+  if (!t) return "Pas encore de moyenne de VFC sur 7 nuits.";
+  const tr = t.trend == null ? "" : t.trend === "stable" ? `, stable sur 4 semaines (${t.past.hrv7} → ${t.v})` : `, en ${t.trend === "up" ? "hausse" : "baisse"} de ${Math.abs(t.v - t.past.hrv7)} ms sur 4 semaines (${t.past.hrv7} → ${t.v})`;
+  const z = `${t.lo}–${t.up} ms`;
+  const zone = t.zone === "below" ? `, sous ta zone normale (${z}) depuis ${t.below} jour${t.below > 1 ? "s" : ""} : une fatigue s'installe, allège tant qu'elle n'y est pas revenue.`
+    : t.zone === "above" ? `, au-dessus de ta zone normale (${z}) : souvent bon signe, mais si tu te sens vidé, c'est aussi un signe de fatigue.`
+    : `, dans ta zone normale (${z}) : pas de fatigue qui dure.`;
+  return `Ta VFC moyenne sur 7 nuits est de <b>${t.v} ms</b>${tr}${zone}`;
+}
+function renderHrvTrend(P) {
+  const t = hrvTrend(RC.days);
+  $("rHrvTAns").innerHTML = hrvTrendAnswer(t);
+  const N = P.filter(d => d.hrv != null || d.hrv7 != null);
+  $("rHrvTInfo").textContent = t ? `zone normale ${t.lo}–${t.up} ms` : "";
+  tsChart("rHrvT", N, [{ k: "hrv", l: "nuit", c: "var(--muted)", w: 1, u: "ms" }, { k: "hrv7", l: "moyenne 7 nuits", c: "var(--accent)", w: 2.6, u: "ms" }],
+    { band: ["hrvLo", "hrvUp", "var(--teal)", .16], tipExtra: d => d.hrvLo != null ? `<br>zone normale : ${d.hrvLo}–${d.hrvUp}` : "" });
 }
 
 // ------------------------------------------------------------------ Comparaisons
@@ -516,7 +586,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
