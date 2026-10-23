@@ -26,9 +26,12 @@ const READY_LOW = 45;                                       // récup du jour so
 const TREND = { stablePct: 3 };                             // niveau à ±3 % de celui d'il y a 30 jours = « stable »
 const CURVE_DAYS = 183;                                     // mini-courbe du niveau : 6 mois
 const BAND = { good: "var(--good)", mid: "var(--warn)", bad: "var(--bad)" };
-// Objectifs de fin d'année (projection)
+// Objectifs de fin d'année (projection) : ceux du Plan (carte objectifs, modifiables), GOALS seulement si le Plan n'est pas chargé
 const GOALS = { ftp: 300, vo2: 65, date: "2026-12-31" };
-const PROJ = { days: 120, justFrac: .6, rampFrac: .75, ftpDec: 0, vo2Dec: 1 };   // tendance sur 120 jours ; « un peu juste » si le rythme actuel couvre au moins 60 % du rythme nécessaire ; test rampe : FTP = 75 % de la meilleure minute (comme le Plan)
+const PROJ = { days: 120, justFrac: .6, ftpDec: 0, vo2Dec: 1 };   // tendance sur 120 jours ; « un peu juste » si le rythme actuel couvre au moins 60 % du rythme nécessaire
+// FTP mesurée, comme le Plan (detectFtp) : meilleur 20 min × 95 % ou meilleur 1 h, sur 4 semaines glissantes, un point par semaine.
+// Ni test rampe ni FTP Garmin : chez toi ils surestiment la FTP (rampe 260-304 W pour un meilleur 20 min de 228 W en 2026).
+const FTPM = { win: 28, step: 7, f20: .95, gap: 1.05 };   // gap : FTP du Plan plus de 5 % au-dessus de la mesure → conseiller le test 20 min
 // Détecteurs (« frais cachés »)
 const DET = { grayDays: 14, grayMin: 3, grayShare: .2, grayRunIF: .85, graySessionSec: 1200,   // zone grise : ≥ 3 séances non dures avec > 20 % du temps en zone 3 sur 14 jours
   loadAcute: 7, loadChronic: 28, loadRatio: 1.5,                                                // charge des 7 derniers jours / moyenne hebdo des 28 jours d'avant
@@ -120,23 +123,41 @@ function theilSen(pts) {
   if (!sl.length) return null;
   const slope = median(sl), intercept = median(pts.map(p => p.y - slope * p.x)); return { slope, intercept };
 }
-// FTP de test (test rampe, séances nommées « … Ramp Test ») : 75 % de la meilleure minute
-function rampPoints(acts, now) {
-  const byDay = {};   // plusieurs tests le même jour (un « Lite » interrompu avant le vrai) : on garde le meilleur
-  for (const a of acts) { if (!(/ramp/i.test(a.n || "") && /test/i.test(a.n || "") && a.pc && a.pc["60"] > 0 && a.dt.getTime() <= now)) continue;
-    const k = ymd(a.dt), v = Math.round(a.pc["60"] * PROJ.rampFrac); if (!byDay[k] || v > byDay[k].v) byDay[k] = { t: a.dt.getTime(), v }; }
-  return Object.values(byDay).sort((x, y) => x.t - y.t);
+// FTP mesurée d'une sortie vélo : max(20 min × 95 %, 1 h) ; { v, w, l } ou null
+function ftpOf(a) {
+  const pc = a.pc || {}, c = [[pc["1200"] * FTPM.f20, pc["1200"], "20 min"], [pc["3600"], pc["3600"], "1 h"]].filter(r => r[1] > 0);
+  if (!c.length) return null; const b = c.reduce((x, y) => y[0] > x[0] ? y : x); return { v: Math.round(b[0]), w: b[1], l: b[2] };
+}
+// Série de FTP mesurée : un point par semaine (aujourd'hui, −7 j, −14 j…) = meilleure FTP mesurée des 28 jours qui finissent ce jour-là.
+// Un point n'est gardé que si ses 28 jours sont couverts par l'historique de puissance (première sortie avec des puissances), sinon
+// le premier point ne verrait que quelques sorties. Chaque point garde la sortie retenue (a) pour l'infobulle.
+function ftpPoints(acts, now) {
+  const rides = acts.filter(a => a.pc && window.Charge.sportOf(a) === "bike" && a.dt.getTime() <= now).map(a => ({ a, t: a.dt.getTime(), m: ftpOf(a) })).filter(r => r.m);
+  if (!rides.length) return [];
+  const first = Math.min(...rides.map(r => r.t)), out = [];
+  for (let e = now; e - FTPM.win * DAY >= first; e -= FTPM.step * DAY) {
+    let best = null; for (const r of rides) if (r.t > e - FTPM.win * DAY && r.t <= e && (!best || r.m.v > best.m.v)) best = r;
+    if (best) out.push({ t: e, v: best.m.v, w: best.m.w, l: best.m.l, a: best.a });
+  }
+  return out.reverse();
+}
+// Objectifs : ceux du Plan (planCfg.goal), validés ; sinon GOALS
+function goalsFrom(g) {
+  const ok = g && typeof g === "object", ftp = ok && +g.ftp >= 100 && +g.ftp <= 600 ? +g.ftp : GOALS.ftp, vo2 = ok && +g.vo2 >= 30 && +g.vo2 <= 90 ? +g.vo2 : GOALS.vo2;
+  const date = ok && /^\d{4}-\d{2}-\d{2}$/.test(g.date || "") && !isNaN(dayMs(g.date)) ? g.date : GOALS.date;
+  return { ftp, vo2, date, plan: !!ok };
 }
 // Projection vers un objectif. ser : [{ t, v }] ; cur : valeur actuelle (la FTP utilisée par le Plan, la dernière VO2max) ; tendance sur les 120 derniers jours.
 // Le rythme actuel est la pente de Theil-Sen ; verdict : atteint / dans les temps / un peu juste / hors de portée au rythme actuel.
-function projection(ser, goal, dateStr, now, cur, dec = 0) {
+// anchor : la tendance tracée passe par la valeur actuelle (FTP du Plan) avec la pente des mesures, au lieu de l'ordonnée de Theil-Sen.
+function projection(ser, goal, dateStr, now, cur, dec = 0, anchor = false) {
   const t0 = now - PROJ.days * DAY, pts = ser.filter(p => p.t >= t0 && p.t <= now).map(p => ({ x: (p.t - now) / DAY, y: p.v })), ts = theilSen(pts);
   const end = dayMs(dateStr), daysLeft = (end - now) / DAY, weeksLeft = Math.max(daysLeft / 7, 0), base = cur != null ? cur : pts.length ? pts[pts.length - 1].y : null;
   if (!ts || base == null) return null;
   const rate = ts.slope * 7, projected = base + ts.slope * Math.max(daysLeft, 0), need = weeksLeft > 0 ? (goal - base) / weeksLeft : null, f = x => Math.round(x * 10 ** dec) / 10 ** dec;
   let verdict = base >= goal ? "atteint" : weeksLeft <= 0 ? "hors de portée au rythme actuel" : projected >= goal ? "dans les temps" : rate > 0 && rate >= PROJ.justFrac * need ? "un peu juste" : "hors de portée au rythme actuel";
   return { n: pts.length, slope: ts.slope, intercept: ts.intercept, rate, cur: base, projected, need, weeksLeft, verdict, goal, end,
-    trendAt: x => ts.intercept + ts.slope * x, text: { cur: f(base), projected: f(projected), rate: f(rate * 10) / 10, need: need == null ? null : f(need * 10) / 10 } };
+    anchor, trendAt: x => (anchor ? base : ts.intercept) + ts.slope * x, text: { cur: f(base), projected: f(projected), rate: f(rate * 10) / 10, need: need == null ? null : f(need * 10) / 10 } };
 }
 
 // ------------------------------------------------------------------ Fonctions pures : détecteurs (4b)
@@ -227,7 +248,7 @@ function progress(ser) {
 }
 
 // 2. Que faire aujourd'hui ? Seuils du Plan : fraîcheur (frais > 5, équilibré > −10, chargé > −25, très chargé), récup du jour < 45 = basse.
-// o : { tsb, reco (score du jour ou null), hrvLow (VFC basse 3 jours), planned ({ label, dur, hard } ou null) }
+// o : { tsb, reco (score du jour ou null), hrvLow (VFC basse 3 jours), planned ({ label, dur, hard } ou null ; label = titre avec le palier, « Sweet spot #2 · 3 × 10' », si la séance en a un) }
 function advice(o) {
   const lab = formLabel(o.tsb), tired = lab === "chargé" || lab === "très chargé", reco = o.reco, recoLow = reco != null && reco < READY_LOW;
   const pl = o.planned, sess = pl ? `ta séance « ${pl.label} »${pl.dur ? ` de ${pl.dur} min` : ""} prévue ce soir` : null, hard = !!(pl && pl.hard);
@@ -245,7 +266,7 @@ function advice(o) {
     text = `${cap(why)} : ` + (hard ? `${sess} reste jouable, mais coupe-la si les jambes tirent.` : pl ? `${sess} passe, sans chercher à en faire plus.` : "une séance tranquille est le bon choix.");
   } else {
     tone = "good";
-    const state = `${lab === "frais" ? "Tu es frais" : "Ta fraîcheur est correcte"}${reco != null ? " et bien récupéré" : ""}`;
+    const state = lab === "frais" ? `Tu es frais${reco != null ? " et bien récupéré" : ""}` : `Ta fraîcheur est correcte${reco != null ? " et tu es bien récupéré" : ""}`;
     text = `${state} : ` + (hard ? `bon jour pour ${sess}.` : pl ? `${sess} se fait sans souci.` : lab === "frais" ? "bon jour pour une séance intense si tu en as envie." : "une séance normale passe bien.");
   }
   return { text, tone, label: lab, reasons };
@@ -261,11 +282,21 @@ function objective(ser, cur, goal, now) {
 const VERDICT_TXT = { "atteint": "Objectif atteint", "dans les temps": "Dans les temps", "un peu juste": "Un peu juste", "hors de portée au rythme actuel": "Hors de portée au rythme actuel" };
 const endLabel = dateStr => { const [, m, d] = dateStr.split("-"); return `${d}/${m}`; };
 // « Au rythme actuel : ~232 W au 31/12. Il faudrait +9,4 W/semaine (tu fais +1,2). »
-function objLine(P, unit, dec) {
+function objLine(P, unit, dec, date = GOALS.date) {
   if (!P) return "Pas assez de mesures sur les 120 derniers jours pour projeter.";
   if (P.verdict === "atteint") return "Objectif atteint.";
   const u = unit ? " " + unit : "", d = dec ? 2 : 1;
-  return `Au rythme actuel : ~${num(P.projected, dec)}${u} au ${endLabel(GOALS.date)}. Il faudrait ${sgnT(P.need, d)}${u}/semaine (tu fais ${sgnT(P.rate, d)}).`;
+  return `Au rythme actuel : ~${num(P.projected, dec)}${u} au ${endLabel(date)}. Il faudrait ${sgnT(P.need, d)}${u}/semaine (${Math.abs(P.rate) < 5 * 10 ** (-d - 1) ? "tu stagnes" : `tu fais ${sgnT(P.rate, d)}`}).`;
+}
+// FTP du Plan contre la dernière mesure : « FTP du Plan : 240 W. Ta meilleure mesure des 4 dernières semaines : 196 W (20 min à 206 W, le 3 oct.). … »
+function ftpCheckLine(cur, last) {
+  if (!last) return cur ? `FTP du Plan : ${num(cur)} W. Aucun effort de 20 min ou 1 h mesuré ces 4 dernières semaines : fais le test 20 min pour la vérifier.` : "";
+  const when = new Date(last.a.dt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), meas = `${num(last.v)} W (${last.l} à ${num(last.w)} W, le ${when})`;
+  if (!cur) return `Ta meilleure mesure des 4 dernières semaines : ${meas}.`;
+  const gap = (cur / last.v - 1) * 100;
+  const tail = cur > last.v * FTPM.gap ? ` Ta FTP du Plan est ${num(gap)} % au-dessus : soit tu ne t'es pas employé à fond, soit elle est trop haute. Le test 20 min tranchera.`
+    : cur < last.v / FTPM.gap ? ` Tu as fait mieux que ta FTP du Plan : passe-la à ${num(last.v)} W.` : " Les deux concordent.";
+  return `FTP du Plan : ${num(cur)} W. Ta meilleure mesure des 4 dernières semaines : ${meas}.${tail}`;
 }
 function objectivesAnswer(items) {   // items : [{ name, verdict }]
   const ok = items.filter(i => i.verdict);
@@ -312,10 +343,10 @@ function weeksTitle(W) {
   const best = prev.reduce((b, w) => w.total > b.total ? w : b, prev[0]);
   return `Ta semaine la plus chargée : celle du ${dayMonth(best.t)} (${num(best.total / avg * 100)} % de ta moyenne).`;
 }
-function projTitle(name, P, unit, dec) {
+function projTitle(name, P, unit, dec, date = GOALS.date) {
   if (!P) return `${name} : pas assez de mesures pour dégager une tendance.`;
   if (P.verdict === "atteint") return `${name} : objectif atteint.`;
-  return `${name} : la tendance mène à ~${num(P.projected, dec)}${unit ? " " + unit : ""} au ${endLabel(GOALS.date)}, pour un objectif de ${num(P.goal, dec)}${unit ? " " + unit : ""}.`;
+  return `${name} : la tendance mène à ~${num(P.projected, dec)}${unit ? " " + unit : ""} au ${endLabel(date)}, pour un objectif de ${num(P.goal, dec)}${unit ? " " + unit : ""}.`;
 }
 
 // ------------------------------------------------------------------ Rendu : outils
@@ -435,15 +466,16 @@ async function loadWx() {
   el.hidden = false;
 }
 function blkGoals(D) {
-  const O = D.obj, row = (name, o, P, unit, dec, what) => {
-    if (!o) return `<div class="syobj"><div class="syoh"><b>${name}</b></div>${note("Pas assez de mesures depuis le 1er janvier.")}</div>`;
+  const O = D.obj, G = O.goals, row = (name, o, P, unit, dec, extra = "") => {
+    if (!o) return `<div class="syobj"><div class="syoh"><b>${name}</b></div>${note("Pas assez de mesures depuis le 1er janvier.")}${extra}</div>`;
     const u = unit ? " " + unit : "", vcol = P ? verdictCol(P.verdict) : "var(--muted)", ok = P && P.verdict === "atteint";
     return `<div class="syobj"><div class="syoh"><b>${name}</b>${P ? `<span class="syverd" style="color:${vcol}">${VERDICT_TXT[P.verdict]}</span>` : ""}</div>
       <div class="syprog" role="img" aria-label="${name} : ${nf(o.pct)} % du chemin"><div class="syfill" style="width:${o.bar}%;background:${ok ? "var(--good)" : "var(--accent)"}"></div><b class="symark" style="left:${o.bar}%"><span>${nf(o.cur, dec)}${u}</span></b></div>
       <div class="syscale"><span>${nf(o.start, dec)}${u} <small>${dShort(o.startT)}</small></span><span class="sypct">${o.pct < 0 ? "recul de " + nf(-o.pct) : nf(o.pct)} % du chemin</span><span>${nf(o.goal, dec)}${u}</span></div>
-      <p class="syobl">${objLine(P, unit, dec)}</p></div>`; };
+      <p class="syobl">${objLine(P, unit, dec, G.date)}</p>${extra}</div>`; };
   return `<section class="card span12 syblk" id="syGoals"><h2>Où j'en suis de mes objectifs ?</h2><p class="syans">${objectivesAnswer([{ name: "FTP", verdict: D.proj.ftp && D.proj.ftp.verdict }, { name: "VO2max", verdict: D.proj.vo2 && D.proj.vo2.verdict }])}</p>
-    <div class="syobjs">${row("FTP", O.ftp, D.proj.ftp, "W", PROJ.ftpDec)}${row("VO2max", O.vo2, D.proj.vo2, "", PROJ.vo2Dec)}</div></section>`;
+    <div class="syobjs">${row("FTP", O.ftp, D.proj.ftp, "W", PROJ.ftpDec, O.ftpCheck ? `<p class="syobl">${O.ftpCheck}</p>` : "")}${row("VO2max", O.vo2, D.proj.vo2, "", PROJ.vo2Dec)}</div>
+    <p class="note">Objectifs au ${endLabel(G.date)} : ${num(G.ftp)} W et ${num(G.vo2, G.vo2 % 1 ? 1 : 0)} de VO2max. <a href="#plan" data-go="plan" role="button">Les modifier dans le Plan</a>. FTP mesurée = meilleur 20 min × 95 % ou meilleur 1 h sur 4 semaines, comme le Plan (ni test rampe, ni FTP Garmin).</p></section>`;
 }
 function blkDet(D) {
   const rows = DETECTORS.filter(([k]) => D.det.res[k].active).map(([k, , , title]) => { const t = DET_TXT[k](D.det.res[k]);
@@ -489,8 +521,8 @@ function projChart(box, P, ser, unit, dec, label) {
   g += `<path d="M${x(now).toFixed(1)},${y(P.trendAt(0)).toFixed(1)}L${x(t1).toFixed(1)},${y(P.trendAt(xs(t1))).toFixed(1)}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="6 5" opacity=".7"/>`;
   g += `<text x="${W - m.r}" y="${y(P.trendAt(xs(t1))) + (P.trendAt(xs(t1)) < P.goal ? 14 : -6)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--ink)">≈ ${f(P.projected)} ${unit}</text>`;
   hist.forEach((p, i) => g += `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3.6" fill="var(--accent)" fill-opacity=".75" stroke="var(--card)" stroke-width="1.5" data-i="${i}"/>`);
-  box.innerHTML = g + `</svg><div class="legend bm-leg"><span><i style="background:var(--accent)"></i>mesures</span><span><i style="background:var(--ink);opacity:.6"></i>tendance des 120 derniers jours</span><span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>projection au ${dShort(P.end)}</span></div>`;
-  const svg = box.querySelector("svg"), tipf = e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = hist[+c.dataset.i]; showTip(e, `<b>${dLong(p.t)}</b><br>${f(p.v)} ${unit}`); };
+  box.innerHTML = g + `</svg><div class="legend bm-leg"><span><i style="background:var(--accent)"></i>mesures</span><span><i style="background:var(--ink);opacity:.6"></i>${P.anchor ? "rythme des 120 derniers jours, depuis ta FTP du Plan" : "tendance des 120 derniers jours"}</span><span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>projection au ${dShort(P.end)}</span></div>`;
+  const svg = box.querySelector("svg"), tipf = e => { const c = e.target.closest("circle[data-i]"); if (!c) return hideTip(); const p = hist[+c.dataset.i]; showTip(e, `<b>${dLong(p.t)}</b><br>${f(p.v)} ${unit}${p.l ? `<br>${p.l} à ${nf(p.w)} W sur les 4 semaines d'avant` : ""}`); };
   svg.addEventListener("pointermove", tipf); svg.addEventListener("pointerdown", tipf); svg.addEventListener("pointerleave", hideTip);
 }
 const verdictCol = v => v === "atteint" || v === "dans les temps" ? "var(--good)" : v === "un peu juste" ? "var(--warn)" : "var(--bad)";
@@ -504,7 +536,7 @@ function detailsHtml(D) {
   const chips = PERIODS.map(([mo]) => `<button class="chip" aria-pressed="${mo === S_.period}" data-per="${mo}">${mo} mois</button>`).join("");
   const hist = DETECTORS.map(([k, , , title]) => { const h = D.det.hist[k], r = D.det.res[k];
     return `<li><b>${title}</b> : ${r.status === "nodata" ? "pas assez de données" : h.last == null ? `aucune alerte sur ${DET.history} jours` : `dernière alerte le ${dLong(h.last)} · ${nf(h.count)} jour${h.count > 1 ? "s" : ""} en alerte sur ${DET.history}`}</li>`; }).join("");
-  const proj = (id, P, ser, name, unit, dec) => `<div class="pg-box pg-wide" id="${id}"><h4>${projTitle(name, P, unit, dec)}</h4>${P ? `<div class="${id}Plot"></div>` : note("Pas assez de mesures sur les 120 derniers jours pour dégager une tendance.")}</div>`;
+  const proj = (id, P, ser, name, unit, dec, date) => `<div class="pg-box pg-wide" id="${id}"><h4>${projTitle(name, P, unit, dec, date)}</h4>${P ? `<div class="${id}Plot"></div>` : note("Pas assez de mesures sur les 120 derniers jours pour dégager une tendance.")}</div>`;
   const ctitle = curveTitle(D.fit.slice(-(PERIODS.find(p => p[0] === S_.period)[1])));
   return `<details class="card span12 sydetails" id="syDetails"${lsGet(K_DETAILS) === "1" ? " open" : ""}><summary><span>Détails</span><small>courbes, charge par semaine, projections, historique des alertes</small></summary>
     <div class="sydbody">
@@ -512,7 +544,7 @@ function detailsHtml(D) {
     <div class="chips crchips" role="group" aria-label="Période">${chips}</div><div id="syPlot"></div>
     <ul class="sycl"><li><i style="background:${LINE.ctl}"></i><b>Niveau</b> : ce que tu encaisses, il bouge lentement.</li><li><i style="background:${LINE.atl}"></i><b>Fatigue récente</b> : monte vite après une grosse semaine.</li><li><i style="background:${LINE.tsb}"></i><b>Fraîcheur</b> : niveau moins fatigue ; au-dessus de 0, tu es reposé.</li></ul>
     <h3 class="syh3">Charge par semaine</h3><p class="syans2">${weeksTitle(D.weeks)}</p><div id="syWeeks"></div>
-    <h3 class="syh3">Projection vers tes objectifs</h3><div class="pg-grid">${proj("syFtp", D.proj.ftp, D.proj.ftpSer, "FTP", "W", PROJ.ftpDec)}${proj("syVo2", D.proj.vo2, D.proj.vo2Ser, "VO2max", "", PROJ.vo2Dec)}</div>
+    <h3 class="syh3">Projection vers tes objectifs</h3><div class="pg-grid">${proj("syFtp", D.proj.ftp, D.proj.ftpSer, "FTP", "W", PROJ.ftpDec, D.obj.goals.date)}${proj("syVo2", D.proj.vo2, D.proj.vo2Ser, "VO2max", "", PROJ.vo2Dec, D.obj.goals.date)}</div>
     <h3 class="syh3">Historique des alertes <small>${DET.history} derniers jours</small></h3><ul class="syhist">${hist}</ul>
     <h3 class="syh3">Indicateurs <small>valeur, courbe et variation sur 30 jours · un clic ouvre l'onglet</small></h3>${indic(D)}
     </div></details>`;
@@ -537,7 +569,7 @@ function indic(D) {
     <div class="crd">${d}</div>${sp}<div class="s">${sub}</div></div>`;
   const dv = (v, dg, unit = "") => v ? `<span>30 j <span style="color:${col(v.delta)}">${v.delta === 0 ? "=" : sgn(v.delta, dg)}${unit}</span></span>` : `<span>30 j –</span>`;
   const T = [];
-  T.push(tile("plan", "FTP", D.ftp.cur ? nf(D.ftp.cur) : "–", " W", "utilisée par le Plan", dv(D.ftp.v30, 0, " W"), spark(D.ftp.ser)));
+  T.push(tile("plan", "FTP", D.ftp.cur ? nf(D.ftp.cur) : "–", " W", `utilisée par le Plan${D.ftp.meas ? ` · mesurée ${nf(D.ftp.meas.v)} W` : ""}`, dv(D.ftp.v30, 0, " W"), spark(D.ftp.ser)));
   T.push(tile("plan", "VO2max", D.vo2.cur != null ? nf(D.vo2.cur, 1) : "–", "", D.vo2.date ? `mesurée le ${dLong(D.vo2.date)}` : "", dv(D.vo2.v30, 1), spark(D.vo2.ser)));
   T.push(tile("course", "Allure seuil", D.thr.pace ? window.paceTxt(D.thr.pace) : "–", D.thr.pace ? " /km" : "", D.thr.src, `<span>pas d'historique (seuil unique)</span>`, ""));
   T.push(tile("recup", "Récup du jour", D.rec.score != null ? nf(D.rec.score) : "–", D.rec.score != null ? " /100" : "", D.rec.label || "pas de nuit enregistrée", D.rec.v ? `<span>vs 30 j <span style="color:${col(D.rec.v.delta)}">${D.rec.v.delta === 0 ? "=" : sgn(D.rec.v.delta, 0)}</span></span>` : `<span>vs 30 j –</span>`, spark(D.rec.ser, D.rec.color), D.rec.color));
@@ -550,7 +582,8 @@ function gather() {
   const profile = (window.Recup && window.Recup.data && window.Recup.data.profile) || {}, now = today.getTime();
   const firstT = acts.length ? Math.min(...acts.map(a => a.dt.getTime())) : null;
   const fit = fitSeries(loads, today, 365, firstT);
-  const ftpSer = listSeries(profile.ftpHist), ftpNow = window.Plan && window.Plan.ftp ? window.Plan.ftp() : profile.ftp || null;
+  const ftpSer = ftpPoints(acts, now), ftpNow = window.Plan && window.Plan.ftp ? window.Plan.ftp() : ftpSer.length ? ftpSer[ftpSer.length - 1].v : null;
+  let G = goalsFrom(null); try { if (window.Plan && window.Plan._cfg) G = goalsFrom(window.Plan._cfg().goal); } catch (e) {}
   const vo2Ser = listSeries(profile.vo2), p = ch.params();
   const own = (() => { try { const v = +localStorage.getItem("runThrPace"), [lo, hi] = ch.RUN_PACE_RANGE; return v >= lo && v <= hi; } catch (e) { return false; } })();
   const lt = (profile.run && profile.run.lt) || {};
@@ -564,18 +597,18 @@ function gather() {
   // projection, détecteurs, relevé
   const planAPI = window.Plan && window.Plan.plannedFor ? window.Plan : null, recDays = (window.Recup && window.Recup.days) || [];
   const dctx = { acts, loads, days: recDays, hardRide: a => planAPI ? planAPI.hardRide(a) : false, tssOf: a => ch.tssOf(a) };
-  const ftpTrend = ftpSer.concat(rampPoints(acts, now)).sort((a, b) => a.t - b.t);
-  const proj = { ftp: projection(ftpTrend, GOALS.ftp, GOALS.date, now, ftpNow, PROJ.ftpDec), ftpSer: ftpTrend, vo2: projection(vo2Ser, GOALS.vo2, GOALS.date, now, vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, PROJ.vo2Dec), vo2Ser };
+  const proj = { ftp: projection(ftpSer, G.ftp, G.date, now, ftpNow, PROJ.ftpDec, true), ftpSer, vo2: projection(vo2Ser, G.vo2, G.date, now, vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, PROJ.vo2Dec), vo2Ser };
   const vo2Cur = vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null;
-  const obj = { ftp: objective(ftpSer, ftpNow, GOALS.ftp, now), vo2: objective(vo2Ser, vo2Cur, GOALS.vo2, now) };
+  const lastFtp = ftpSer.length && now - ftpSer[ftpSer.length - 1].t < DAY ? ftpSer[ftpSer.length - 1] : null;   // le point d'aujourd'hui = les 28 derniers jours
+  const obj = { ftp: objective(ftpSer, ftpNow, G.ftp, now), vo2: objective(vo2Ser, vo2Cur, G.vo2, now), goals: G, ftpCheck: ftpCheckLine(ftpNow, lastFtp) };
   const res = detectAll(dctx, today), hist = Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, alertHistory(fn, dctx, today)]));
   const report = acts.length ? weekReport(dctx, today, planAPI) : null;
   // séance prévue ce soir (Plan) pour la phrase « Que faire aujourd'hui ? »
-  let planned = null; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) planned = { label: pl.label, dur: pl.dur, hard: !!(planAPI.TYPES[pl.t] && planAPI.TYPES[pl.t].hard) }; } catch (e) {}
+  let planned = null; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) planned = { label: pl.w && /#\d/.test(pl.w.title || "") ? pl.w.title : pl.label, dur: pl.dur, hard: !!(planAPI.TYPES[pl.t] && planAPI.TYPES[pl.t].hard) }; } catch (e) {}
   const f = fit[fit.length - 1];
   const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned });
   return { today, now, acts, loads, daily, profile, proj, obj, det: { res, hist }, report, dctx, fit, prog: fit.length ? progress(fit) : null, adv, planned, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
-    ftp: { cur: ftpNow, ser: ftpSer, v30: ftpNow ? listVariation(ftpSer, now, 30, ftpNow) : null },
+    ftp: { cur: ftpNow, ser: ftpSer, meas: lastFtp, v30: lastFtp ? listVariation(ftpSer, now, 30) : null },   // variation : la mesure contre la mesure, jamais la FTP du Plan contre une mesure
     vo2: { cur: vo2Cur, date: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].t : null, ser: vo2Ser, v30: listVariation(vo2Ser, now, 30) },
     thr: { pace: p.runPace, src: thrSrc }, rec };
 }
@@ -675,7 +708,7 @@ async function open() {
   render();
 }
 
-window.Synthese = { open, render, _: { theilSen, rampPoints, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
+window.Synthese = { open, render, _: { theilSen, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
   trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, wxHoursHtml, wxMoreUrl, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });

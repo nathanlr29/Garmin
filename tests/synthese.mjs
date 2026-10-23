@@ -101,10 +101,29 @@ const real = proj(Y.listSeries(ftpHist)); const without = proj(Y.listSeries(ftpH
 assert.ok(Math.abs(real.rate - without.rate) < 1, `un test isolé (292 → 260) ne bouge pas la tendance : ${real.rate.toFixed(2)} contre ${without.rate.toFixed(2)} W/semaine`); assert.ok(real.rate > -1.5, "pas de bascule vers une pente fortement négative");
 // arrondis : FTP au watt, VO2max au dixième
 pr = Y.projection([0, 1, 2, 3, 4].map(i => ({ t: daysAgo(30 - i * 7), v: 63 + .037 * i })), 65, "2026-12-31", NOWT, 63.2, 1); assert.equal(pr.text.cur, 63.2); assert.equal(pr.text.projected, Math.round(pr.projected * 10) / 10); assert.equal(Math.round(proj(lineSer(4)).text.projected), proj(lineSer(4)).text.projected, "FTP entière");
-// tests de rampe : 75 % de la meilleure minute
-const ramps = Y.rampPoints([{ n: "MyWhoosh Ramp Test", pc: { "60": 400 }, dt: new Date(daysAgo(10)) }, { n: "Ramp", pc: { "60": 400 }, dt: new Date(daysAgo(10)) }, { n: "Ramp Test", pc: {}, dt: new Date(daysAgo(10)) }, { n: "ramp test", pc: { "60": 360 }, dt: new Date(daysAgo(-5)) }], NOWT);
-same(ramps.map(r => r.v), [300], "FTP de test = 75 % de la meilleure minute ; seulement les séances « Ramp Test » passées avec puissance");
-same(Y.rampPoints([{ n: "Zwift - FTP Ramp Test [Lite]", pc: { "60": 192 }, dt: new Date(daysAgo(20)) }, { n: "Zwift - FTP Ramp Test", pc: { "60": 347 }, dt: new Date(daysAgo(20)) }], NOWT).map(r => r.v), [260], "deux tests le même jour (Lite interrompu) : on garde le meilleur");
+// FTP mesurée (comme le Plan) : max(20 min × 95 %, 1 h), meilleure des 4 semaines glissantes, un point par semaine ; ni test rampe ni FTP Garmin
+assert.match(read("../synthese.js"), /20 min × 95 %/); assert.doesNotMatch(read("../synthese.js"), /rampPoints|ftpHist\)/, "plus de test rampe ni de FTP Garmin dans la projection");
+same(Y.ftpOf({ pc: { "1200": 228, "3600": 210 } }), { v: 217, w: 228, l: "20 min" }, "20 min × 95 %"); same(Y.ftpOf({ pc: { "1200": 220, "3600": 212 } }), { v: 212, w: 212, l: "1 h" }, "1 h si meilleur");
+assert.equal(Y.ftpOf({ pc: { "60": 400 } }), null, "une minute ne compte pas"); assert.equal(Y.ftpOf({}), null);
+const fr = (back, w20, o = {}) => ({ t: "Ride", mt: 3600, dt: new Date(daysAgo(back)), pc: { "1200": w20 }, ...o });
+let fp = Y.ftpPoints([fr(60, 200), fr(40, 220), fr(10, 210), fr(5, 400, { t: "running" }), fr(-3, 300), { t: "Ride", dt: new Date(daysAgo(20)) }], NOWT);
+assert.equal(fp[fp.length - 1].t, NOWT, "dernier point = aujourd'hui"); assert.equal(fp[fp.length - 1].v, 200, "28 derniers jours : 210 × 0,95 (course et sortie future ignorées)");
+assert.ok(fp.every((p, k) => !k || p.t - fp[k - 1].t === 7 * DAYMS), "un point par semaine"); assert.ok(fp[0].t - 28 * DAYMS >= daysAgo(60), "pas de point sans 4 semaines d'historique");
+assert.equal(Math.max(...fp.map(p => p.v)), 209, "220 × 0,95"); assert.equal(fp.find(p => p.v === 209).l, "20 min");
+same(Y.ftpPoints([], NOWT), []);
+const realFp = Y.ftpPoints(acts, NOWT); assert.ok(realFp.length >= 20 && realFp.every(p => p.v >= 150 && p.v <= 240), `vraies données : FTP mesurée entre 150 et 240 W (${realFp.map(p => p.v)})`);
+// projection ancrée sur la FTP du Plan : la tendance passe par la valeur actuelle avec la pente des mesures
+const pa = Y.projection(lineSer(1), 300, "2026-12-31", NOWT, 240, 0, true); near(pa.trendAt(0), 240, 1e-9, "ancrage"); near(pa.trendAt(-7) - pa.trendAt(0), -pa.slope * 7, 1e-9); assert.equal(pa.anchor, true);
+// objectifs du Plan (validés), sinon GOALS
+same(Y.goalsFrom({ ftp: 260, vo2: 65.5, date: "2027-03-31" }), { ftp: 260, vo2: 65.5, date: "2027-03-31", plan: true });
+same(Y.goalsFrom({ ftp: 9000, vo2: "x", date: "demain" }), { ftp: 300, vo2: 65, date: "2026-12-31", plan: true }, "valeurs hors plage : celles par défaut");
+same(Y.goalsFrom(null), { ftp: 300, vo2: 65, date: "2026-12-31", plan: false });
+assert.match(Y.objLine(proj(lineSer(1)), "W", 0, "2027-03-31"), / au 31\/03\./, "date de l'objectif du Plan");
+// FTP du Plan contre la mesure
+const lastM = { v: 196, w: 206, l: "20 min", a: { dt: new Date(2026, 9, 3) } };
+assert.equal(Y.ftpCheckLine(240, lastM), "FTP du Plan : 240 W. Ta meilleure mesure des 4 dernières semaines : 196 W (20 min à 206 W, le 3 oct.). Ta FTP du Plan est 22 % au-dessus : soit tu ne t'es pas employé à fond, soit elle est trop haute. Le test 20 min tranchera.");
+assert.match(Y.ftpCheckLine(200, lastM), /Les deux concordent\.$/); assert.match(Y.ftpCheckLine(180, lastM), /passe-la à 196 W\.$/);
+assert.match(Y.ftpCheckLine(240, null), /^FTP du Plan : 240 W\. Aucun effort .* test 20 min/); assert.equal(Y.ftpCheckLine(null, null), "");
 assert.deepEqual(Y.GOALS && JSON.parse(JSON.stringify(Y.GOALS)), { ftp: 300, vo2: 65, date: "2026-12-31" });
 
 // ---- détecteurs
@@ -196,7 +215,7 @@ const hardPl = { label: "Seuil", dur: 60, hard: true }, easyPl = { label: "Endur
 let ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "good"); assert.equal(ad.text, "Tu es frais et bien récupéré : bon jour pour ta séance « Seuil » de 60 min prévue ce soir.");
 ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: null }); assert.match(ad.text, /^Tu es frais et bien récupéré : bon jour pour une séance intense/);
 ad = Y.advice({ tsb: 14, reco: null, hrvLow: false, planned: easyPl }); assert.equal(ad.text, "Tu es frais : ta séance « Endurance » de 90 min prévue ce soir se fait sans souci.", "sans récup du jour : pas de « bien récupéré »");
-ad = Y.advice({ tsb: 0, reco: 70, hrvLow: false, planned: null }); assert.equal(ad.tone, "good"); assert.match(ad.text, /^Ta fraîcheur est correcte et bien récupéré/);
+ad = Y.advice({ tsb: 0, reco: 70, hrvLow: false, planned: null }); assert.equal(ad.tone, "good"); assert.match(ad.text, /^Ta fraîcheur est correcte et tu es bien récupéré : /);
 ad = Y.advice({ tsb: -15, reco: 70, hrvLow: true, planned: easyPl }); assert.equal(ad.tone, "bad"); assert.match(ad.text, /^Fatigue récente élevée et VFC basse : /); assert.match(ad.text, /sans chercher|garde|repos|passe/, "chargé + VFC basse : mauvais jour");
 ad = Y.advice({ tsb: -15, reco: 70, hrvLow: true, planned: null }); assert.equal(ad.text, "Fatigue récente élevée et VFC basse : garde la séance facile, ou prends un jour de repos.");
 ad = Y.advice({ tsb: -15, reco: 70, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "mid"); assert.match(ad.text, /^Fatigue récente élevée : ta séance « Seuil » de 60 min prévue ce soir reste jouable/);
@@ -219,7 +238,7 @@ const real2 = Y.objective(Y.listSeries(profile.vo2), 63.2, 65, NOWT); assert.equ
 // phrase sous la barre
 let pj = proj(lineSer(1)); assert.match(Y.objLine(pj, "W", 0), /^Au rythme actuel : ~\d+ W au 31\/12\. Il faudrait \+3,4 W\/semaine \(tu fais \+1,0\)\.$/);
 assert.equal(Y.objLine(proj(lineSer(0), 305), "W", 0), "Objectif atteint."); assert.match(Y.objLine(null, "W", 0), /Pas assez de mesures/);
-assert.match(Y.objLine(proj(lineSer(-2)), "W", 0), /tu fais −2,0\)\.$/, "rythme négatif : signe moins");
+assert.match(Y.objLine(proj(lineSer(-2)), "W", 0), /tu fais −2,0\)\.$/, "rythme négatif : signe moins"); assert.match(Y.objLine(proj(lineSer(0), 240), "W", 0), /\(tu stagnes\)\.$/, "rythme nul");
 assert.equal(Y.objLine(Y.projection([0, 1, 2, 3, 4].map(i => ({ t: daysAgo(30 - i * 7), v: 63 + .037 * i })), 65, "2026-12-31", NOWT, 63.2, 1), "", 1).startsWith("Au rythme actuel : ~63,"), true);
 // phrase-réponse du bloc
 assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "hors de portée au rythme actuel" }, { name: "VO2max", verdict: "hors de portée au rythme actuel" }]), "Tes deux objectifs sont hors de portée au rythme actuel.");
