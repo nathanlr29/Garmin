@@ -238,3 +238,52 @@ html.bm-open{overflow:hidden}
 #plan .pgsteps .ok{border-color:var(--good);color:var(--ink)}
 #plan .pgsteps .cur{border-color:var(--accent);color:var(--ink);font-weight:600}
 @media (max-width:600px){#plan .pgl li{grid-template-columns:1fr}}
+
+/* Sommaire collant de l'onglet (sous la barre d'application sur ordinateur, en haut de l'écran sur mobile) */
+#plan .psum{position:sticky;top:calc(56px + env(safe-area-inset-top));z-index:15;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;
+  margin:0 0 12px;padding:8px 0;background:var(--bg);border-bottom:1px solid var(--line)}
+#plan .psum::-webkit-scrollbar{display:none}
+#plan .psum .chip{flex:0 0 auto;padding:6px 13px;font-size:13.5px;transition:background-color .2s,color .2s,border-color .2s}
+@media (max-width:720px){#plan .psum{top:env(safe-area-inset-top);margin:0 -16px 8px;padding:8px 16px}#plan .psum .chip{flex:1 0 auto;padding:6px 9px;font-size:13px}}
+#plan #pTop{margin-bottom:12px}
+#plan #pTop > section, #plan #pAna > section{scroll-margin-top:116px}
+@media (max-width:720px){#plan #pTop > section, #plan #pAna > section{scroll-margin-top:60px}}
+@media (max-width:600px){#plan #pTop{margin-bottom:8px}}
+
+/* Semaine en cours : jours passés repliés en une ligne */
+#plan .wpast{display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);
+  background:none;color:var(--ink);font:inherit;font-size:14px;padding:12px 0;cursor:pointer}
+#plan .wpast b{font-size:15px}
+#plan .wpast span{color:var(--muted);flex:1 1 auto}
+#plan .wpast em{font-style:normal;color:var(--accent-ink);font-weight:600}
+#plan .wpast small{font-size:13px;font-weight:600;color:var(--accent-ink)}
+#plan .wpast[aria-expanded="true"]{padding:4px 0 10px}
+#plan .wpast[aria-expanded="true"] span{font-size:13px;font-weight:600;color:var(--accent-ink)}
+
+/* Programme FTP : une barre de paliers par séance */
+#plan .pgbars{list-style:none;margin:0;padding:0}
+#plan .pgbars li{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+#plan .pgbars b{font-size:14.5px}
+#plan .pgseg{display:flex;gap:3px}
+#plan .pgseg i{flex:1 1 0;height:8px;border-radius:2px;background:var(--h0)}
+#plan .pgseg i.ok{background:var(--good)}
+#plan .pgseg i.cur{background:var(--accent)}
+#plan .pgnext{font-size:13px;color:var(--muted);white-space:nowrap}
+@media (max-width:600px){#plan .pgbars li{grid-template-columns:1fr auto}#plan .pgseg{grid-column:1/-1;grid-row:2}}
+#plan .pgall{margin-top:6px;border-top:1px solid var(--line);padding-top:10px}
+#plan .pgall summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--accent-ink);list-style:none}
+#plan .pgall summary::-webkit-details-marker{display:none}
+#plan .pgall .pgl{margin-top:8px}
+
+/* Analyses repliables : le titre ouvre la carte, la phrase-réponse reste visible repliée */
+#plan .fold h2{margin-bottom:0}
+#plan .foldt{position:relative;display:flex;align-items:baseline;gap:4px 12px;flex-wrap:wrap;width:100%;border:0;background:none;
+  color:inherit;font:inherit;text-align:left;cursor:pointer;padding:0 26px 0 0}
+#plan .foldt::after{content:"";position:absolute;right:4px;top:6px;width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-3px);transition:transform .2s}
+#plan .fold.open .foldt::after{transform:rotate(-135deg) translateY(-1px)}
+#plan .fold .foldsum{margin:10px 0 0;color:var(--muted)}
+#plan .fold:not(.open) > :not(h2):not(.foldsum){display:none}
+#plan .fold.open .foldsum{display:none}
+#plan .fold.open h2{margin-bottom:14px}
+/* note des séances fondatrices, dans « Mes disponibilités » */
+#plan .avail .design{margin-top:14px;padding:10px 12px}
