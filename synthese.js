@@ -31,6 +31,8 @@ const GOALS = { ftp: 300, vo2: 65, date: "2026-12-31" };
 const PROJ = { days: 120, justFrac: .6, ftpDec: 0, vo2Dec: 1 };   // tendance sur 120 jours ; « un peu juste » si le rythme actuel couvre au moins 60 % du rythme nécessaire
 // FTP mesurée, comme le Plan (detectFtp) : meilleur 20 min × 95 % ou meilleur 1 h, sur 4 semaines glissantes, un point par semaine.
 // Ni test rampe ni FTP Garmin : chez toi ils surestiment la FTP (rampe 260-304 W pour un meilleur 20 min de 228 W en 2026).
+const ULTRA = { km: 250, kmh: 28, weeks: 8 };   // objectif ultra : 250 km à 28 km/h ; regarde la plus longue sortie dehors des 8 dernières semaines
+const PAL = { ss: ["sweet spot", 6], thr: ["seuil", 7], vo2r: ["VO2max", 5] };   // programme FTP du Plan : nom et nombre de paliers (STEPS de plan.js, vérifié par le test)
 const FTPM = { win: 28, step: 7, f20: .95, gap: 1.05 };   // gap : FTP du Plan plus de 5 % au-dessus de la mesure → conseiller le test 20 min
 // Détecteurs (« frais cachés »)
 const DET = { grayDays: 14, grayMin: 3, grayShare: .2, grayRunIF: .85, graySessionSec: 1200,   // zone grise : ≥ 3 séances non dures avec > 20 % du temps en zone 3 sur 14 jours
@@ -293,10 +295,32 @@ function ftpCheckLine(cur, last) {
   if (!last) return cur ? `FTP du Plan : ${num(cur)} W. Aucun effort de 20 min ou 1 h mesuré ces 4 dernières semaines : fais le test 20 min pour la vérifier.` : "";
   const when = new Date(last.a.dt).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), meas = `${num(last.v)} W (${last.l} à ${num(last.w)} W, le ${when})`;
   if (!cur) return `Ta meilleure mesure des 4 dernières semaines : ${meas}.`;
-  const gap = (cur / last.v - 1) * 100;
-  const tail = cur > last.v * FTPM.gap ? ` Ta FTP du Plan est ${num(gap)} % au-dessus : soit tu ne t'es pas employé à fond, soit elle est trop haute. Le test 20 min tranchera.`
-    : cur < last.v / FTPM.gap ? ` Tu as fait mieux que ta FTP du Plan : passe-la à ${num(last.v)} W.` : " Les deux concordent.";
-  return `FTP du Plan : ${num(cur)} W. Ta meilleure mesure des 4 dernières semaines : ${meas}.${tail}`;
+  const gap = (1 - last.v / cur) * 100;
+  if (cur > last.v * FTPM.gap) return `Mesurée sur 4 semaines : ${meas}, ${num(gap)} % sous ta FTP du Plan. Le test 20 min tranchera.`;
+  if (cur < last.v / FTPM.gap) return `Mesurée sur 4 semaines : ${meas}, mieux que ta FTP du Plan : passe-la à ${num(last.v)} W.`;
+  return `Mesurée sur 4 semaines : ${meas}, comme ta FTP du Plan.`;
+}
+// Ultra : plus longue sortie vélo dehors des 8 dernières semaines contre 250 km à 28 km/h (vitesse en mouvement) ; record de l'année en repère
+function ultraStat(acts, now) {
+  const y0 = new Date(new Date(now).getFullYear(), 0, 1).getTime(), out = acts.filter(a => a.t === "Ride" && a.m > 0 && a.mt > 0 && a.dt.getTime() <= now);
+  const longest = l => l.reduce((b, a) => !b || a.m > b.m ? a : b, null), r = a => a && { km: a.m / 1000, kmh: a.m / a.mt * 3.6, t: a.dt.getTime(), a };
+  return { last: r(longest(out.filter(a => a.dt.getTime() > now - ULTRA.weeks * 7 * DAY))), year: r(longest(out.filter(a => a.dt.getTime() >= y0))) };
+}
+function ultraLine(U) {
+  const L = U.last, d = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  const yr = U.year && (!L || U.year.km > L.km + 1) ? ` Record de l'année : ${num(U.year.km)} km le ${dayMonth(U.year.t)}.` : "";
+  if (!L) return { ok: false, text: `Aucune sortie dehors ces ${ULTRA.weeks} dernières semaines.${yr}` };
+  const dk = ULTRA.km - L.km, dv = ULTRA.kmh - L.kmh, ok = dk <= 0 && dv <= 0;
+  const miss = [dk > 0 ? `${num(dk)} km` : "", dv > 0 ? `${num(dv, 1)} km/h` : ""].filter(Boolean).join(" et ");
+  return { ok, text: `Plus longue sortie des ${ULTRA.weeks} dernières semaines : ${num(L.km)} km à ${num(L.kmh, 1)} km/h (${d(L.t)})${ok ? " : tu y es." : `, il manque ${miss}.`}${yr}` };
+}
+// Programme FTP du Plan (palLog) : paliers réussis et prochain palier de chaque échelle ; null sans suivi
+function palSummary(log) {
+  const L = (Array.isArray(log) ? log : []).filter(x => x && x.v === 2 && PAL[x.t] && Number.isInteger(x.k) && x.k >= 0 && x.k < PAL[x.t][1] && /^\d{4}-\d\d-\d\d$/.test(x.d || "")).sort((a, b) => a.d < b.d ? -1 : 1);
+  if (!L.length) return null;
+  const done = new Set(L.filter(x => x.ok).map(x => x.t + x.k)).size, total = Object.values(PAL).reduce((n, p) => n + p[1], 0);
+  const next = Object.keys(PAL).map(t => { const r = L.filter(x => x.t === t).pop(), k = r ? Math.min(r.k + (r.ok ? 1 : 0), PAL[t][1] - 1) : 0; return `${PAL[t][0]} #${k + 1}`; });
+  return `Programme FTP : ${done} palier${done > 1 ? "s" : ""} réussi${done > 1 ? "s" : ""} sur ${total}. Prochains : ${next.join(", ")}.`;
 }
 function objectivesAnswer(items) {   // items : [{ name, verdict }]
   const ok = items.filter(i => i.verdict);
@@ -428,7 +452,7 @@ function blkProgress(D) {
   const pk = P.peak ? `<small>${P.atPeak ? "ton plus haut de l'année" : `pic de l'année : ${nf(P.peak.v)} (${dayMonth(P.peak.t)}) · tu es à ${nf(P.share)} %`}</small>` : "";
   return `<section class="card hud span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2><p class="syans">${P.text}</p>
     <div class="synum"><span class="crbig syctl">${nf(P.cur)}</span><div class="synumt"><span class="sylab">niveau d'entraînement ${q("niveau")}</span>${ref}${pk}</div></div>${helpP("niveau")}
-    <div id="syMini"></div></section>`;
+    <div id="syMini"></div>${D.pal ? `<p class="syobl">${D.pal} <a href="#plan" data-go="plan" role="button">Voir dans le Plan</a></p>` : ""}</section>`;
 }
 function blkToday(D) {
   const A = D.adv, f = D.fit[D.fit.length - 1], rec = D.rec;
@@ -474,8 +498,9 @@ function blkGoals(D) {
       <div class="syscale"><span>${nf(o.start, dec)}${u} <small>${dShort(o.startT)}</small></span><span class="sypct">${o.pct < 0 ? "recul de " + nf(-o.pct) : nf(o.pct)} % du chemin</span><span>${nf(o.goal, dec)}${u}</span></div>
       <p class="syobl">${objLine(P, unit, dec, G.date)}</p>${extra}</div>`; };
   return `<section class="card span12 syblk" id="syGoals"><h2>Où j'en suis de mes objectifs ?</h2><p class="syans">${objectivesAnswer([{ name: "FTP", verdict: D.proj.ftp && D.proj.ftp.verdict }, { name: "VO2max", verdict: D.proj.vo2 && D.proj.vo2.verdict }])}</p>
-    <div class="syobjs">${row("FTP", O.ftp, D.proj.ftp, "W", PROJ.ftpDec, O.ftpCheck ? `<p class="syobl">${O.ftpCheck}</p>` : "")}${row("VO2max", O.vo2, D.proj.vo2, "", PROJ.vo2Dec)}</div>
-    <p class="note">Objectifs au ${endLabel(G.date)} : ${num(G.ftp)} W et ${num(G.vo2, G.vo2 % 1 ? 1 : 0)} de VO2max. <a href="#plan" data-go="plan" role="button">Les modifier dans le Plan</a>. FTP mesurée = meilleur 20 min × 95 % ou meilleur 1 h sur 4 semaines, comme le Plan (ni test rampe, ni FTP Garmin).</p></section>`;
+    <div class="syobjs">${row("FTP", O.ftp, D.proj.ftp, "W", PROJ.ftpDec, O.ftpCheck ? `<p class="syobl">${O.ftpCheck}</p>` : "")}${row("VO2max", O.vo2, D.proj.vo2, "", PROJ.vo2Dec)}
+      <div class="syobj"><div class="syoh"><b>Ultra : ${num(ULTRA.km)} km à ${num(ULTRA.kmh)} km/h</b>${O.ultra.ok ? `<span class="syverd" style="color:var(--good)">Prêt</span>` : ""}</div><p class="syobl">${O.ultra.text}</p></div></div>
+    <p class="note">Objectifs au ${endLabel(G.date)} : ${num(G.ftp)} W et ${num(G.vo2, G.vo2 % 1 ? 1 : 0)} de VO2max. <a href="#plan" data-go="plan" role="button">Les modifier dans le Plan</a>. FTP mesurée : meilleur 20 min × 95 % ou meilleur 1 h.</p></section>`;
 }
 function blkDet(D) {
   const rows = DETECTORS.filter(([k]) => D.det.res[k].active).map(([k, , , title]) => { const t = DET_TXT[k](D.det.res[k]);
@@ -600,14 +625,15 @@ function gather() {
   const proj = { ftp: projection(ftpSer, G.ftp, G.date, now, ftpNow, PROJ.ftpDec, true), ftpSer, vo2: projection(vo2Ser, G.vo2, G.date, now, vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, PROJ.vo2Dec), vo2Ser };
   const vo2Cur = vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null;
   const lastFtp = ftpSer.length && now - ftpSer[ftpSer.length - 1].t < DAY ? ftpSer[ftpSer.length - 1] : null;   // le point d'aujourd'hui = les 28 derniers jours
-  const obj = { ftp: objective(ftpSer, ftpNow, G.ftp, now), vo2: objective(vo2Ser, vo2Cur, G.vo2, now), goals: G, ftpCheck: ftpCheckLine(ftpNow, lastFtp) };
+  const obj = { ftp: objective(ftpSer, ftpNow, G.ftp, now), vo2: objective(vo2Ser, vo2Cur, G.vo2, now), goals: G, ftpCheck: ftpCheckLine(ftpNow, lastFtp), ultra: ultraLine(ultraStat(acts, now)) };
+  let pal = null; try { pal = palSummary(JSON.parse(localStorage.getItem("palLog"))); } catch (e) {}
   const res = detectAll(dctx, today), hist = Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, alertHistory(fn, dctx, today)]));
   const report = acts.length ? weekReport(dctx, today, planAPI) : null;
   // séance prévue ce soir (Plan) pour la phrase « Que faire aujourd'hui ? »
   let planned = null; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) planned = { label: pl.w && /#\d/.test(pl.w.title || "") ? pl.w.title : pl.label, dur: pl.dur, hard: !!(planAPI.TYPES[pl.t] && planAPI.TYPES[pl.t].hard) }; } catch (e) {}
   const f = fit[fit.length - 1];
   const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned });
-  return { today, now, acts, loads, daily, profile, proj, obj, det: { res, hist }, report, dctx, fit, prog: fit.length ? progress(fit) : null, adv, planned, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
+  return { pal, today, now, acts, loads, daily, profile, proj, obj, det: { res, hist }, report, dctx, fit, prog: fit.length ? progress(fit) : null, adv, planned, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
     ftp: { cur: ftpNow, ser: ftpSer, meas: lastFtp, v30: lastFtp ? listVariation(ftpSer, now, 30) : null },   // variation : la mesure contre la mesure, jamais la FTP du Plan contre une mesure
     vo2: { cur: vo2Cur, date: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].t : null, ser: vo2Ser, v30: listVariation(vo2Ser, now, 30) },
     thr: { pace: p.runPace, src: thrSrc }, rec };
@@ -708,7 +734,7 @@ async function open() {
   render();
 }
 
-window.Synthese = { open, render, _: { theilSen, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
+window.Synthese = { open, render, _: { theilSen, ultraStat, ultraLine, palSummary, ULTRA, PAL, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
   trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, wxHoursHtml, wxMoreUrl, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });

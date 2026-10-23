@@ -117,12 +117,24 @@ const pa = Y.projection(lineSer(1), 300, "2026-12-31", NOWT, 240, 0, true); near
 // objectifs du Plan (validés), sinon GOALS
 same(Y.goalsFrom({ ftp: 260, vo2: 65.5, date: "2027-03-31" }), { ftp: 260, vo2: 65.5, date: "2027-03-31", plan: true });
 same(Y.goalsFrom({ ftp: 9000, vo2: "x", date: "demain" }), { ftp: 300, vo2: 65, date: "2026-12-31", plan: true }, "valeurs hors plage : celles par défaut");
+// ultra : plus longue sortie dehors des 8 dernières semaines
+const ur = (back, km, h, t = "Ride") => ({ t, m: km * 1000, mt: h * 3600, dt: new Date(daysAgo(back)) });
+let U = Y.ultraStat([ur(70, 340, 14), ur(10, 150, 5.5), ur(5, 200, 6, "VirtualRide"), ur(3, 60, 2)], NOWT);
+assert.equal(U.last.km, 150, "home trainer ignoré"); assert.equal(U.year.km, 340);
+assert.equal(Y.ultraLine(U).text, "Plus longue sortie des 8 dernières semaines : 150 km à 27,3 km/h (29 sept.), il manque 100 km et 0,7 km/h. Record de l'année : 340 km le 31 juillet.");
+assert.equal(Y.ultraLine(Y.ultraStat([ur(4, 260, 9)], NOWT)).ok, true); assert.match(Y.ultraLine(Y.ultraStat([ur(4, 260, 9)], NOWT)).text, /tu y es\.$/);
+assert.match(Y.ultraLine(Y.ultraStat([], NOWT)).text, /^Aucune sortie dehors/);
+// paliers du programme FTP (mêmes nombres que STEPS de plan.js)
+for (const [t, [, n]] of Object.entries(Y.PAL)) assert.equal(read("../plan.js").match(new RegExp(`\\n  ${t}: \\[([^\\n]*)\\]`))[1].match(/\[\d/g).length, n, `paliers ${t}`);
+assert.equal(Y.palSummary([]), null); assert.equal(Y.palSummary([{ d: "2026-10-21", t: "ss", k: 0, ok: true }]), null, "anciens paliers sans v ignorés");
+assert.equal(Y.palSummary([{ d: "2026-10-21", t: "ss", k: 0, ok: true, v: 2 }, { d: "2026-10-23", t: "ss", k: 1, ok: false, v: 2 }, { d: "2026-10-22", t: "thr", k: 0, ok: true, v: 2 }]),
+  "Programme FTP : 2 paliers réussis sur 18. Prochains : sweet spot #2, seuil #2, VO2max #1.");
 same(Y.goalsFrom(null), { ftp: 300, vo2: 65, date: "2026-12-31", plan: false });
 assert.match(Y.objLine(proj(lineSer(1)), "W", 0, "2027-03-31"), / au 31\/03\./, "date de l'objectif du Plan");
 // FTP du Plan contre la mesure
 const lastM = { v: 196, w: 206, l: "20 min", a: { dt: new Date(2026, 9, 3) } };
-assert.equal(Y.ftpCheckLine(240, lastM), "FTP du Plan : 240 W. Ta meilleure mesure des 4 dernières semaines : 196 W (20 min à 206 W, le 3 oct.). Ta FTP du Plan est 22 % au-dessus : soit tu ne t'es pas employé à fond, soit elle est trop haute. Le test 20 min tranchera.");
-assert.match(Y.ftpCheckLine(200, lastM), /Les deux concordent\.$/); assert.match(Y.ftpCheckLine(180, lastM), /passe-la à 196 W\.$/);
+assert.equal(Y.ftpCheckLine(240, lastM), "Mesurée sur 4 semaines : 196 W (20 min à 206 W, le 3 oct.), 18 % sous ta FTP du Plan. Le test 20 min tranchera.");
+assert.match(Y.ftpCheckLine(200, lastM), /comme ta FTP du Plan\.$/); assert.match(Y.ftpCheckLine(180, lastM), /passe-la à 196 W\.$/);
 assert.match(Y.ftpCheckLine(240, null), /^FTP du Plan : 240 W\. Aucun effort .* test 20 min/); assert.equal(Y.ftpCheckLine(null, null), "");
 assert.deepEqual(Y.GOALS && JSON.parse(JSON.stringify(Y.GOALS)), { ftp: 300, vo2: 65, date: "2026-12-31" });
 
