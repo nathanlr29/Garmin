@@ -1045,14 +1045,14 @@ function render() {
   if (!$("pTop")) box.innerHTML = `<nav class="psum" aria-label="Sommaire du plan">${SUM.map(([id, l]) => `<button class="chip" data-sum="${id}">${l}</button>`).join("")}</nav>
     <div class="grid" id="pTop"></div><div class="grid" id="pAna"></div>`;
   const H = renderHead(prof, form, ready, W.ph, c);
-  $("pTop").innerHTML = `${H.goal}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${H.form}${renderAvail(c)}`;
+  $("pTop").innerHTML = `${H.goal}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${window.Reprise ? Reprise.html({ acts: S.all, items: Wc.items, now: Date.now() }) : ""}${H.form}${renderAvail(c)}`;
   renderAna(c, prof);
   bind(c, prof);
   spy();
 }
 // ------------------------------------------------------------------ Navigation dans l'onglet
 // Sommaire collant : un clic fait défiler jusqu'à la carte, la puce de la carte à l'écran est mise en avant
-const SUM = [["pDay", "Aujourd'hui"], ["pWeek", "Semaine"], ["pPgram", "Paliers"], ["pAvail", "Dispos"], ["pAna", "Analyses"]];
+const SUM = [["pDay", "Aujourd'hui"], ["pWeek", "Semaine"], ["pPgram", "Paliers"], ["pRun", "Course"], ["pAvail", "Dispos"], ["pAna", "Analyses"]];
 let spyObs = null;
 function spy() {
   const nav = document.querySelector("#plan .psum"); if (!nav) return;

@@ -237,6 +237,11 @@ html.bm-open{overflow:hidden}
 #plan .pgsteps span small{font-size:11px}
 #plan .pgsteps .ok{border-color:var(--good);color:var(--ink)}
 #plan .pgsteps .cur{border-color:var(--accent);color:var(--ink);font-weight:600}
+#plan .rpw{list-style:none;margin:0 0 4px;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px}
+#plan .rpw li{padding:2px 0 2px 8px;border-left:2px solid var(--line);font-size:14px}
+#plan .rpw li.ok{border-color:var(--good)}
+#plan .reprise .pgsteps{margin-top:12px}
+#plan .reprise .pgsteps span{min-width:52px}
 @media (max-width:600px){#plan .pgl li{grid-template-columns:1fr}}
 
 /* Sommaire collant de l'onglet (sous la barre d'application sur ordinateur, en haut de l'écran sur mobile) */
