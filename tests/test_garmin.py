@@ -362,6 +362,21 @@ class PoiTiles(unittest.TestCase):
                          {"id": "w5", "lat": 48.12346, "lon": -1.7, "t": {"landuse": "cemetery"}})
         self.assertIsNone(fp.compact({"type": "node", "id": 1, "lat": 48, "lon": -1, "tags": {"tourism": "viewpoint"}}))
         self.assertIsNone(fp.compact({"type": "way", "id": 2, "tags": {}}))
+        tags = {"shop": "bakery", "name": "Au Bon Pain", "addr:city": "Betton", "website": "https://x.fr", "phone": "+33 2 99 00 00 00",
+                "check_date:opening_hours": "2025-03-01", "fixme": "x"}
+        self.assertEqual(fp.compact({"type": "node", "id": 3, "lat": 48, "lon": -1, "tags": tags})["t"],
+                         {k: v for k, v in tags.items() if k != "fixme"})
+
+    def test_ancien_format_rafraichi_peu_a_peu(self):
+        from datetime import date
+        t = fp.tiles()
+        idx = {x: "2026-10-20" for x in t[1:]}
+        ver = {x: fp.FORMAT_V for x in t[3:]}
+        ver[t[2]] = 1
+        todo = fp.todo(idx, ver, date(2026, 10, 26))
+        self.assertEqual(todo, [t[0], t[1], t[2]])  # jamais fait, puis ancien format (sans entrée = version 1) ; les autres sont frais
+        idx[t[5]] = "2026-10-01"  # plus vieux que 14 jours, au bon format : après les anciens formats
+        self.assertEqual(fp.todo(idx, ver, date(2026, 10, 26)), [t[0], t[1], t[2], t[5]])
 
 
 if __name__ == "__main__":
