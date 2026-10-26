@@ -62,7 +62,7 @@ assert.equal(A._advise(L, { ...r, secs: 1.5 * 3600 }, null).length, 0, "moins de
   ctx.fetch = (url, o) => { if (!o) return Promise.resolve({ ok: false, status: 404 }); const id = bodies.push(decodeURIComponent(o.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ elements: [{ type: "node", id: 7, lat: 48.2, lon: -1.68, tags: { amenity: "drinking_water" } }, { type: "node", id, lat: 48.3, lon: -1.68, tags: { shop: "bakery" } }] }) }); };
   const els = await A._fetchPois(C, false);
   assert.equal(bodies.length, Math.ceil(n / 15), `${n} rectangles : ${Math.ceil(n / 15)} requêtes`);
-  assert.ok(bodies.every(b => b.split("amenity").length - 1 <= 15), "15 rectangles au plus par requête");
+  assert.ok(bodies.every(b => b.split("drinking_water").length - 1 <= 15), "15 rectangles au plus par requête");
   assert.equal(els.length, 1 + bodies.length, "le point présent dans chaque réponse n'est gardé qu'une fois"); }
 // 2 sexies) carreaux préparés (data/poi) : lus localement, Overpass seulement pour les rectangles hors des carreaux
 { const C = A._corridor(P), B = C.split("|"), posts = [], gets = [];
@@ -134,3 +134,13 @@ assert.ok(A._anecdote("x ".repeat(400)).length <= 300);
   assert.match(html, /href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&amp;query=Au%20Bon%20Pain%2C%20Betton" target="_blank" rel="noopener">Google Maps</);
   assert.match(html, />site</); assert.match(html, /href="tel:\+33299123456">02 99 12 34 56</); assert.match(html, /openstreetmap\.org\/node\/42/); }
 console.log("OK : horaires lus, arrêts conseillés cohérents, lieux à voir filtrés, fiches Google Maps et horaires du jour.");
+
+// McDonald's : ravito (ouvert tous les jours, toilettes et eau), les autres fast-foods ne sont pas pris
+assert.equal(A._kindOf({ amenity: "fast_food", name: "McDonald's", brand: "McDonald's" }), "mcdo");
+assert.equal(A._kindOf({ amenity: "fast_food", brand: "McDonald's" }), "mcdo", "nom absent, marque présente");
+assert.equal(A._kindOf({ amenity: "fast_food", name: "Kebab du port" }), null);
+{ const els2 = [node(.48, 30, { amenity: "drinking_water", name: "Fontaine" }), node(.57, 40, { amenity: "fast_food", name: "McDonald's", opening_hours: "Mo-Su 07:00-23:00" }), node(.58, 30, { amenity: "cafe", name: "Bar de la place", opening_hours: "Mo-Su 07:00-20:00" })];
+  const L2 = A._place(els2, P, r); L2.forEach(p => { if (p.t.opening_hours) p.oh = A._ohSimple(p.t.opening_hours, p.t0); });
+  const a2 = A._advise(L2, r, { drink: .6, cap: 1.2, rate: 60, water: 2.4 }), rv = a2.find(a => a.role === "ravito");
+  assert.equal(rv && rv.p.name, "McDonald's", "McDo préféré au bar"); assert.match(rv.why, /toilettes/); }
+console.log("arrets mcdo ok");

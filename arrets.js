@@ -29,6 +29,7 @@ const KINDS = {
   shop: { cat: "ravito", ic: "🛒", l: "Épicerie", s: "Épicerie", fit: "store", sym: "Convenience Store" },
   fuel: { cat: "ravito", ic: "⛽", l: "Station-service", s: "Station", fit: "store", sym: "Gas Station" },
   cafe: { cat: "ravito", ic: "☕", l: "Café", s: "Café", fit: "food", sym: "Restaurant" },
+  mcdo: { cat: "ravito", ic: "🍔", l: "McDonald's", s: "McDo", fit: "food", sym: "Fast Food" },  // ouvert tous les jours, tard, toilettes et eau
   toilets: { cat: "wc", ic: "🚻", l: "Toilettes", s: "WC", fit: "toilet", sym: "Restroom" },
   repair: { cat: "repa", ic: "🔧", l: "Station de réparation", s: "Répar. vélo", fit: "gear", sym: "Bike Trail" },
   bikeshop: { cat: "repa", ic: "🚲", l: "Magasin de vélo", s: "Vélociste", fit: "gear", sym: "Bike Trail" },
@@ -50,6 +51,7 @@ function kindOf(t) {
   if (/^(convenience|supermarket|general|greengrocer|farm)$/.test(t.shop || "")) return "shop";
   if (t.amenity === "fuel") return "fuel";
   if (/^(cafe|bar|pub)$/.test(t.amenity || "")) return "cafe";
+  if (t.amenity === "fast_food" && /mcdonald/i.test((t.name || "") + (t.brand || ""))) return "mcdo";
   if (t.amenity === "toilets") return "toilets";
   if (t.amenity === "bicycle_repair_station") return "repair";
   if (t.shop === "bicycle") return "bikeshop";
@@ -101,6 +103,7 @@ const query = (L, voir) => {
     A('["amenity"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|grave_yard)$"]');
     A('["shop"~"^(bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle)$"]');
     A('["landuse"="cemetery"]');
+    A('["amenity"="fast_food"]["name"~"McDonald",i]');
     if (voir) {  // le tag wikipedia ou wikidata est vérifié ensuite (voirKind)
       A('["historic"~"^(castle|manor|chateau|church|chapel|archaeological_site|megalith|menhir|dolmen|tumulus|mill|windmill|watermill|wayside_cross|wayside_shrine|calvary|monument|ruins)$"]["wikidata"]');
       A('["amenity"="place_of_worship"]["wikidata"]'); A('["tourism"="viewpoint"]'); A('["man_made"~"^(windmill|watermill)$"]["wikidata"]');
@@ -111,7 +114,7 @@ const query = (L, voir) => {
 };
 const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type", "addr:city", "addr:street", "addr:housenumber", "website", "contact:website", "phone", "contact:phone", "check_date:opening_hours", "check_date"];
 const CHUNK = 15;
-const K_POI = "soPoi", POI_V = 5, POI_TTL = 7 * 864e5;
+const K_POI = "soPoi", POI_V = 6, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
 // 429 (plus de place pour cette IP) ou 502-504 (serveur saturé, environ une requête sur deux le 13/10/2026) : on attend et on redemande au même serveur, 3 fois au plus.
@@ -232,7 +235,7 @@ const sameDay = (a, b) => a && b && a.toDateString() === b.toDateString();
 // Horaires du jour de la sortie (« samedi 7h-13h, 15h30-19h30 ») : bibliothèque opening_hours si chargée, sinon lecture simple, sinon texte brut abrégé
 const DAY_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 const MON_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
-const SHOP_K = new Set(["bakery", "shop", "fuel", "cafe", "bikeshop"]);  // commerces : « horaires inconnus » s'ils n'en ont pas
+const SHOP_K = new Set(["bakery", "shop", "fuel", "cafe", "mcdo", "bikeshop"]);  // commerces : « horaires inconnus » s'ils n'en ont pas
 function ohDay(s, t, lat, lon) {  // plages du jour de t, en minutes ; null si non lu
   if (window.opening_hours) {
     try { const oh = new window.opening_hours(s, { lat, lon, address: { country_code: "fr", state: "Bretagne" } }, 0);
@@ -351,11 +354,11 @@ function advise(L, r, nut) {
   }
   // ravitaillement ouvert au-delà de 3 h
   if (h > 3 && adv.length < 3) {
-    const shop = p => p.cat !== "ravito" || shut(p) ? Infinity : (known(p) ? 0 : 20) + (p.k === "fuel" ? 8 : 0) + (p.k === "bakery" || p.k === "shop" ? 0 : 4);
+    const shop = p => p.cat !== "ravito" || shut(p) ? Infinity : (known(p) ? 0 : 20) + (p.k === "fuel" ? 8 : 0) + (p.k === "bakery" || p.k === "shop" || p.k === "mcdo" ? 0 : 4);
     const same = adv.find(a => a.p.cat === "ravito" && Math.abs(atH(a.p) - h * .55) < .6);
     if (same) { same.role = "eau + ravito"; same.why += ` Profites-en pour acheter de quoi manger${rate ? ` (${rate} g de glucides par heure)` : ""}.`; }
     else { const f = pick(L, Math.max(early, h * .55), shop);
-      if (f) { used.add(f.id); adv.push({ p: f, role: "ravito", why: `Arrêt ravito vers ${hm(f.t0)}${known(f) ? "" : " (horaires à vérifier)"}${rate ? ` : il te faut ${rate} g de glucides par heure, de quoi recharger les poches pour la fin` : ""}${f.cat === "ravito" && f.k !== "fuel" ? ", et tu peux y remplir les bidons" : ""}.` }); } }
+      if (f) { used.add(f.id); adv.push({ p: f, role: "ravito", why: `Arrêt ravito vers ${hm(f.t0)}${known(f) ? "" : " (horaires à vérifier)"}${rate ? ` : il te faut ${rate} g de glucides par heure, de quoi recharger les poches pour la fin` : ""}${f.k === "mcdo" ? ", avec toilettes et eau pour les bidons" : f.cat === "ravito" && f.k !== "fuel" ? ", et tu peux y remplir les bidons" : ""}.` }); } }
   }
   return adv.slice(0, 3).sort((a, b) => a.p.km - b.p.km);
 }
