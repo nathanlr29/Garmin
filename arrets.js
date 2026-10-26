@@ -265,24 +265,9 @@ function hoursLine(p, now = new Date()) {
   if (cd && +cd[2] >= 1 && +cd[2] <= 12) x += ` (vérifiés en ${MON_FR[+cd[2] - 1]} ${cd[1]})`;
   return x;
 }
-// Fiche Google Maps sans clé (API « Maps URLs ») : nom + adresse si la commune est connue (la sienne, sinon celle d'un point à moins d'1 km, `nearCity`),
-// sinon nom + coordonnées (avec les seules coordonnées, Google pose un repère au lieu d'ouvrir la fiche du commerce) ;
-// point d'eau, cimetière, toilettes, station de réparation (sans fiche Google en général) ou lieu sans nom : coordonnées seules.
-const GENERIC = /^(boulangerie|boulangerie[- ]p[aâ]tisserie|p[aâ]tisserie|caf[eé]|bar|bar[- ]tabac|tabac|[eé]picerie|sup[eé]rette|alimentation|station[- ]service|magasin de v[eé]lo)$/i;
-const NO_FICHE = new Set(["water", "cemetery", "toilets", "repair"]);
-function gmapsUrl(p) {
-  const t = p.t || {}, n = String(t.name || t.brand || "").trim(), ll = `${(+p.lat).toFixed(5)},${(+p.lon).toFixed(5)}`, city = String(t["addr:city"] || p.city || "").trim();
-  const street = [t["addr:housenumber"], t["addr:street"]].filter(Boolean).join(" ").trim();
-  // nom générique (« Boulangerie », « Bar ») : sans la rue, Google listerait toutes les boulangeries de la commune
-  const vague = GENERIC.test(n) && !(street && city);
-  const q = !n || vague || NO_FICHE.has(p.k) ? ll : city ? [n, street, city].filter(Boolean).join(", ") : `${n} ${ll}`;
-  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
-}
-function nearCity(L) {  // commune d'un point voisin (moins d'1 km) quand OSM n'a pas addr:city
-  const C = L.filter(q => q.t["addr:city"]);
-  L.forEach(p => { if (p.t["addr:city"] || NO_FICHE.has(p.k)) return; let b = null, bd = 1000;
-    C.forEach(q => { const d = dist([p.lat, p.lon], [q.lat, q.lon]); if (d < bd) { bd = d; b = q; } }); if (b) p.city = b.t["addr:city"]; });
-}
+// Fiche Google Maps sans clé (API « Maps URLs ») : les coordonnées seules (« 48.12346,-1.65432 »), demande de Nathan du 26/10/2026 :
+// la recherche par nom et commune ne tombait pas toujours sur la bonne fiche ; un repère au bon endroit, on touche le commerce sur la carte
+const gmapsUrl = p => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(`${(+p.lat).toFixed(5)},${(+p.lon).toFixed(5)}`);
 function webUrl(t) {  // http(s) seulement (jamais « javascript: » venu d'OSM)
   let u = String(t.website || t["contact:website"] || "").split(";")[0].trim();
   if (u && !/^https?:\/\//i.test(u) && /^[\w-]+(\.[\w-]+)+(\/|$)/.test(u)) u = "https://" + u;
@@ -439,7 +424,6 @@ const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</s
 function annotate() {
   const { P, r } = ST.ctx, all = place(ST.poi, P, r);
   all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; p.hrs = hoursLine(p); });
-  nearCity(all);
   ST.stops = all.filter(p => p.cat !== "voir"); ST.cands = all.filter(p => p.cat === "voir");
   ST.adv = advise(ST.stops, r, ST.ctx.nut);
   // lieux déjà choisis : on garde le choix, avec km et heure de passage à jour
@@ -556,5 +540,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _nearCity: nearCity, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
 })();

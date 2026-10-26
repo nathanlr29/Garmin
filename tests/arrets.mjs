@@ -89,18 +89,8 @@ assert.ok(A._anecdote("x ".repeat(400)).length <= 300);
 { const G = "https://www.google.com/maps/search/?api=1&query=", q = u => decodeURIComponent(u.slice(G.length));
   const pt = (k, t, x = {}) => ({ id: "n42", k, lat: 48.123456, lon: -1.654321, t, t0: at("2026-10-31T10:30"), ...x });
   assert.ok(A._gmapsUrl(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton" })).startsWith(G), "API Maps URLs, sans clé");
-  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton" }))), "Au Bon Pain, Betton", "nom + commune");
-  assert.equal(q(A._gmapsUrl(pt("shop", { brand: "Proxi", "addr:housenumber": "3", "addr:street": "Rue de Rennes", "addr:city": "Betton" }))), "Proxi, 3 Rue de Rennes, Betton", "enseigne + adresse");
-  assert.equal(q(A._gmapsUrl(pt("cafe", { name: "Le Bistrot" }))), "Le Bistrot 48.12346,-1.65432", "sans commune : nom + coordonnées");
-  assert.equal(q(A._gmapsUrl(pt("cafe", { name: "Le Bistrot" }, { city: "Betton" }))), "Le Bistrot, Betton", "commune d'un voisin");
-  assert.equal(q(A._gmapsUrl(pt("shop", { shop: "convenience" }))), "48.12346,-1.65432", "sans nom : coordonnées");
-  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Boulangerie", "addr:city": "Betton" }))), "48.12346,-1.65432", "nom générique sans rue : coordonnées");
-  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Boulangerie", "addr:street": "Rue Nationale", "addr:city": "Betton" }))), "Boulangerie, Rue Nationale, Betton", "nom générique avec l'adresse");
-  assert.equal(q(A._gmapsUrl(pt("cemetery", { name: "Cimetière", "addr:city": "Betton" }))), "48.12346,-1.65432", "cimetière : l'emplacement suffit");
-  assert.ok(A._gmapsUrl(pt("bakery", { name: "Pain & Cie", "addr:city": "Saint-Grégoire" })).includes("Pain%20%26%20Cie%2C%20Saint-Gr%C3%A9goire"), "requête encodée");
-  // commune voisine : seulement à moins d'1 km, jamais pour un point d'eau
-  { const L4 = [pt("bakery", { name: "A", "addr:city": "Betton" }), pt("cafe", { name: "B" }, { lat: 48.128 }), pt("cafe", { name: "C" }, { lat: 48.2 }), pt("water", {}, { lat: 48.124 })];
-    A._nearCity(L4); assert.deepEqual(L4.map(p => p.city), [undefined, "Betton", undefined, undefined]); }
+  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton" }))), "48.12346,-1.65432", "coordonnées seules, même avec nom et commune");
+  assert.equal(q(A._gmapsUrl(pt("water", {}))), "48.12346,-1.65432");
   // horaires du jour (samedi 31/10/2026), sans la bibliothèque : lecture simple
   const H2 = "Mo-Sa 07:00-13:00,15:30-19:30; Su 07:30-12:30";
   assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2 }), at("2026-10-26T08:00")), "samedi 7h-13h, 15h30-19h30");
@@ -131,7 +121,7 @@ assert.ok(A._anecdote("x ".repeat(400)).length <= 300);
   assert.equal(A._telOf({}), null);
   assert.equal(A._osmUrl("w123"), "https://www.openstreetmap.org/way/123"); assert.equal(A._osmUrl("x1"), null);
   const html = A._linksHtml(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton", website: "https://pain.fr", phone: "0299123456", opening_hours: H2 }));
-  assert.match(html, /href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&amp;query=Au%20Bon%20Pain%2C%20Betton" target="_blank" rel="noopener">Google Maps</);
+  assert.match(html, /href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&amp;query=48.12346%2C-1.65432" target="_blank" rel="noopener">Google Maps</);
   assert.match(html, />site</); assert.match(html, /href="tel:\+33299123456">02 99 12 34 56</); assert.match(html, /openstreetmap\.org\/node\/42/); }
 console.log("OK : horaires lus, arrêts conseillés cohérents, lieux à voir filtrés, fiches Google Maps et horaires du jour.");
 
