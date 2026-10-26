@@ -38,7 +38,12 @@ FILTERS = [
 # mêmes champs que KEEP_T dans arrets.js
 KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee",
           "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type",
-          "archaeological_site", "megalith_type"]
+          "archaeological_site", "megalith_type", "addr:city", "addr:street", "addr:housenumber", "website", "contact:website",
+          "phone", "contact:phone", "check_date:opening_hours", "check_date"]
+# Version du format des carreaux, à incrémenter quand FILTERS ou KEEP_T changent : les carreaux d'un format plus ancien
+# repassent en tête de file, au rythme normal (3 ou 4 par passage), sans tout retélécharger d'un coup.
+# index.json : {"<carreau>": "AAAA-MM-JJ", …, "_v": {"<carreau>": version}} (sans entrée dans "_v" : version 1).
+FORMAT_V = 2
 
 
 def tiles():
@@ -80,16 +85,23 @@ def fetch(name, tries=2):
     return None
 
 
+def todo(idx, ver, today):
+    """Carreaux à (re)télécharger : jamais faits, puis d'un ancien format, puis plus vieux que MAX_AGE (les plus anciens d'abord)."""
+    old = (today - timedelta(days=MAX_AGE)).isoformat()
+    stale = [t for t in tiles() if idx.get(t, "") < old or ver.get(t, 1) < FORMAT_V]
+    return sorted(stale, key=lambda t: (t in idx, ver.get(t, 1) >= FORMAT_V, idx.get(t, "")))
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     try:
         idx = json.loads(INDEX.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         idx = {}
-    old = (date.today() - timedelta(days=MAX_AGE)).isoformat()
-    todo = sorted((t for t in tiles() if idx.get(t, "") < old), key=lambda t: idx.get(t, ""))  # jamais faits, puis les plus anciens
+    ver = idx.pop("_v", None)
+    ver = ver if isinstance(ver, dict) else {}
     t0, done = time.time(), 0
-    for t in todo[:PER_RUN]:
+    for t in todo(idx, ver, date.today())[:PER_RUN]:
         if time.time() - t0 > BUDGET_S:
             break
         els = fetch(t)
@@ -97,9 +109,12 @@ def main():
             continue
         (OUT / f"{t}.json").write_text(json.dumps(els, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         idx[t] = date.today().isoformat()
+        ver[t] = FORMAT_V
         done += 1
         time.sleep(2)
-    INDEX.write_text(json.dumps(dict(sorted(idx.items())), separators=(",", ":")), encoding="utf-8")
+    out = dict(sorted(idx.items()))
+    out["_v"] = {t: v for t, v in sorted(ver.items()) if t in idx}
+    INDEX.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
     print(f"Points d'arrêt : {done} carreaux mis à jour, {len(idx)}/{len(tiles())} disponibles.")
 
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-const win = {}, ctx = { window: win, document: {}, localStorage: { getItem: () => null, setItem() {} }, nf: (v, d = 0) => (+v).toFixed(d).replace(".", ","), esc: s => String(s), setTimeout, clearTimeout, AbortController };
+const win = {}, ctx = { window: win, document: {}, localStorage: { getItem: () => null, setItem() {} }, nf: (v, d = 0) => (+v).toFixed(d).replace(".", ","), esc: s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])), setTimeout, clearTimeout, AbortController };
 vm.createContext(ctx);
 vm.runInContext(readFileSync(new URL("../arrets.js", import.meta.url), "utf8"), ctx);
 const A = win.Arrets;
@@ -85,4 +85,52 @@ assert.equal(A._voirKind({ man_made: "windmill", wikipedia: "fr:Moulin" }), "mil
 assert.equal(A._voirKind({ tourism: "viewpoint", wikidata: "Q2" }), "viewpoint");
 assert.equal(A._anecdote("Le menhir de Champ-Dolent est un menhir de Dol-de-Bretagne. Il mesure 9,5 m. Troisième phrase."), "Le menhir de Champ-Dolent est un menhir de Dol-de-Bretagne. Il mesure 9,5 m.");
 assert.ok(A._anecdote("x ".repeat(400)).length <= 300);
-console.log("OK : horaires lus, arrêts conseillés cohérents, lieux à voir filtrés.");
+// 4) fiche Google Maps sans clé, horaires du jour, site et téléphone
+{ const G = "https://www.google.com/maps/search/?api=1&query=", q = u => decodeURIComponent(u.slice(G.length));
+  const pt = (k, t, x = {}) => ({ id: "n42", k, lat: 48.123456, lon: -1.654321, t, t0: at("2026-10-31T10:30"), ...x });
+  assert.ok(A._gmapsUrl(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton" })).startsWith(G), "API Maps URLs, sans clé");
+  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton" }))), "Au Bon Pain, Betton", "nom + commune");
+  assert.equal(q(A._gmapsUrl(pt("shop", { brand: "Proxi", "addr:housenumber": "3", "addr:street": "Rue de Rennes", "addr:city": "Betton" }))), "Proxi, 3 Rue de Rennes, Betton", "enseigne + adresse");
+  assert.equal(q(A._gmapsUrl(pt("cafe", { name: "Le Bistrot" }))), "Le Bistrot 48.12346,-1.65432", "sans commune : nom + coordonnées");
+  assert.equal(q(A._gmapsUrl(pt("cafe", { name: "Le Bistrot" }, { city: "Betton" }))), "Le Bistrot, Betton", "commune d'un voisin");
+  assert.equal(q(A._gmapsUrl(pt("shop", { shop: "convenience" }))), "48.12346,-1.65432", "sans nom : coordonnées");
+  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Boulangerie", "addr:city": "Betton" }))), "48.12346,-1.65432", "nom générique sans rue : coordonnées");
+  assert.equal(q(A._gmapsUrl(pt("bakery", { name: "Boulangerie", "addr:street": "Rue Nationale", "addr:city": "Betton" }))), "Boulangerie, Rue Nationale, Betton", "nom générique avec l'adresse");
+  assert.equal(q(A._gmapsUrl(pt("cemetery", { name: "Cimetière", "addr:city": "Betton" }))), "48.12346,-1.65432", "cimetière : l'emplacement suffit");
+  assert.ok(A._gmapsUrl(pt("bakery", { name: "Pain & Cie", "addr:city": "Saint-Grégoire" })).includes("Pain%20%26%20Cie%2C%20Saint-Gr%C3%A9goire"), "requête encodée");
+  // commune voisine : seulement à moins d'1 km, jamais pour un point d'eau
+  { const L4 = [pt("bakery", { name: "A", "addr:city": "Betton" }), pt("cafe", { name: "B" }, { lat: 48.128 }), pt("cafe", { name: "C" }, { lat: 48.2 }), pt("water", {}, { lat: 48.124 })];
+    A._nearCity(L4); assert.deepEqual(L4.map(p => p.city), [undefined, "Betton", undefined, undefined]); }
+  // horaires du jour (samedi 31/10/2026), sans la bibliothèque : lecture simple
+  const H2 = "Mo-Sa 07:00-13:00,15:30-19:30; Su 07:30-12:30";
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2 }), at("2026-10-26T08:00")), "samedi 7h-13h, 15h30-19h30");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2 }), at("2026-10-31T08:00")), "aujourd'hui 7h-13h, 15h30-19h30");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2 }, { t0: at("2026-11-01T10:00") }), at("2026-10-31T20:00")), "demain 7h30-12h30");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: "Mo-Fr 07:00-19:00; Sa,Su off" }), at("2026-10-26T08:00")), "fermé le samedi");
+  assert.equal(A._hoursLine(pt("fuel", { opening_hours: "24/7" }), at("2026-10-31T08:00")), "aujourd'hui ouvert 24 h/24");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2, "check_date:opening_hours": "2024-03-12" }), at("2026-10-26T08:00")), "samedi 7h-13h, 15h30-19h30 (vérifiés en mars 2024)");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: H2, check_date: "2025-06" }), at("2026-10-26T08:00")), "samedi 7h-13h, 15h30-19h30 (vérifiés en juin 2025)");
+  assert.equal(A._hoursLine(pt("bakery", { opening_hours: "Mo-Sa 07:00-19:00; PH off; Jan off" }), at("2026-10-26T08:00")), "horaires : lu-sa 7h-19h ; fériés fermé ; Jan fermé", "non lu : texte brut abrégé");
+  assert.ok(A._ohBrief("Mo 08:00-12:00; Tu 08:00-12:00; We 08:00-12:00; Th 08:00-12:00; Fr 08:00-12:00").length <= 48);
+  assert.equal(A._hoursLine(pt("bakery", { name: "X" })), "horaires inconnus, vois Google Maps", "commerce sans horaires");
+  assert.equal(A._hoursLine(pt("water", {})), "", "point d'eau sans horaires : rien");
+  // avec la bibliothèque opening_hours (bouchon) : plages du jour lues par getOpenIntervals
+  { const d = (h, m = 0) => { const x = new Date("2026-10-31T00:00"); x.setHours(h, m); return x; };
+    win.opening_hours = function () { this.getOpenIntervals = (a, b) => [[d(8), d(12, 15), false], [d(14), b, false]]; };
+    assert.equal(A._hoursLine(pt("bakery", { opening_hours: "x" }), at("2026-10-26T08:00")), "samedi 8h-12h15, 14h-minuit");
+    win.opening_hours = function () { this.getOpenIntervals = (a, b) => [[d(8), d(12), true, "sur rendez-vous"]]; };
+    assert.match(A._hoursLine(pt("bikeshop", { opening_hours: "Sa 08:00-12:00 \"sur rendez-vous\"" }), at("2026-10-26T08:00")), /^horaires : sa 8h-12h/, "plage incertaine : texte brut");
+    delete win.opening_hours; }
+  // site (http(s) seulement) et téléphone
+  assert.equal(A._webUrl({ website: "www.boulangerie.fr" }), "https://www.boulangerie.fr");
+  assert.equal(A._webUrl({ "contact:website": "https://a.fr/x;https://b.fr" }), "https://a.fr/x");
+  assert.equal(A._webUrl({ website: "javascript:alert(1)" }), null, "jamais javascript:");
+  assert.deepEqual({ ...A._telOf({ phone: "+33 2 99 12 34 56" }) }, { href: "tel:+33299123456", txt: "02 99 12 34 56" });
+  assert.deepEqual({ ...A._telOf({ "contact:phone": "02.99.12.34.56;0611223344" }) }, { href: "tel:+33299123456", txt: "02 99 12 34 56" });
+  assert.deepEqual({ ...A._telOf({ phone: "+33 (0)2 99 12 34 56" }) }, { href: "tel:+33299123456", txt: "02 99 12 34 56" });
+  assert.equal(A._telOf({}), null);
+  assert.equal(A._osmUrl("w123"), "https://www.openstreetmap.org/way/123"); assert.equal(A._osmUrl("x1"), null);
+  const html = A._linksHtml(pt("bakery", { name: "Au Bon Pain", "addr:city": "Betton", website: "https://pain.fr", phone: "0299123456", opening_hours: H2 }));
+  assert.match(html, /href="https:\/\/www\.google\.com\/maps\/search\/\?api=1&amp;query=Au%20Bon%20Pain%2C%20Betton" target="_blank" rel="noopener">Google Maps</);
+  assert.match(html, />site</); assert.match(html, /href="tel:\+33299123456">02 99 12 34 56</); assert.match(html, /openstreetmap\.org\/node\/42/); }
+console.log("OK : horaires lus, arrêts conseillés cohérents, lieux à voir filtrés, fiches Google Maps et horaires du jour.");

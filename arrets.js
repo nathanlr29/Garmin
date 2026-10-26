@@ -109,9 +109,9 @@ const query = (L, voir) => {
   });
   return `[out:json][timeout:60][maxsize:67108864];(${st.join("")});out tags center qt;`;
 };
-const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type"];
+const KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "access", "drinking_water", "disused", "seasonal", "fee", "wikipedia", "wikidata", "historic", "tourism", "natural", "man_made", "leisure", "building", "site_type", "archaeological_site", "megalith_type", "addr:city", "addr:street", "addr:housenumber", "website", "contact:website", "phone", "contact:phone", "check_date:opening_hours", "check_date"];
 const CHUNK = 15;
-const K_POI = "soPoi", POI_V = 4, POI_TTL = 7 * 864e5;
+const K_POI = "soPoi", POI_V = 5, POI_TTL = 7 * 864e5;
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const ST = { inflight: new Map(), poi: null, voirSel: null, stops: [], cands: [], key: null, err: "", seq: 0, layer: null, adv: [], list: [], ctx: null, showAll: false };
 // 429 (plus de place pour cette IP) ou 502-504 (serveur saturé, environ une requête sur deux le 13/10/2026) : on attend et on redemande au même serveur, 3 fois au plus.
@@ -192,9 +192,10 @@ function ohLib() {
   return OHL.p;
 }
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-function ohSimple(s, t) {  // « Mo-Sa 07:00-13:00,15:00-19:30; Su 07:00-12:30 », « 24/7 », « Mo off »… ; null si non lu
-  s = String(s).trim(); if (s === "24/7") return { open: true };
-  const dow = t.getDay(), now = t.getHours() * 60 + t.getMinutes(), DR = "(?:Mo|Tu|We|Th|Fr|Sa|Su)";
+// plages d'ouverture d'un jour de la semaine, en minutes ([[420, 780], [900, 1170]]) ; [] = fermé ; null si non lu
+function ohRanges(s, dow) {  // « Mo-Sa 07:00-13:00,15:00-19:30; Su 07:00-12:30 », « 24/7 », « Mo off »…
+  s = String(s).trim(); if (s === "24/7") return [[0, 1440]];
+  const DR = "(?:Mo|Tu|We|Th|Fr|Sa|Su)";
   let today;
   for (let rule of s.split(";")) {
     rule = rule.trim(); if (!rule || /^PH\b/.test(rule)) continue;
@@ -209,8 +210,13 @@ function ohSimple(s, t) {  // « Mo-Sa 07:00-13:00,15:00-19:30; Su 07:00-12:30 �
     else return null;
     if (days.has(dow)) today = R;
   }
-  if (!today) return { open: false };
-  const at = mm => { const d = new Date(t); d.setHours(0, mm, 0, 0); return d; };
+  return today || [];
+}
+function ohSimple(s, t) {  // état à l'heure t : { open, next } ; null si non lu
+  const today = ohRanges(s, t.getDay()); if (!today) return null;
+  if (today.length === 1 && today[0][0] === 0 && today[0][1] === 1440) return { open: true };
+  if (!today.length) return { open: false };
+  const now = t.getHours() * 60 + t.getMinutes(), at = mm => { const d = new Date(t); d.setHours(0, mm, 0, 0); return d; };
   for (const [a, b0] of today) { const b = b0 <= a ? b0 + 1440 : b0; if (now >= a && now < b) return { open: true, next: at(b) }; }
   const nx = today.map(r => r[0]).filter(a => a > now).sort((a, b) => a - b)[0];
   return { open: false, next: nx != null ? at(nx) : null };
@@ -223,6 +229,76 @@ function ohState(s, t, lat, lon) {
   const r = ohSimple(s, t); return r || { open: null };
 }
 const sameDay = (a, b) => a && b && a.toDateString() === b.toDateString();
+// Horaires du jour de la sortie (« samedi 7h-13h, 15h30-19h30 ») : bibliothèque opening_hours si chargée, sinon lecture simple, sinon texte brut abrégé
+const DAY_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const MON_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const SHOP_K = new Set(["bakery", "shop", "fuel", "cafe", "bikeshop"]);  // commerces : « horaires inconnus » s'ils n'en ont pas
+function ohDay(s, t, lat, lon) {  // plages du jour de t, en minutes ; null si non lu
+  if (window.opening_hours) {
+    try { const oh = new window.opening_hours(s, { lat, lon, address: { country_code: "fr", state: "Bretagne" } }, 0);
+      const d0 = new Date(t); d0.setHours(0, 0, 0, 0); const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
+      const iv = oh.getOpenIntervals(d0, d1), mn = d => d.getHours() * 60 + d.getMinutes();
+      if (iv.some(x => x[2])) return null;  // plage « peut-être ouvert » (commentaire, sur rendez-vous…) : texte brut
+      return iv.map(([a, b]) => [a <= d0 ? 0 : mn(a), b >= d1 ? 1440 : mn(b)]);
+    } catch (e) {}
+  }
+  return ohRanges(s, t.getDay());
+}
+const hMin = m => m >= 1440 ? "minuit" : `${Math.floor(m / 60)}h${m % 60 ? pad(m % 60) : ""}`;
+function dayWord(t, now) { const d = new Date(now); if (sameDay(t, d)) return "aujourd'hui"; d.setDate(d.getDate() + 1); return sameDay(t, d) ? "demain" : DAY_FR[t.getDay()]; }
+const DFR = { Mo: "lu", Tu: "ma", We: "me", Th: "je", Fr: "ve", Sa: "sa", Su: "di", PH: "fériés" };
+function ohBrief(s) {  // « Mo-Sa 07:00-19:00; Su off » → « lu-sa 7h-19h ; di fermé », 48 caractères au plus
+  const x = String(s).replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH)\b/g, d => DFR[d]).replace(/\b0?(\d{1,2}):(\d\d)\b/g, (_, h, m) => `${+h}h${m === "00" ? "" : m}`)
+    .replace(/\b(off|closed)\b/g, "fermé").replace(/\s*;\s*/g, " ; ").trim();
+  return x.length > 48 ? x.slice(0, 47).trimEnd() + "…" : x;
+}
+function hoursLine(p, now = new Date()) {
+  const s = p.t.opening_hours;
+  if (!s) return SHOP_K.has(p.k) ? "horaires inconnus, vois Google Maps" : "";
+  const R = ohDay(s, p.t0, p.lat, p.lon), w = dayWord(p.t0, now);
+  let x = !R ? "horaires : " + ohBrief(s) : R.length === 1 && R[0][0] === 0 && R[0][1] >= 1440 ? `${w} ouvert 24 h/24`
+    : R.length ? `${w} ${R.map(([a, b]) => `${hMin(a)}-${hMin(b)}`).join(", ")}` : `fermé ${/^(aujourd|demain)/.test(w) ? w : "le " + w}`;
+  const cd = /^(\d{4})-(\d\d)/.exec(p.t["check_date:opening_hours"] || p.t.check_date || "");
+  if (cd && +cd[2] >= 1 && +cd[2] <= 12) x += ` (vérifiés en ${MON_FR[+cd[2] - 1]} ${cd[1]})`;
+  return x;
+}
+// Fiche Google Maps sans clé (API « Maps URLs ») : nom + adresse si la commune est connue (la sienne, sinon celle d'un point à moins d'1 km, `nearCity`),
+// sinon nom + coordonnées (avec les seules coordonnées, Google pose un repère au lieu d'ouvrir la fiche du commerce) ;
+// point d'eau, cimetière, toilettes, station de réparation (sans fiche Google en général) ou lieu sans nom : coordonnées seules.
+const GENERIC = /^(boulangerie|boulangerie[- ]p[aâ]tisserie|p[aâ]tisserie|caf[eé]|bar|bar[- ]tabac|tabac|[eé]picerie|sup[eé]rette|alimentation|station[- ]service|magasin de v[eé]lo)$/i;
+const NO_FICHE = new Set(["water", "cemetery", "toilets", "repair"]);
+function gmapsUrl(p) {
+  const t = p.t || {}, n = String(t.name || t.brand || "").trim(), ll = `${(+p.lat).toFixed(5)},${(+p.lon).toFixed(5)}`, city = String(t["addr:city"] || p.city || "").trim();
+  const street = [t["addr:housenumber"], t["addr:street"]].filter(Boolean).join(" ").trim();
+  // nom générique (« Boulangerie », « Bar ») : sans la rue, Google listerait toutes les boulangeries de la commune
+  const vague = GENERIC.test(n) && !(street && city);
+  const q = !n || vague || NO_FICHE.has(p.k) ? ll : city ? [n, street, city].filter(Boolean).join(", ") : `${n} ${ll}`;
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+}
+function nearCity(L) {  // commune d'un point voisin (moins d'1 km) quand OSM n'a pas addr:city
+  const C = L.filter(q => q.t["addr:city"]);
+  L.forEach(p => { if (p.t["addr:city"] || NO_FICHE.has(p.k)) return; let b = null, bd = 1000;
+    C.forEach(q => { const d = dist([p.lat, p.lon], [q.lat, q.lon]); if (d < bd) { bd = d; b = q; } }); if (b) p.city = b.t["addr:city"]; });
+}
+function webUrl(t) {  // http(s) seulement (jamais « javascript: » venu d'OSM)
+  let u = String(t.website || t["contact:website"] || "").split(";")[0].trim();
+  if (u && !/^https?:\/\//i.test(u) && /^[\w-]+(\.[\w-]+)+(\/|$)/.test(u)) u = "https://" + u;
+  return /^https?:\/\/[^\s"'<>]+$/i.test(u) ? u : null;
+}
+function telOf(t) {  // { href: "tel:+33299…", txt: "02 99 …" }
+  const raw = String(t.phone || t["contact:phone"] || "").split(/[;,]/)[0].trim();
+  let d = raw.replace(/[^\d+]/g, "").replace(/^00/, "+").replace(/^\+330/, "+33");
+  if (d.replace(/\D/g, "").length < 6) return null;
+  const fr = /^\+33(\d{9})$/.exec(d), nat = fr ? "0" + fr[1] : /^0\d{9}$/.test(d) ? d : null;
+  if (/^0\d{9}$/.test(d)) d = "+33" + d.slice(1);
+  return { href: "tel:" + d, txt: nat ? nat.replace(/(\d\d)(?=\d)/g, "$1 ") : raw };
+}
+// « corriger sur OSM » : seulement pour les commerces (horaires à compléter ou à corriger), pour garder une ligne courte
+const osmUrl = id => { const m = /^([nwr])(\d+)$/.exec(id || ""); return m ? `https://www.openstreetmap.org/${{ n: "node", w: "way", r: "relation" }[m[1]]}/${m[2]}` : null; };
+function linksHtml(p, noHours) {
+  const h = noHours ? "" : p.hrs ?? hoursLine(p), w = webUrl(p.t), tel = telOf(p.t), osm = osmUrl(p.id), A = (u, x) => `<a href="${esc(u)}" target="_blank" rel="noopener">${x}</a>`;
+  return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(gmapsUrl(p), "Google Maps")}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
+}
 function statusTxt(p) {
   const o = p.oh; if (!o) return p.k === "cemetery" ? (p.winter ? "eau souvent coupée l'hiver" : "robinet probable, non garanti") : p.t.seasonal && p.t.seasonal !== "no" ? "saisonnier" : "";
   if (o.open === true) return o.next && sameDay(o.next, p.t0) ? `ouvert jusqu'à ${hh(o.next)}` : "ouvert";
@@ -299,7 +375,7 @@ const K_ALL = "soStopAll", allOn = () => LS.get(K_ALL, false) === true;   // lis
 const shownOnMap = (p, on, advIds) => advIds.has(p.id) || (p.cat === "voir" ? on.voir : allOn() && on[p.cat]);
 const catsOn = () => ({ eau: true, ravito: true, wc: true, repa: true, ...LS.get(K_CAT, {}), voir: decouv() && LS.get(K_CAT, {}).voir !== false });
 function iconHtml(p, big) { const c = CATS[p.cat]; return `<span class="stmk${big ? " big" : ""}" style="--c:${c.col}">${KINDS[p.k].ic}</span>`; }
-function tipHtml(p) { const st = statusTxt(p); return `<b>${esc(p.name)}</b><br>${KINDS[p.k].l} · km ${fmt(p.km, 1)} · vers ${hm(p.t0)}<br>à ${fmt(p.off)} m du tracé${st ? `<br>${esc(st)}` : ""}`; }
+function tipHtml(p) { const st = statusTxt(p), h = (p.hrs ?? hoursLine(p)).replace(/, vois Google Maps$/, ""); return `<b>${esc(p.name)}</b><br>${KINDS[p.k].l} · km ${fmt(p.km, 1)} · vers ${hm(p.t0)}<br>à ${fmt(p.off)} m du tracé${st ? `<br>${esc(st)}` : ""}${h ? `<br>${esc(h)}` : ""}`; }
 function drawMap() {
   const map = ST.ctx && ST.ctx.map; if (!map || !window.L) return;
   if (!ST.layer || ST.layerMap !== map) { if (ST.layer) ST.layer.remove(); ST.layer = L.layerGroup().addTo(map); ST.layerMap = map; }
@@ -311,8 +387,10 @@ function drawMap() {
   });
 }
 function row(p, adv) {
-  const st = statusTxt(p), cls = p.oh ? (p.oh.open === true ? "ok" : p.oh.open === false ? "ko" : "") : p.k === "cemetery" ? "warn" : "";
-  return `<div class="strow${adv ? " adv" : ""}" data-pid="${p.id}">${iconHtml(p)}<button class="stname" data-go="${p.id}"><b>${esc(p.name)}</b><small>km ${fmt(p.km, 1)} · ${hm(p.t0)} · ${fmt(p.off)} m${st ? ` · <span class="st ${cls}">${esc(st)}</span>` : ""}</small></button>
+  // fermé toute la journée : la ligne d'horaires (« fermé le samedi ») remplace « fermé à ce moment-là »
+  const h = p.hrs ?? hoursLine(p), shutDay = p.oh && p.oh.open === false && /^fermé /.test(h);
+  const st = shutDay ? h : statusTxt(p), cls = p.oh ? (p.oh.open === true ? "ok" : p.oh.open === false ? "ko" : "") : p.k === "cemetery" ? "warn" : "";
+  return `<div class="strow${adv ? " adv" : ""}" data-pid="${p.id}">${iconHtml(p)}<div class="stbody"><button class="stname" data-go="${p.id}"><b>${esc(p.name)}</b><small>km ${fmt(p.km, 1)} · ${hm(p.t0)} · ${fmt(p.off)} m${st ? ` · <span class="st ${cls}">${esc(st)}</span>` : ""}</small></button>${linksHtml(p, shutDay)}</div>
     <label class="stgps" title="Ajouter au GPS (export GPX)"><input type="checkbox" data-gps="${p.id}" ${gpsOn(p) ? "checked" : ""}><span>GPS</span></label></div>`;
 }
 function render() {
@@ -357,7 +435,8 @@ const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</s
 </ol><p class="note">Sans ordinateur : branche l'Edge en USB et copie le .fit dans le dossier Garmin/NewFiles.</p></details>`;
 function annotate() {
   const { P, r } = ST.ctx, all = place(ST.poi, P, r);
-  all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; });
+  all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; p.hrs = hoursLine(p); });
+  nearCity(all);
   ST.stops = all.filter(p => p.cat !== "voir"); ST.cands = all.filter(p => p.cat === "voir");
   ST.adv = advise(ST.stops, r, ST.ctx.nut);
   // lieux déjà choisis : on garde le choix, avec km et heure de passage à jour
@@ -474,5 +553,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _nearCity: nearCity, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
 })();
