@@ -28,6 +28,7 @@ FILTERS = [
     '["amenity"~"^(drinking_water|water_point|toilets|cafe|bar|pub|fuel|bicycle_repair_station|grave_yard)$"]',
     '["shop"~"^(bakery|pastry|convenience|supermarket|general|greengrocer|farm|bicycle)$"]',
     '["landuse"="cemetery"]',
+    '["amenity"="fast_food"]["name"~"McDonald",i]',
     '["historic"~"^(castle|manor|chateau|church|chapel|archaeological_site|megalith|menhir|dolmen|tumulus|mill|windmill|watermill|wayside_cross|wayside_shrine|calvary|monument|ruins)$"]["wikidata"]',
     '["amenity"="place_of_worship"]["wikidata"]',
     '["tourism"="viewpoint"]',
@@ -43,7 +44,7 @@ KEEP_T = ["name", "brand", "amenity", "shop", "landuse", "opening_hours", "acces
 # Version du format des carreaux, à incrémenter quand FILTERS ou KEEP_T changent : les carreaux d'un format plus ancien
 # repassent en tête de file, au rythme normal (3 ou 4 par passage), sans tout retélécharger d'un coup.
 # index.json : {"<carreau>": "AAAA-MM-JJ", …, "_v": {"<carreau>": version}} (sans entrée dans "_v" : version 1).
-FORMAT_V = 2
+FORMAT_V = 3
 
 
 def tiles():
