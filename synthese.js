@@ -250,7 +250,10 @@ function progress(ser) {
 }
 
 // 2. Que faire aujourd'hui ? Seuils du Plan : fraîcheur (frais > 5, équilibré > −10, chargé > −25, très chargé), récup du jour < 45 = basse.
-// o : { tsb, reco (score du jour ou null), hrvLow (VFC basse 3 jours), planned ({ label, dur, hard } ou null ; label = titre avec le palier, « Sweet spot #2 · 3 × 10' », si la séance en a un) }
+// o : { tsb, reco (score du jour ou null), hrvLow (VFC basse 3 jours), planned ({ label, dur, hard } ou null ; label = titre avec le palier, « Sweet spot #2 · 3 × 10' », si la séance en a un),
+//       done (séances déjà faites aujourd'hui : [{ label, min, plan }], plan = séance du Plan, sinon sortie en plus) }
+// Séance du jour faite : la phrase le dit et passe à la récup ; s'il reste une séance prévue (vélo + course), le conseil porte sur elle.
+const doneList = L => cap(L.map(x => `${x.plan ? "séance" : "sortie"} « ${x.label} »${x.min ? ` (${x.min} min)` : ""}`).join(" et ")) + ` faite${L.length > 1 ? "s" : ""} ✓`;
 function advice(o) {
   const lab = formLabel(o.tsb), tired = lab === "chargé" || lab === "très chargé", reco = o.reco, recoLow = reco != null && reco < READY_LOW;
   const pl = o.planned, sess = pl ? `ta séance « ${pl.label} »${pl.dur ? ` de ${pl.dur} min` : ""} prévue ce soir` : null, hard = !!(pl && pl.hard);
@@ -259,6 +262,8 @@ function advice(o) {
   if (recoLow) reasons.push("récup basse"); else if (reco != null && reco < 65) reasons.push("récup moyenne");
   if (o.hrvLow) reasons.push("VFC basse");
   const bad = recoLow || lab === "très chargé" || (tired && o.hrvLow), mid = !bad && reasons.length > 0, why = reasons.join(" et ");
+  const done = (o.done || []).filter(Boolean);
+  if (done.length && !pl) return { text: `${doneList(done)}. ` + (reasons.length ? `${cap(why)} : récupère bien ce soir, mange bien et couche-toi tôt.` : "C'est bouclé pour aujourd'hui : place à la récup."), tone: "good", label: lab, reasons, done: true };
   let tone, text;
   if (bad) {
     tone = "bad";
@@ -271,7 +276,20 @@ function advice(o) {
     const state = lab === "frais" ? `Tu es frais${reco != null ? " et bien récupéré" : ""}` : `Ta fraîcheur est correcte${reco != null ? " et tu es bien récupéré" : ""}`;
     text = `${state} : ` + (hard ? `bon jour pour ${sess}.` : pl ? `${sess} se fait sans souci.` : lab === "frais" ? "bon jour pour une séance intense si tu en as envie." : "une séance normale passe bien.");
   }
+  if (done.length) text = `${doneList(done)}. ${text}`;
   return { text, tone, label: lab, reasons };
+}
+
+// séances du jour pour advice() : pl = Plan.plannedFor(jour) (vélo, avec `run` si une course est aussi prévue, ou course seule), acts = Plan.doneOn(jour).
+// planned = la première séance prévue pas encore faite (ni ratée), done = séances du Plan faites puis sorties en plus
+function todaySessions(pl, TYPES, acts) {
+  const S = pl ? [pl.sport === "run" ? null : pl, pl.sport === "run" ? pl : pl.run].filter(Boolean) : [], used = new Set();
+  const min = L => Math.round(L.reduce((n, a) => n + (a.mt || 0), 0) / 60) || null;
+  const lab = p => p.w && /#\d/.test(p.w.title || "") ? p.w.title : p.label;
+  const done = S.filter(p => p.st === "done").map(p => { (p.acts || []).forEach(a => used.add(a.id)); return { label: lab(p), min: min(p.acts || []), plan: true }; });
+  (acts || []).filter(a => !used.has(a.id)).forEach(a => done.push({ label: a.n || "sans nom", min: min([a]), plan: false }));
+  const left = S.find(p => p.st !== "done" && p.st !== "missed");
+  return { planned: left ? { label: lab(left), dur: left.dur, hard: !!(TYPES[left.t] && TYPES[left.t].hard) } : null, done };
 }
 
 // 3. Où j'en suis de mes objectifs ? Départ = valeur connue au 1er janvier (sinon la première de l'année), arrivée = objectif, repère = part du chemin faite
@@ -630,9 +648,9 @@ function gather() {
   const res = detectAll(dctx, today), hist = Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, alertHistory(fn, dctx, today)]));
   const report = acts.length ? weekReport(dctx, today, planAPI) : null;
   // séance prévue ce soir (Plan) pour la phrase « Que faire aujourd'hui ? »
-  let planned = null; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) planned = { label: pl.w && /#\d/.test(pl.w.title || "") ? pl.w.title : pl.label, dur: pl.dur, hard: !!(planAPI.TYPES[pl.t] && planAPI.TYPES[pl.t].hard) }; } catch (e) {}
+  let planned = null, done = []; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) ({ planned, done } = todaySessions(pl, planAPI.TYPES, planAPI.doneOn ? planAPI.doneOn(ymd(today)) : [])); else if (planAPI && planAPI.doneOn) done = todaySessions(null, planAPI.TYPES, planAPI.doneOn(ymd(today))).done; } catch (e) {}
   const f = fit[fit.length - 1];
-  const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned });
+  const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned, done });
   return { pal, today, now, acts, loads, daily, profile, proj, obj, det: { res, hist }, report, dctx, fit, prog: fit.length ? progress(fit) : null, adv, planned, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
     ftp: { cur: ftpNow, ser: ftpSer, meas: lastFtp, v30: lastFtp ? listVariation(ftpSer, now, 30) : null },   // variation : la mesure contre la mesure, jamais la FTP du Plan contre une mesure
     vo2: { cur: vo2Cur, date: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].t : null, ser: vo2Ser, v30: listVariation(vo2Ser, now, 30) },
@@ -734,7 +752,7 @@ async function open() {
   render();
 }
 
-window.Synthese = { open, render, _: { theilSen, ultraStat, ultraLine, palSummary, ULTRA, PAL, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
+window.Synthese = { open, render, _: { todaySessions, theilSen, ultraStat, ultraLine, palSummary, ULTRA, PAL, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
   trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, wxHoursHtml, wxMoreUrl, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });

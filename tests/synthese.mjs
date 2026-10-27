@@ -236,6 +236,22 @@ ad = Y.advice({ tsb: 10, reco: 44, hrvLow: false, planned: hardPl }); assert.equ
 ad = Y.advice({ tsb: 10, reco: 45, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "mid", "récup 45 : pas basse, mais moyenne"); assert.match(ad.text, /^Récup moyenne : /);
 ad = Y.advice({ tsb: 10, reco: 65, hrvLow: false, planned: hardPl }); assert.equal(ad.tone, "good", "65 et plus : bien récupéré (libellé « Plutôt en forme »)");
 for (const tsb of [-60, -25.01, -25, -10, 5, 5.01, 40]) assert.equal(Y.advice({ tsb, reco: 70, hrvLow: false, planned: null }).label, planLabel({ tsb }), `étiquette de fraîcheur à ${tsb} = celle du Plan`);
+// séance du jour faite : la phrase passe à la récup (demande de Nathan, 27/10/2026)
+const plain = o => JSON.parse(JSON.stringify(o)), TY = { thr: { hard: 1 }, end: {}, rfoot: {} }, thrPl = { t: "thr", dur: 60, label: "Seuil", w: { title: "Seuil #2 · 3 × 10'" } };
+let sj = Y.todaySessions({ ...thrPl, st: "plan" }, TY, []); assert.deepEqual(plain(sj), { planned: { label: "Seuil #2 · 3 × 10'", dur: 60, hard: true }, done: [] }, "rien de fait : la séance reste prévue");
+sj = Y.todaySessions({ ...thrPl, st: "done", acts: [{ id: 1, mt: 3720, n: "MyWhoosh" }] }, TY, [{ id: 1, mt: 3720, n: "MyWhoosh" }]);
+assert.equal(sj.planned, null); assert.deepEqual(plain(sj.done), [{ label: "Seuil #2 · 3 × 10'", min: 62, plan: true }], "séance faite : rattachée au Plan, pas comptée deux fois");
+ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: sj.planned, done: sj.done }); assert.equal(ad.tone, "good");
+assert.equal(ad.text, "Séance « Seuil #2 · 3 × 10' » (62 min) faite ✓. C'est bouclé pour aujourd'hui : place à la récup.");
+ad = Y.advice({ tsb: -30, reco: 70, hrvLow: false, planned: null, done: sj.done }); assert.equal(ad.tone, "good", "faite : plus de « à alléger »");
+assert.equal(ad.text, "Séance « Seuil #2 · 3 × 10' » (62 min) faite ✓. Fatigue récente très élevée : récupère bien ce soir, mange bien et couche-toi tôt.");
+sj = Y.todaySessions({ t: "end", dur: 90, label: "Endurance", st: "done", acts: [{ id: 2, mt: 5400 }], run: { t: "rfoot", dur: 30, label: "Footing", sport: "run", st: "plan" } }, TY, [{ id: 2, mt: 5400 }]);
+assert.deepEqual(plain(sj.planned), { label: "Footing", dur: 30, hard: false }, "vélo fait, course encore prévue");
+ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: sj.planned, done: sj.done });
+assert.equal(ad.text, "Séance « Endurance » (90 min) faite ✓. Tu es frais et bien récupéré : ta séance « Footing » de 30 min prévue ce soir se fait sans souci.");
+sj = Y.todaySessions(null, TY, [{ id: 3, mt: 2700, n: "Sortie vélo" }]); assert.deepEqual(plain(sj), { planned: null, done: [{ label: "Sortie vélo", min: 45, plan: false }] }, "sans plan : la sortie du jour compte");
+assert.match(Y.advice({ tsb: 0, reco: 70, hrvLow: false, planned: null, done: sj.done }).text, /^Sortie « Sortie vélo » \(45 min\) faite ✓\. C'est bouclé/);
+assert.equal(Y.todaySessions({ ...thrPl, st: "missed" }, TY, []).planned, null, "séance ratée (après 22 h) : plus « prévue ce soir »");
 assert.equal(Y.READY_LOW, 45); assert.match(read("../plan.js"), /ready\.today < 45/, "le seuil 45 est bien celui du Plan");
 
 // ---- 3. « Où j'en suis de mes objectifs ? » : départ au 1er janvier, aujourd'hui, objectif, part du chemin
