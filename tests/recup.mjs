@@ -8,11 +8,12 @@ import assert from "node:assert/strict";
 const here = f => new URL(f, import.meta.url);
 const parseLocal = s => { const [d, t = "00:00:00"] = s.split("T"); const [y, m, dd] = d.split("-").map(Number); const [h, mi, se] = t.split(":").map(Number); return new Date(y, m - 1, dd, h || 0, mi || 0, se || 0); };
 const RIDE = new Set(["Ride", "VirtualRide", "GravelRide", "MountainBikeRide"]);
+const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
 const nf = (v, d = 0) => v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 async function load(acts, rec) {
   const win = { Recup: { data: rec } };
-  const ctx = { window: win, S: { all: acts }, RIDE_TYPES: RIDE, parseLocal, nf, console,
+  const ctx = { window: win, S: { all: acts }, RIDE_TYPES: RIDE, parseLocal, nf, console, MONTHS: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
     localStorage: { getItem: k => k === "planFtp" ? "230" : null },
     document: { addEventListener() {}, getElementById() { return {}; } }, addEventListener() {}, innerWidth: 1, setInterval() {},
     Nav: { apply() {}, curTab() { return "plan"; } }, fetch: async () => ({ ok: true, json: async () => structuredClone(rec) }) };
@@ -83,7 +84,38 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
   assert.equal(E._.hrvTrend(E.days), null);
 }
 
-// ------------------------------------------------------------------ 4) Contrôle sur les vraies données : la séance seuil ratée du 20/10/2026
+// ------------------------------------------------------------------ 4) Respiration de la nuit
+{
+  const mk = (vals, f = () => ({})) => { const days = {}; vals.forEach((v, k) => { const t = new Date(2026, 8, 1 + k), d = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; days[d] = { d, f: 1, sl: 8 * 3600, ...(v == null ? {} : { rx: v }), rhr: 45, ...f(k) }; }); return { days }; };
+  const base = Array.from({ length: 30 }, (_, k) => 11 + (k % 3) * .2);   // 11,0 · 11,2 · 11,4 : normale 11,2
+  const run = async (tail, f) => { const { Recup } = await load([], mk([...base, ...tail], f)); return { R: Recup, t: Recup._.respTrend(Recup.days) }; };
+  let { R, t } = await run([11.4]);
+  assert.equal(t.level, "ok"); near(t.base.m, 11.2); assert.equal(t.fine, true);
+  assert.match(R._.respAnswer(t, true), /11,4 \/min<\/b> cette nuit, dans ta normale \(11,2 \/min/);
+  ({ R, t } = await run([12.5]));
+  assert.equal(t.level, "watch", "une nuit à +1,3 seule : à surveiller"); assert.match(R._.respAnswer(t, true), /1,3 au-dessus de ta normale \(11,2\) : à surveiller/);
+  ({ R, t } = await run([12.5, 12.6]));
+  assert.equal(t.level, "alert"); assert.equal(t.streak, 2); assert.match(R._.respAnswer(t, true), /depuis 2 nuits \(<b>12,6 \/min<\/b>/);
+  ({ R, t } = await run([12.5], k => k === 30 ? { rhr: 50 } : {}));
+  assert.equal(t.level, "alert", "une nuit + cœur au repos +5 bpm"); assert.match(R._.respAnswer(t, true), /avec le cœur au repos 5 bpm plus haut/);
+  ({ R, t } = await run([12.5], k => k === 30 ? { hrv: 70, hrvLo: 85 } : {}));
+  assert.equal(t.level, "alert"); assert.match(R._.respAnswer(t, true), /la VFC sous sa zone normale/);
+  ({ R, t } = await run([11.6], k => k === 30 ? { rhr: 52 } : {}));
+  assert.equal(t.level, "ok", "cœur haut mais respiration normale : pas d'alerte respiration");
+  ({ R, t } = await run([10]));
+  assert.equal(t.level, "low");
+  ({ R, t } = await run([12.5, null]));
+  assert.equal(t.v, 12.5, "dernière nuit sans mesure : on garde la précédente"); assert.match(R._.respAnswer(t, false), /la nuit du 30 sept\. au 1 oct\./);
+  // valeur Garmin arrondie (resp) quand rx manque
+  const { Recup: G } = await load([], { days: Object.fromEntries(Object.entries(mk(base).days).map(([k, v]) => [k, { ...v, rx: undefined, resp: 11 }])) });
+  t = G._.respTrend(G.days); assert.equal(t.fine, false); assert.match(G._.respAnswer(t, true), /<b>11 \/min<\/b>/);
+  const { Recup: F } = await load([], mk(base.slice(0, 10)));
+  t = F._.respTrend(F.days); assert.equal(t.level, "nobase"); assert.match(F._.respAnswer(t, true), /Il faut 14 nuits/);
+  const { Recup: E } = await load([], { days: {} });
+  assert.equal(E._.respTrend(E.days), null); assert.match(E._.respAnswer(null), /Pas encore/);
+}
+
+// ------------------------------------------------------------------ 5) Contrôle sur les vraies données : la séance seuil ratée du 20/10/2026
 {
   const acts = JSON.parse(readFileSync(here("../data/activities.json"), "utf8")).map(a => ({ ...a, dt: parseLocal(a.d), km: a.m / 1000 }));
   const rec = JSON.parse(readFileSync(here("../data/recovery.json"), "utf8"));

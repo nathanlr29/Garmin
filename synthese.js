@@ -197,7 +197,13 @@ function detSleep(ctx, asOf) {
   const med = median(base.map(d => d.sl)), debt = last.reduce((s, d) => s + Math.max(0, med - d.sl), 0);
   return { active: debt > DET.sleepDebtSec, status: debt > DET.sleepDebtSec ? "actif" : "ok", debt, med, nights: last.length };
 }
-const DETECTORS = [["gray", "Zone grise", detGray, "Séances ni faciles ni dures"], ["load", "Charge qui monte trop vite", detLoad, "Charge qui monte trop vite"], ["hrv", "VFC basse", detHrv, "VFC basse"], ["sleep", "Dette de sommeil", detSleep, "Dette de sommeil"]];
+// respiration de la nuit au-dessus de ta normale (règle de l'onglet Récup, Recup._.respAt) : 2 nuits de suite, ou une nuit avec cœur au repos haut ou VFC basse
+function detResp(ctx, asOf) {
+  const k = keyOf(asOf), i = ctx.days.findIndex(d => d.d === k), r = i >= 0 && ctx.respAt ? ctx.respAt(ctx.days, i) : null;
+  if (!r || r.level === "nobase") return { active: false, status: "nodata" };
+  const on = r.level === "alert"; return { active: on, status: on ? "actif" : "ok", ...r };
+}
+const DETECTORS = [["gray", "Zone grise", detGray, "Séances ni faciles ni dures"], ["load", "Charge qui monte trop vite", detLoad, "Charge qui monte trop vite"], ["hrv", "VFC basse", detHrv, "VFC basse"], ["sleep", "Dette de sommeil", detSleep, "Dette de sommeil"], ["resp", "Respiration de nuit haute", detResp, "Respiration de nuit haute"]];
 // dernière alerte et nombre de jours en alerte sur les 90 derniers jours
 function alertHistory(fn, ctx, today, n = DET.history) {
   const day = dayStart(today); let last = null, count = 0;
@@ -573,6 +579,7 @@ const DET_TXT = {
   gray: r => ({ why: `${r.count} séances « ni faciles ni dures » en ${DET.grayDays} jours (plus de ${DET.grayShare * 100} % du temps en zone 3) : fatigantes sans apporter le stimulus d'une vraie séance dure.`, tip: "garde les séances faciles vraiment faciles (zones 1-2) et réserve l'intensité aux séances clés." }),
   load: r => ({ why: `Ta charge des 7 derniers jours (${nf(r.acute)}) est ${nf(r.ratio, 1)}× ta charge hebdomadaire habituelle des 28 jours d'avant (${nf(r.chronic)}).`, tip: "évite d'ajouter de l'intensité cette semaine et garde une journée vraiment facile." }),
   hrv: r => ({ why: `VFC (variabilité cardiaque) sous ta normale Garmin ${DET.hrvDays} jours de suite : ${r.vals.slice().reverse().map(v => `${nf(v.hrv)} ms (normale à partir de ${nf(v.lo)})`).join(", ")}.`, tip: "regarde d'abord le sommeil et la fatigue des derniers jours ; si la récup reste basse, garde la séance du jour facile." }),
+  resp: r => ({ why: `Respiration de la nuit à ${nf(r.v, r.fine ? 1 : 0)} /min, ${r.streak >= 2 ? `au-dessus de ta normale depuis ${r.streak} nuits` : `${nf(r.dv, 1)} au-dessus de ta normale`} (${nf(r.base.m, 1)})${r.signals.length ? `, avec ${r.signals.join(" et ")}` : ""} : ${window.Recup?._?.RESP_WHY || "ton corps est sous stress."}`, tip: "allège la séance du jour ; si ça continue ou si tu te sens patraque, repos complet." }),
   sleep: r => ({ why: `Il te manque ${nf(r.debt / 3600, 1)} h de sommeil sur ${r.nights} nuits par rapport à ta médiane des ${DET.sleepBase} nuits d'avant (${nf(r.med / 3600, 1)} h par nuit).`, tip: "récupère avec environ 1 h de plus par nuit cette semaine." }),
 };
 function detailsHtml(D) {
@@ -639,7 +646,7 @@ function gather() {
     v: rs && rs.score != null && prev.length >= 5 ? { delta: rs.score - prev.reduce((s, q) => s + q.v, 0) / prev.length } : null };
   // projection, détecteurs, relevé
   const planAPI = window.Plan && window.Plan.plannedFor ? window.Plan : null, recDays = (window.Recup && window.Recup.days) || [];
-  const dctx = { acts, loads, days: recDays, hardRide: a => planAPI ? planAPI.hardRide(a) : false, tssOf: a => ch.tssOf(a) };
+  const dctx = { acts, loads, days: recDays, respAt: window.Recup?._?.respAt, hardRide: a => planAPI ? planAPI.hardRide(a) : false, tssOf: a => ch.tssOf(a) };
   const proj = { ftp: projection(ftpSer, G.ftp, G.date, now, ftpNow, PROJ.ftpDec, true), ftpSer, vo2: projection(vo2Ser, G.vo2, G.date, now, vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null, PROJ.vo2Dec), vo2Ser };
   const vo2Cur = vo2Ser.length ? vo2Ser[vo2Ser.length - 1].v : null;
   const lastFtp = ftpSer.length && now - ftpSer[ftpSer.length - 1].t < DAY ? ftpSer[ftpSer.length - 1] : null;   // le point d'aujourd'hui = les 28 derniers jours
@@ -752,7 +759,7 @@ async function open() {
   render();
 }
 
-window.Synthese = { open, render, _: { todaySessions, theilSen, ultraStat, ultraLine, palSummary, ULTRA, PAL, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
+window.Synthese = { open, render, _: { todaySessions, theilSen, ultraStat, ultraLine, palSummary, ULTRA, PAL, ftpOf, ftpPoints, goalsFrom, ftpCheckLine, FTPM, projection, detGray, detLoad, detHrv, detSleep, detResp, DETECTORS, alertHistory, detectAll, weekReport, showReleve, median, GOALS, PROJ, DET, fitAt, fitSeries, variation, formLabel, sportShare, weeklyBySport, weekStats, vsAvg, listSeries, valueBefore, listVariation, recupColor, mondayOf, FIT_DAYS, PERIODS,
   trendWord, progress, advice, weekendDays, weekendWx, weekendAnswer, wxLine, wxHoursHtml, wxMoreUrl, windFrom, WX, objective, objLine, objectivesAnswer, detAnswer, weekAnswer, shareAnswer, curveTitle, weeksTitle, projTitle, hmTxt, peakOf, partOfMonth, TREND, READY_LOW, DET_TXT, HELP } };
 document.addEventListener("velo:loaded", () => { if (window.Nav && window.Nav.curTab() === "synthese") open(); });
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav && window.Nav.curTab() === "synthese" && S_.D) render(); }, 150); });
