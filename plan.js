@@ -1206,11 +1206,13 @@ function plannedFor(key, sport) {
   const d = parseYmd(key), mon = mondayOf(d), form = fitness(), ready = readiness();
   const W = withWorkouts(effective(mon, getCfg(), ctxFor(mon, form, ready))), it = W.items[dayIndex(d, mon)];
   if (!it) return null;
-  const run = it.run ? { day: it.day, date: it.date, t: it.run.t, dur: it.run.dur, slot: it.run.slot, w: it.run.w, label: TYPES[it.run.t].l, sport: "run" } : null;
-  const bike = it.bike ? { day: it.day, date: it.date, t: it.bike.t, dur: it.bike.dur, place: it.bike.place, w: it.bike.w, label: TYPES[it.bike.t].l, ftp: profile().ftp } : null;
+  const run = it.run ? { day: it.day, date: it.date, t: it.run.t, dur: it.run.dur, slot: it.run.slot, w: it.run.w, label: TYPES[it.run.t].l, sport: "run", st: it.run.st, acts: it.run.acts } : null;
+  const bike = it.bike ? { day: it.day, date: it.date, t: it.bike.t, dur: it.bike.dur, place: it.bike.place, w: it.bike.w, label: TYPES[it.bike.t].l, ftp: profile().ftp, st: it.bike.st, acts: it.bike.acts } : null;
   if (sport === "run") return run; if (sport === "bike") return bike;
   return bike ? (run ? { ...bike, run } : bike) : run;
 }
+// sorties vélo et course d'entraînement faites un jour donné (mêmes règles que le Plan), prévues ou non
+function doneOn(key) { const d = parseYmd(key), mon = mondayOf(d), f = weekFacts(mon)[dayIndex(d, mon)]; return f ? f.rides.concat(f.runs) : []; }
 
 // une seule fois par appareil : une FTP saisie issue des tests rampe (245 W et plus) passe à FTP0. Une FTP plus basse
 // (un test de 20 min fait depuis, saisi sur un autre appareil et synchronisé) n'est jamais écrasée.
@@ -1226,7 +1228,7 @@ async function open() {
   migrateFtp();
   render();
 }
-window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
