@@ -175,7 +175,14 @@ assert.equal(Y.detSleep(ctxOf({ days: [] }), D0).status, "nodata"); assert.equal
 const hrvLow = hrvDays(Array(100).fill(90)).map(d => (d.d >= win.Charge.ymd(new Date(daysAgo(40))) && d.d <= win.Charge.ymd(new Date(daysAgo(30)))) ? { ...d, hrv: 60 } : d);
 const ah = Y.alertHistory(Y.detHrv, ctxOf({ days: hrvLow }), D0, 90); assert.equal(ah.n, 90); assert.equal(new Date(ah.last).getDate(), new Date(daysAgo(30)).getDate(), "dernière alerte : le dernier jour bas (J-30)"); assert.equal(ah.count, 9, "J-38 à J-30 en alerte (il faut 3 jours bas de suite, donc pas J-40 ni J-39)");
 assert.equal(Y.alertHistory(Y.detHrv, ctxOf({ days: hrvDays(Array(100).fill(90)) }), D0).last, null, "jamais d'alerte");
-const all = Y.detectAll(ctxOf({ acts: [ride(1), ride(5), ride(9)] }), D0); assert.deepEqual(Object.keys(all), ["gray", "load", "hrv", "sleep"]); assert.equal(all.gray.active, true); assert.equal(all.hrv.status, "nodata");
+const all = Y.detectAll(ctxOf({ acts: [ride(1), ride(5), ride(9)] }), D0); assert.deepEqual(Object.keys(all), ["gray", "load", "hrv", "sleep", "resp"]); assert.equal(all.gray.active, true); assert.equal(all.hrv.status, "nodata");
+// respiration de nuit haute : règle de Recup (respAt), ici un faux ; sans respAt ni nuit du jour : nodata
+const rday = [{ d: win.Charge.ymd(D0) }], fake = level => () => ({ level, v: 13, fine: true, dv: 1.6, base: { m: 11.4 }, streak: 2, signals: [] });
+assert.equal(all.resp.status, "nodata", "sans respAt");
+assert.equal(Y.detResp(ctxOf({ days: rday, respAt: fake("alert") }), D0).active, true);
+assert.equal(Y.detResp(ctxOf({ days: rday, respAt: fake("watch") }), D0).status, "ok", "une seule nuit haute sans autre signal : pas d'alerte");
+assert.equal(Y.detResp(ctxOf({ days: rday, respAt: fake("nobase") }), D0).status, "nodata");
+assert.equal(Y.detResp(ctxOf({ days: [], respAt: fake("alert") }), D0).status, "nodata", "pas de nuit ce jour-là");
 assert.equal(Y.DET.loadRatio, 1.5); assert.equal(Y.DET.sleepDebtSec, 10800); assert.equal(Y.DET.grayShare, .2);
 
 // ---- relevé de la semaine (le lundi)
@@ -275,13 +282,13 @@ assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "dans les temps" }, { n
 assert.equal(Y.objectivesAnswer([{ name: "FTP", verdict: "un peu juste" }, { name: "VO2max", verdict: null }]), "L'objectif FTP est un peu juste."); assert.match(Y.objectivesAnswer([{ name: "FTP", verdict: null }]), /Pas assez de mesures/);
 
 // ---- 4. « Quelque chose cloche ? »
-const resOf = (o = {}) => ({ gray: { active: false, status: "ok" }, load: { active: false, status: "ok" }, hrv: { active: false, status: "ok" }, sleep: { active: false, status: "ok" }, ...o });
+const resOf = (o = {}) => ({ gray: { active: false, status: "ok" }, load: { active: false, status: "ok" }, hrv: { active: false, status: "ok" }, sleep: { active: false, status: "ok" }, resp: { active: false, status: "ok" }, ...o });
 assert.equal(Y.detAnswer(resOf()), "Rien à signaler aujourd'hui.");
 assert.equal(Y.detAnswer(resOf({ sleep: { active: false, status: "nodata" } })), "Rien à signaler aujourd'hui (pas assez de données pour : dette de sommeil).");
 assert.equal(Y.detAnswer(resOf({ hrv: { active: true, status: "actif" } })), "1 point d'attention : VFC basse.");
 assert.equal(Y.detAnswer(resOf({ hrv: { active: true }, load: { active: true } })), "2 points d'attention : charge qui monte trop vite et VFC basse.");
-assert.match(Y.detAnswer(resOf({ gray: { status: "nodata" }, load: { status: "nodata" }, hrv: { status: "nodata" }, sleep: { status: "nodata" } })), /^Pas assez de données/);
-assert.ok(!/TSS|CTL|ATL|TSB/.test(JSON.stringify(Object.values(Y.DET_TXT).map((f, i) => f({ count: 3, acute: 400, chronic: 250, ratio: 1.6, vals: [{ hrv: 50, lo: 60 }], debt: 4 * 3600, nights: 7, med: 8 * 3600 })))), "pas de sigle dans les explications des alertes");
+assert.match(Y.detAnswer(resOf({ gray: { status: "nodata" }, load: { status: "nodata" }, hrv: { status: "nodata" }, sleep: { status: "nodata" }, resp: { status: "nodata" } })), /^Pas assez de données/);
+assert.ok(!/TSS|CTL|ATL|TSB/.test(JSON.stringify(Object.values(Y.DET_TXT).map((f, i) => f({ count: 3, acute: 400, chronic: 250, ratio: 1.6, vals: [{ hrv: 50, lo: 60 }], debt: 4 * 3600, nights: 7, med: 8 * 3600, v: 13, fine: true, dv: 1.6, base: { m: 11.4 }, streak: 2, signals: [] })))), "pas de sigle dans les explications des alertes");
 
 // ---- 5. Ma semaine
 const ws2 = (cur, avgTo) => ({ cur: { hours: 0, n: 0, bike: 0, run: 0, strength: 0, other: 0, ...cur }, avgTo: { hours: 0, ...avgTo } });

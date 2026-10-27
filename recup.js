@@ -86,6 +86,7 @@ function renderRecup() {
     <section class="card span12"><h2>Fréquence cardiaque au repos <small id="rRhrInfo"></small></h2><p class="rans" id="rRhrAns"></p><div id="rRhr"></div></section>
     <section class="card span12"><h2>Tendance de la VFC <small id="rHrvTInfo"></small></h2><p class="rans" id="rHrvTAns"></p><div id="rHrvT"></div>
       <p class="note">Trait orange : moyenne de tes 7 dernières nuits ; points gris : chaque nuit ; bande verte : ta zone normale, calculée par Garmin sur tes dernières semaines. Une mauvaise nuit compte peu : c'est quand la moyenne sort de la zone qu'il faut lever le pied.</p></section>
+    <section class="card span12"><h2>Respiration pendant le sommeil <small id="rRespInfo"></small></h2><p class="rans" id="rRespAns"></p><div id="rResp"></div><p class="note" id="rRespNote"></p></section>
     <section class="card span12"><h2>Ce qui joue sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><p class="rans" id="rCmpAns"></p><div class="cmp" id="rCmp"></div>
       <p class="note">Tes nuits comparées entre elles (score de sommeil, durée, VFC). Seuls les facteurs dont l'écart est net, pas dû au hasard, sont gardés (5 au plus, 6 nuits concernées au moins) : ce sont des tendances observées, pas des causes prouvées.</p></section>
     <section class="card span12"><h2>Le saviez-tu ? <button class="btn" id="rShuffle">Autres anecdotes</button></h2><div class="facts" id="rFacts"></div></section>
@@ -99,7 +100,7 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderSleep(P); renderReg(P); renderRhr(P); renderHrvTrend(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderRhr(P); renderHrvTrend(P); renderResp(P); renderCmp(); renderFacts();
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -127,7 +128,7 @@ function afterNote(n) {
 }
 function renderMorning() {
   const n = RC.pick[RC.sel] || {}, latest = isLatest(n);
-  const R = recoScore(n), s = R.score, rem = recovLeft(n);
+  const R = recoScore(n), s = R.score, rem = recovLeft(n), rb = n.dt ? respBase(RC.days, RC.days.indexOf(n)) : null;
   const r = 70, C = 2 * Math.PI * r;
   const ring = s != null ? `<div class="ring"><svg viewBox="0 0 168 168"><circle cx="84" cy="84" r="${r}" fill="none" stroke="var(--h0)" stroke-width="14"/>
       <circle cx="84" cy="84" r="${r}" fill="none" stroke="${scoreColor(s)}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 84 84)" id="rRingArc"/></svg>
@@ -142,7 +143,7 @@ function renderMorning() {
     k("VFC", n.hrv ?? "–", n.hrv ? "ms" : "", n.hrvSt ? (HRV_ST[n.hrvSt] || n.hrvSt.toLowerCase()) + (n.hrvLo ? ` · zone ${n.hrvLo}–${n.hrvUp}` : "") : ""),
     k("FC au repos", n.rhr ?? n.srhr ?? "–", "bpm", n.hrMin ? `min. ${n.hrMin} bpm sur 24 h` : ""),
     k("Récup restante", rem != null ? (rem > 0 ? `~${nf(rem)}` : "0") : "–", rem != null ? " h" : "", rem != null ? `à ${REC.at} h, selon Garmin` : ""),
-    k("Respiration", n.resp ?? "–", n.resp ? "/min" : "", n.sstress != null ? `stress nocturne ${n.sstress}` : ""),
+    k("Respiration", respOf(n) != null ? nf(respOf(n), n.rx != null ? 1 : 0) : "–", respOf(n) != null ? "/min" : "", [rb ? `normale ${nf(rb.m, 1)}` : "", n.sstress != null ? `stress nocturne ${n.sstress}` : ""].filter(Boolean).join(" · ")),
   ].join("");
   const factors = R.parts.map(p => `<div class="f"><span>${p.label}</span><div class="tr"><div style="width:${p.score}%;background:${scoreColor(p.score)}"></div></div><span class="num">${p.score}</span><small>${p.detail}</small></div>`).join("");
   $("rMorning").innerHTML = `${ring}
@@ -377,6 +378,7 @@ function tsChart(el, days, series, opt = {}) {
   series.forEach(se => {
     let d = "", pen = false;
     days.forEach((dd, i) => { const v = dd[se.k]; if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true; });
+    if (se.pts) { days.forEach((dd, i) => { if (dd[se.k] != null) s += `<circle cx="${x(i)}" cy="${y(dd[se.k])}" r="3.4" fill="${se.c}"/>`; }); return; }   // points seuls (nuits à signaler)
     s += `<path d="${d}" fill="none" stroke="${se.c}" stroke-width="${se.w || 2}" ${se.dash ? `stroke-dasharray="${se.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
     if (n <= 35 && !se.dash) days.forEach((dd, i) => { if (dd[se.k] != null) s += `<circle cx="${x(i)}" cy="${y(dd[se.k])}" r="2.4" fill="${se.c}"/>`; });
   });
@@ -385,7 +387,7 @@ function tsChart(el, days, series, opt = {}) {
   const svg = box.querySelector("svg"), cur = $(el + "Cur"), hit = $(el + "Hit");
   const mv = e => { const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width, i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / iw * (n - 1)))), d = days[i];
     cur.setAttribute("x1", x(i)); cur.setAttribute("x2", x(i)); cur.setAttribute("opacity", .5);
-    showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b>` + series.map(se => d[se.k] != null ? `<br>${se.l} : ${nf(d[se.k])} ${se.u || ""}` : "").join("") + (opt.tipExtra ? opt.tipExtra(d) : "")); };
+    showTip(e, `<b>${d.dt.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "long" })}</b>` + series.map(se => d[se.k] != null && !se.noTip ? `<br>${se.l} : ${nf(d[se.k], se.nd || 0)} ${se.u || ""}` : "").join("") + (opt.tipExtra ? opt.tipExtra(d) : "")); };
   hit.addEventListener("pointermove", mv); hit.addEventListener("pointerdown", mv); hit.addEventListener("pointerleave", () => { hideTip(); cur.setAttribute("opacity", 0); });
 }
 const legend = items => items.map(([l, c, dash]) => `<span><i style="background:${dash ? `repeating-linear-gradient(90deg,${c} 0 3px,transparent 3px 6px)` : c}"></i>${l}</span>`).join("");
@@ -444,7 +446,7 @@ function renderReg(P) {
 // 3 bpm ou plus au-dessus = signe de fatigue, de maladie qui couve, de chaleur ou d'alcool ; en dessous = bonne récupération.
 const RHR_HI = 3, RHR_BASE = 30;
 const rhrOf = d => d.rhr ?? d.srhr ?? null;
-function rhrBase(d) { const i = RC.days.indexOf(d), v = RC.days.slice(Math.max(0, i - RHR_BASE), i).map(rhrOf).filter(x => x != null); return v.length >= 7 ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+function rhrBase(d, days = RC.days) { const i = days.indexOf(d), v = days.slice(Math.max(0, i - RHR_BASE), i).map(rhrOf).filter(x => x != null); return v.length >= 7 ? v.reduce((a, b) => a + b, 0) / v.length : null; }
 function renderRhr(P) {
   const box = $("rRhr"), N = P.filter(d => rhrOf(d) != null);
   if (!N.length) { box.innerHTML = `<div class="empty">Pas de mesure sur la période</div>`; $("rRhrAns").textContent = ""; $("rRhrInfo").textContent = ""; return; }
@@ -500,6 +502,59 @@ function renderHrvTrend(P) {
   $("rHrvTInfo").textContent = t ? `zone normale ${t.lo}–${t.up} ms` : "";
   tsChart("rHrvT", N, [{ k: "hrv", l: "nuit", c: "var(--muted)", w: 1, u: "ms" }, { k: "hrv7", l: "moyenne 7 nuits", c: "var(--accent)", w: 2.6, u: "ms" }],
     { band: ["hrvLo", "hrvUp", "var(--teal)", .16], tipExtra: d => d.hrvLo != null ? `<br>zone normale : ${d.hrvLo}–${d.hrvUp}` : "" });
+}
+
+// Respiration de la nuit (à la Whoop) : moyenne de la nuit (rx au dixième, sinon resp de Garmin, arrondie à l'unité),
+// comparée à ta normale = moyenne des 30 jours d'avant (14 nuits au moins). +1 /min ou plus = au-dessus ;
+// alerte si c'est 2 nuits de suite, ou une nuit avec le cœur au repos (+3 bpm, RHR_HI) ou la VFC sous sa zone normale.
+const RESP = { base: 30, min: 14, hi: 1, lo: -1, streak: 2 };
+const respOf = d => d.rx ?? d.resp ?? null;
+const RESP_WHY = "ton corps est sous stress (soirée arrosée, grosse fatigue ou virus qui couve). C'est ce signal que Whoop surveille pour repérer une infection avant les premiers symptômes.";
+function respBase(days, i) {
+  const v = days.slice(Math.max(0, i - RESP.base), i).map(respOf).filter(x => x != null);
+  if (v.length < RESP.min) return null;
+  const m = v.reduce((a, b) => a + b, 0) / v.length;
+  return { m, sd: Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length), n: v.length };
+}
+function respAt(days, i) {
+  const d = days[i], v = d ? respOf(d) : null;
+  if (v == null) return null;
+  const b = respBase(days, i), dv = b ? v - b.m : null, up = dv != null && dv >= RESP.hi;
+  let streak = 0;
+  for (let k = i; k >= 0; k--) { const x = respOf(days[k]), bk = respBase(days, k); if (x == null || !bk || x - bk.m < RESP.hi) break; streak++; }
+  const signals = [], rb = rhrBase(d, days), r = rhrOf(d);
+  if (up && rb != null && r != null && r - rb >= RHR_HI) signals.push(`le cœur au repos ${nf(r - rb)} bpm plus haut`);
+  if (up && d.hrv != null && d.hrvLo != null && d.hrv < d.hrvLo) signals.push("la VFC sous sa zone normale");
+  const level = dv == null ? "nobase" : up ? (streak >= RESP.streak || signals.length ? "alert" : "watch") : dv <= RESP.lo ? "low" : "ok";
+  return { d, v, fine: d.rx != null, base: b, dv, streak, signals, level };
+}
+function respTrend(days) {
+  let i = days.length - 1; while (i >= 0 && respOf(days[i]) == null) i--;
+  return i < 0 ? null : respAt(days, i);
+}
+function respAnswer(t, latest) {
+  if (!t) return "Pas encore de mesure de la respiration pendant le sommeil.";
+  const f = x => nf(x, t.fine ? 1 : 0), dm = x => `${x.getDate()} ${MONTHS[x.getMonth()]}`, eve = new Date(t.d.dt.getTime() - 864e5),
+    when = latest ? "cette nuit" : `la nuit du ${eve.getMonth() === t.d.dt.getMonth() ? eve.getDate() : dm(eve)} au ${dm(t.d.dt)}`;
+  const head = `Tu as respiré à <b>${f(t.v)} /min</b> ${when}`;
+  if (t.level === "nobase") return `${head}. Il faut ${RESP.min} nuits mesurées pour connaître ta normale.`;
+  const nm = nf(t.base.m, 1), gap = nf(Math.abs(t.dv), 1);
+  if (t.level === "alert") return `Ta respiration est au-dessus de ta normale ${t.streak >= RESP.streak ? `depuis ${t.streak} nuits` : when} (<b>${f(t.v)} /min</b> contre ${nm})${t.signals.length ? `, avec ${t.signals.join(" et ")}` : ""} : ${RESP_WHY} Allège l'entraînement aujourd'hui ; si ça continue ou si tu te sens patraque, repos complet.`;
+  if (t.level === "watch") return `${head}, ${gap} au-dessus de ta normale (${nm}) : à surveiller. Une grosse séance, l'alcool, un repas tardif ou la chaleur la font monter, mais c'est aussi un des premiers signes d'un virus : si ça se répète la nuit prochaine, lève le pied.`;
+  if (t.level === "low") return `${head}, ${gap} en dessous de ta normale (${nm}) : rien d'inquiétant, souvent une nuit très calme.`;
+  return `${head}, dans ta normale (${nm} /min, moyenne de tes ${RESP.base} jours d'avant) : rien à signaler.`;
+}
+function renderResp(P) {
+  const t = respTrend(RC.days);
+  $("rRespAns").innerHTML = respAnswer(t, t && t.d === RC.days[RC.days.length - 1]);
+  const N = P.filter(d => respOf(d) != null);
+  N.forEach(d => { const i = RC.days.indexOf(d), a = respAt(RC.days, i), b = a && a.base; d._rv = respOf(d); d._rb = b ? +b.m.toFixed(1) : null;
+    d._rlo = b ? b.m - RESP.hi : null; d._rhi = b ? b.m + RESP.hi : null; d._ru = a && (a.level === "watch" || a.level === "alert") ? d._rv : null; });
+  const fine = N.filter(d => d.rx != null).length;
+  $("rRespInfo").textContent = t && t.base ? `normale ${nf(t.base.m, 1)} /min` : "";
+  tsChart("rResp", N, [{ k: "_rv", l: "nuit", c: "var(--accent)", w: 2, u: "/min", nd: 1 }, { k: "_rb", l: "ta normale", c: "var(--ink)", w: 1.2, dash: "3 4", u: "/min", nd: 1 }, { k: "_ru", c: "var(--amber)", pts: 1, noTip: 1 }],
+    { band: ["_rlo", "_rhi", "var(--teal)", .16], h: Math.round(Math.min(240, Math.max(170, ($("rResp").clientWidth || 300) * .34))) });
+  $("rRespNote").innerHTML = `Trait orange : respiration moyenne de chaque nuit ; pointillé : ta normale (moyenne des ${RESP.base} jours d'avant) ; bande verte : ta normale à ±${RESP.hi} /min ; points ambre : nuits au-dessus. Elle bouge très peu d'une nuit à l'autre : une hausse nette qui dure, surtout avec le cœur au repos plus haut, annonce souvent un virus.${!N.length || fine === N.length ? "" : fine ? " Les nuits les plus anciennes sont arrondies à l'unité par Garmin." : " Garmin arrondit ces valeurs à l'unité : le dixième arrive au fil des prochaines mises à jour."}`;
 }
 
 // ------------------------------------------------------------------ Comparaisons
@@ -586,7 +641,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, _: { REC, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
