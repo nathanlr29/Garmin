@@ -41,6 +41,20 @@ class RawScrub(unittest.TestCase):
         self.assertEqual(r, '[{"pace": 250, "x": {"ok": 5}}]')
 
 
+# ---------------------------------------------------------------- Respiration de la nuit au dixième
+class Respiration(unittest.TestCase):
+    def test_moyenne_au_dixieme(self):
+        ep = [{"startTimeGMT": i, "respirationValue": v} for i, v in enumerate([11.0] * 12 + [13.0] * 3 + [-1, 0, None, "x", True])]
+        self.assertEqual(rc.read_resp({"wellnessEpochRespirationDataDTOList": ep}), {"rx": 11.4})
+
+    def test_autre_liste_et_absence(self):
+        ep = [{"respirationAverageValue": 12.5}] * 10
+        self.assertEqual(rc.read_resp({"wellnessEpochRespirationAveragesList": ep}), {"rx": 12.5})
+        self.assertEqual(rc.read_resp({"wellnessEpochRespirationDataDTOList": [{"respirationValue": 12}] * 9}), {}, "trop peu de mesures")
+        self.assertEqual(rc.read_resp({}), {})
+        self.assertEqual(rc.read_resp(None), {})
+
+
 # ---------------------------------------------------------------- Seuil lactique
 class LactateThreshold(unittest.TestCase):
     def test_echelles_de_vitesse(self):

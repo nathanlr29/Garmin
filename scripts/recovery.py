@@ -23,6 +23,9 @@ START = date(2026, 1, 1)
 REFRESH_DAYS = 3
 BACKFILL_PER_RUN = 30
 HYPNO_NIGHTS = 21          # nuits gardées avec le détail des phases
+RESP_DAYS = 120            # respiration au dixième (rx) : nuits relues si elles ne l'ont pas encore
+RESP_PER_RUN = 20          # nuits relues par passage (un seul appel Garmin chacune)
+RESP_V = 1                 # version de la lecture de rx : l'incrémenter relit les RESP_DAYS dernières nuits
 TZ = ZoneInfo("Europe/Paris")
 
 
@@ -118,6 +121,21 @@ def stage_mapping(levels, dto):
     return best if err_best < err_def * 0.8 else default
 
 
+def read_resp(sl):
+    """Respiration moyenne de la nuit au dixième, depuis les mesures de la nuit (Garmin arrondit la sienne à l'unité).
+    {} si Garmin ne les donne pas : le site se rabat alors sur `resp`."""
+    vals = []
+    for key in ("wellnessEpochRespirationDataDTOList", "wellnessEpochRespirationAveragesList"):
+        for e in (sl or {}).get(key) or []:
+            if isinstance(e, dict):
+                v = e.get("respirationValue", e.get("respirationAverageValue"))
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and 4 <= v <= 40:
+                    vals.append(float(v))
+        if vals:
+            break
+    return {"rx": round(sum(vals) / len(vals), 1)} if len(vals) >= 10 else {}
+
+
 def fetch_day(api, d, with_hypno):
     ds = d.isoformat()
     rec = {"d": ds, "f": 1}   # f = journée déjà interrogée
@@ -139,6 +157,7 @@ def fetch_day(api, d, with_hypno):
             "sstress": num(dto.get("avgSleepStress"), 1),
             "bbch": num(sl.get("bodyBatteryChange")),
             "srhr": num(sl.get("restingHeartRate")),
+            "rv": RESP_V, **read_resp(sl),
         })
         levels = sl.get("sleepLevels") or []
         if with_hypno and levels:
@@ -642,6 +661,15 @@ def run(api):
         days[d.isoformat()] = fetch_day(api, d, with_hypno=d >= hypno_from)
         if old_wx:
             days[d.isoformat()]["wx"] = old_wx
+        time.sleep(0.4)
+    # respiration au dixième des nuits déjà lues : on relit seulement le sommeil, sans toucher au reste
+    resp_from = (today - timedelta(days=RESP_DAYS)).isoformat()
+    for k in [k for k, v in sorted(days.items(), reverse=True) if k >= resp_from and v.get("sl") and v.get("rv") != RESP_V][:RESP_PER_RUN]:
+        sl = safe(api.get_sleep_data, k)
+        if not sl:
+            continue                     # échec : on réessaiera au prochain passage
+        days[k].pop("rx", None)
+        days[k].update({"rv": RESP_V, **read_resp(sl)})
         time.sleep(0.4)
     # on retire le détail des phases des nuits trop anciennes (fichier léger)
     for k, v in days.items():
