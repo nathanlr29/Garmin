@@ -3,8 +3,9 @@
 #plan .goalcard .gc{display:grid;grid-template-columns:1fr 1fr;gap:18px 36px}
 @media (max-width:760px){#plan .goalcard .gc{grid-template-columns:1fr}}
 #plan .gl{font-size:14px;color:var(--muted);font-weight:600}
-#plan .gv{display:flex;align-items:baseline;gap:8px;margin:2px 0 10px;font:italic 800 56px/1 var(--font-num);letter-spacing:-.01em}
-#plan .gv input{width:1.75em;font:inherit;color:var(--ink);background:transparent;border:0;border-bottom:2px dashed var(--line);padding:0;-moz-appearance:textfield}
+#plan .gl small{font-weight:400;font-size:12px}
+#plan .gv{display:flex;align-items:baseline;gap:4px;margin:2px 0 10px;font:italic 800 56px/1 var(--font-num);letter-spacing:-.01em}
+#plan .gv input{width:1.75em;font:inherit;color:var(--ink);background:transparent;border:0;border-bottom:1px solid var(--ghost);padding:0;-moz-appearance:textfield}
 #plan .gv input::-webkit-outer-spin-button,#plan .gv input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 #plan .gv input:focus{outline:none;border-bottom-color:var(--accent)}
 #plan .gv span{font:600 18px var(--font-ui);color:var(--muted);letter-spacing:0}
@@ -292,3 +293,4 @@ html.bm-open{overflow:hidden}
 #plan .fold.open h2{margin-bottom:14px}
 /* note des séances fondatrices, dans « Mes disponibilités » */
 #plan .avail .design{margin-top:14px;padding:10px 12px}
+#plan .today{align-self:start}

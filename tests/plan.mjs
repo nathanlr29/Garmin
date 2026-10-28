@@ -16,8 +16,9 @@ const sha = o => createHash("sha256").update(JSON.stringify(o)).digest("hex").sl
 const same = (a, b, m) => assert.equal(JSON.stringify(a), JSON.stringify(b), m);
 
 // ---- Plan.js chargé dans un contexte vm avec de faux objets (date figée, localStorage en mémoire)
-function load({ hash = "", acts = [], course = null, extra = {} } = {}) {
-  const store = new Map(), clock = { t: new Date(2026, 9, 12, 12, 0, 0).getTime() }, calls = { replace: [], toasts: [] };
+function load({ hash = "", acts = [], course = null, extra = {}, fresh = false } = {}) {
+  // appareil déjà migré (FTP 230), sauf fresh = appareil neuf
+  const store = new Map(fresh ? [] : [["planFtpMig", "1"]]), clock = { t: new Date(2026, 9, 12, 12, 0, 0).getTime() }, calls = { replace: [], toasts: [] };
   class FD extends Date { constructor(...a) { a.length ? super(...a) : super(clock.t); } static now() { return clock.t; } }
   const win = { Recup: { data: { profile: { ftp: 250 } }, days: [] } };
   const ctx = { window: win, Recup: win.Recup, S: { all: acts }, RIDE_TYPES: RIDE, Date: FD, setTimeout() {}, clearTimeout() {}, innerWidth: 1280, addEventListener() {}, dispatchEvent() {}, HashChangeEvent: class {},
@@ -410,6 +411,11 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   // sans aucun réglage course, une course faite apparaît quand même comme « extra » (comme le vélo)
   h.store.clear(); const W0 = h.Plan._eff(mon, CFGS.cinq, { ...SIT.frais, prev: PREV[0] });
   assert.ok(W0.items[1].extra.some(a => a.id === 901) && W0.items[3].extra.some(a => a.id === 903) && W0.items.every(i => !i.run));
+}
+// ---- 3.9 bis migration de la FTP dès le chargement (la Synthèse lit la même FTP que le Plan sans ouvrir le Plan)
+{
+  assert.equal(load({ fresh: true }).store.get("planFtp"), "230", "appareil neuf : 230 W");
+  assert.equal(load({ fresh: true }).store.get("planFtpMig"), "1", "migration notée");
 }
 // ---- 3.10 liens #plan= : tout est validé, rien de dangereux n'entre
 {
