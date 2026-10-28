@@ -45,6 +45,9 @@
 #sortie .sotips{margin:0;display:grid;gap:10px}
 #sortie .sotips dt{font-size:14px;font-weight:700;color:var(--ink)}
 #sortie .sotips dd{margin:2px 0 0;font-size:14px;line-height:1.45;color:var(--muted)}
+#sortie .sokit{display:block;margin-top:4px;font-size:13px}
+#sortie .sokitb{font:inherit;color:var(--accent-ink);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
+#sortie #soTyre{font:inherit;font-size:13px;margin-left:4px;padding:1px 4px;border:1px solid var(--line);border-radius:6px;background:var(--raised);color:var(--ink)}
 #sortie .sotl{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
 #sortie .sotc{flex:0 0 auto;min-width:92px;border:1px solid var(--line);border-radius:var(--r-md);padding:9px 10px;background:var(--raised);display:grid;gap:2px;font-size:12.5px}
 #sortie .sotc .h{font-weight:700;font-size:14px}

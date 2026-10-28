@@ -95,6 +95,8 @@
 .sywxday>.sywxd::after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin:0 4px 3px;align-self:center}
 .sywxday[open]>.sywxd::after{transform:rotate(-135deg);margin-bottom:-2px}
 .sywxday>.sywxd:hover b{color:var(--accent-ink)}
+.sywxkit{margin:6px 0 4px;font-size:13.5px;line-height:1.45;color:var(--muted);max-width:560px}
+.sywxkit b{color:var(--ink);font-weight:600}
 .sywxh{width:100%;max-width:440px;border-collapse:collapse;margin:6px 0 10px;font-size:13px;font-variant-numeric:tabular-nums}
 .sywxh th,.sywxh td{text-align:left}
 .sywxh th{font-weight:400;color:var(--muted);padding:2px 6px 4px 0}

@@ -12,6 +12,7 @@ Ton mot de passe Garmin n'est jamais stocké nulle part.
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import time
@@ -122,7 +123,50 @@ def dist_m(a, b):
     return 2 * 6371000 * math.asin(math.sqrt(h))
 
 
-def private_trace(pts, radius, max_points=MAX_POINTS):
+# Après le rayon, on retire encore 1 à 2 km le long du tracé à chaque bout, longueur tirée au hasard par sortie :
+# avec le rayon seul, toutes les traces commençaient sur le même cercle, dont le centre est le domicile.
+CUT_M = (1000, 2000)
+PRIVACY_V = 2   # version du découpage : les fichiers déjà publiés sont recoupés une fois (migrate_privacy)
+
+
+def cut_lengths(rnd=random):
+    return rnd.uniform(*CUT_M), rnd.uniform(*CUT_M)
+
+
+def trim_index(pts, cut_start, cut_end):
+    """Indices [i, j) des points gardés après avoir retiré cut_start m au début et cut_end m à la fin, le long du tracé."""
+    if len(pts) < 2:
+        return 0, 0
+    i, d = 0, 0.0
+    while i < len(pts) - 1 and d < cut_start:
+        d += dist_m(pts[i], pts[i + 1])
+        i += 1
+    j, d = len(pts), 0.0
+    while j > i and d < cut_end:
+        d += dist_m(pts[j - 2], pts[j - 1]) if j >= 2 else 0
+        j -= 1
+    return i, j
+
+
+def trim_trace(pts, rnd=random):
+    """Trace déjà publiée (sans le rayon) : retire 1 à 2 km de plus à chaque bout. None si presque rien ne reste."""
+    if not pts:
+        return pts
+    i, j = trim_index(pts, *cut_lengths(rnd))
+    return pts[i:j] if j - i >= 10 else None
+
+
+def trim_stream_g(g, rnd=random):
+    """Flux de séance : met à 0 (position masquée) 1 à 2 km de plus à chaque bout du tracé."""
+    idx = [k for k, p in enumerate(g) if p]
+    if not idx:
+        return g
+    i, j = trim_index([g[k] for k in idx], *cut_lengths(rnd))
+    keep = set(idx[i:j]) if j - i >= 10 else set()
+    return [p if k in keep else 0 for k, p in enumerate(g)]
+
+
+def private_trace(pts, radius, max_points=MAX_POINTS, rnd=random):
     """Retire les points proches du départ et de l'arrivée (ton domicile n'apparaît pas)."""
     pts = [p for p in pts if p[0] is not None and p[1] is not None]
     if len(pts) < 10:
@@ -130,6 +174,8 @@ def private_trace(pts, radius, max_points=MAX_POINTS):
     if radius > 0:
         s, e = pts[0], pts[-1]
         pts = [p for p in pts if dist_m(p, s) > radius and dist_m(p, e) > radius]
+    i, j = trim_index(pts, *cut_lengths(rnd))
+    pts = pts[i:j]
     if len(pts) < 10:
         return None
     step = max(1, math.ceil(len(pts) / max_points))
@@ -343,8 +389,8 @@ def build_stream(act_id, recs, radius, run=False):
         if len(pts) >= 10:
             s, e = pts[0], pts[-1]
             # comme pour les traces : rien autour du départ et de l'arrivée (ton domicile n'apparaît pas)
-            out["g"] = [0 if p[0] is None or dist_m(p, s) <= radius or dist_m(p, e) <= radius
-                        else [round(p[0], 4), round(p[1], 4)] for p in g]
+            out["g"] = trim_stream_g([0 if p[0] is None or dist_m(p, s) <= radius or dist_m(p, e) <= radius
+                                      else [round(p[0], 4), round(p[1], 4)] for p in g])
     if not any(k in out for k in ("p", "h", "v")):
         return None
     return out
@@ -402,6 +448,29 @@ def fetch_all(api, only_recent=False):
     return out
 
 
+def migrate_privacy(meta, traces):
+    """Une fois : recoupe les traces, parcours et flux publiés avec l'ancien découpage (rayon seul)."""
+    if meta.get("privacy") == PRIVACY_V:
+        return
+    for k, v in list(traces.items()):
+        traces[k] = trim_trace(v)
+    routes = load(ROUTES_FILE, {})
+    if routes:
+        dump(ROUTES_FILE, {k: trim_trace(v) for k, v in routes.items()})
+    for f in STREAMS.glob("*.json") if STREAMS.exists() else []:
+        if f.name == "index.json":
+            continue
+        st = load(f, None)
+        if isinstance(st, dict) and st.get("g"):
+            st["g"] = trim_stream_g(st["g"])
+            f.write_text(json.dumps(st, separators=(",", ":")), encoding="utf-8")
+    # écrit tout de suite : une sortie anticipée (Garmin en panne) ne doit pas faire recouper deux fois
+    dump(TRACES_FILE, {str(k): v for k, v in traces.items()})
+    meta["privacy"] = PRIVACY_V
+    dump(META_FILE, meta)
+    print("Confidentialité : traces, parcours et flux déjà publiés recoupés le long du tracé.")
+
+
 def load(path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -420,13 +489,14 @@ def main():
     old_acts = load(ACTIVITIES_FILE, [])
     known = {a["id"]: a for a in old_acts}
     traces = {int(k): v for k, v in load(TRACES_FILE, {}).items()}
+    migrate_privacy(meta, traces)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     full = meta.get("full_sync_on") != today or not known or os.environ.get("FULL_SYNC") == "1"
 
     api = connect()
     try:
-        # MyWhoosh → Garmin (fichier présenté comme venant de ton Edge 540) : avant la récupération des activités
+        # MyWhoosh → Garmin (fichier présenté comme venant de l'appli Tacx) : avant la récupération des activités
         try:
             import mywhoosh
             mywhoosh.run(api)
@@ -493,6 +563,7 @@ def main():
     dump(TRACES_FILE, {str(k): v for k, v in new_traces.items()})
     if changed or full:
         dump(META_FILE, {
+            "privacy": PRIVACY_V,
             "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "full_sync_on": today,
             "count": len(acts),

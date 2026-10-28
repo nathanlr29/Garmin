@@ -9,6 +9,11 @@ const pad = n => String(n).padStart(2, "0");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const addDays = (d, n) => { const t = new Date(d); t.setDate(t.getDate() + n); return t; };
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const dayStart = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d; };
+// lundi 0 h de la semaine de t (Date ou ms) ; partagé par le Plan, la Synthèse, la course, la reprise et les zones
+const mondayOf = t => { const d = dayStart(t); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d; };
+// jours de calendrier entre t et maintenant : une sortie d'hier soir vue ce matin, c'est 1 (« hier »), pas 0
+const daysAgo = (t, now = new Date()) => Math.round((dayStart(now) - dayStart(t)) / 864e5);
 const all = () => S.all || [];
 
 // vélo | run | strength | other
@@ -96,5 +101,5 @@ function fatiguePart(dt, acts = all()) {
   return { ratio, total, days, score: Math.round(clamp(100 - 35 * Math.max(0, ratio - .6), 0, 100)) };
 }
 
-window.Charge = { RUN_TYPES, RUN_CLIMB, RUN_PACE_RANGE, FAT_W, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, fatiguePart, ymd };
+window.Charge = { RUN_TYPES, RUN_CLIMB, RUN_PACE_RANGE, FAT_W, sportOf, params, tssOf, dayLoads, dayLoadsBySport, dayLoad, series, fitness, loadPart, fatiguePart, ymd, mondayOf, daysAgo };
 })();

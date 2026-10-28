@@ -101,7 +101,7 @@ function variation(ser, now, days, since) {
 }
 
 // Jauge de reprise, sur les km courus : aigu = 7 derniers jours, chronique = moyenne hebdo des 28 jours précédents
-const mondayOf = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.getTime(); };
+const mondayOf = t => window.Charge.mondayOf(t).getTime();
 function weeklyKm(acts, now, n) {
   const m0 = mondayOf(now), W = Array.from({ length: n }, (_, i) => { const d = new Date(m0); d.setDate(d.getDate() - 7 * (n - 1 - i)); return { t: d.getTime(), km: 0 }; });
   for (const a of acts) { if (!isRun(a) || T(a) > now) continue; const k = Math.round((m0 - mondayOf(T(a))) / WEEK); if (k >= 0 && k < n) W[n - 1 - k].km += a.km; }

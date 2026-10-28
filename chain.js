@@ -80,7 +80,7 @@ async function render() {
     bind(box); return;
   }
   const rides = outdoorRides(last), km = rides.reduce((s, a) => s + a.km, 0);
-  const days = Math.floor((Date.now() - last) / 864e5);
+  const days = Charge.daysAgo(last);
   const draw = (wet, rainKnown) => {
     if (my !== seq) return;
     const open = box.querySelector("details.chmore")?.open;

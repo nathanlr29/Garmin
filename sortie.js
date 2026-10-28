@@ -465,14 +465,21 @@ function renderClimbs(r) {
 function renderTips(r, wx) {
   const T = [];
   if (r.ok) {
-    const a = r.amin, wet = r.rain >= .5 || r.ppMax >= 50;
-    const kit = a < 3 ? "Hiver : collant long, veste thermique, gants longs, couvre-chaussures, cache-cou." : a < 8 ? "Frais : collant ou jambières, maillot manches longues + coupe-vent, gants longs." : a < 13 ? "Mi-saison : manchettes et jambières (ou genouillères), gilet coupe-vent." : a < 18 ? "Cuissard court, manchettes au départ, gilet dans la poche." : "Tenue d'été." + (r.tmax >= 26 ? " Couleurs claires, ça va chauffer." : "");
-    T.push(["Tenue", kit + (wet ? " Veste de pluie et garde-boue." : "")]);
+    const wet = r.rain >= .5 || r.ppMax >= 50, E = window.Equip;
+    if (E) {
+      T.push(["Tenue", `${E.wearLine({ tmin: r.tmin, tmax: r.tmax, wind: r.ws, speed: settings().speed, rain: r.rain, pp: r.ppMax })}
+        <span class="sokit">Après la sortie : <button type="button" class="sokitb" data-kit="cold">j'ai eu froid</button> <button type="button" class="sokitb" data-kit="hot">j'ai eu trop chaud</button></span>`]);
+      const w = E.tyreWidth();
+      T.push(["Pneus", `${E.tyreLine(riderKg(), w, r.rain >= .5)} <select id="soTyre" aria-label="Largeur des pneus">${E.TYRE.widths.map(x => `<option value="${x}"${x === w ? " selected" : ""}>${x} mm</option>`).join("")}</select>`]);
+    } else T.push(["Tenue", wet ? "Veste de pluie et garde-boue." : "Prévisions sans conseil de tenue."]);
     if (r.sun) { const late = r.end > r.sun.set, dusk = r.end > new Date(r.sun.set.getTime() - 1800e3); T.push(["Soleil", `Lever ${hm(r.sun.rise)}, coucher ${hm(r.sun.set)}.${late ? " Tu rentres de nuit : éclairage avant et arrière obligatoires." : dusk ? " Arrivée proche du coucher : prends tes lumières." : ""}${r.uv >= 5 ? ` UV jusqu'à ${fmt(r.uv)} : crème solaire.` : ""}`]); }
     if (r.gust >= 50) T.push(["Rafales", `Jusqu'à ${fmt(r.gust)} km/h : prudence dans les descentes et sur les zones dégagées.`]);
   }
   try { const st = window.Chain?.status?.(); if (st && st.km != null) { const after = st.km + r.total; T.push(["Chaîne", r.rain >= .5 ? "Sortie humide : nettoie et regraisse la chaîne en rentrant (Squirt)." : after >= st.lim ? `Avec cette sortie tu seras à ${fmt(after)} km depuis le graissage (rappel à ${st.lim}) : graisse-la la veille.` : `${fmt(after)} km sur la chaîne après cette sortie, ça passe.`]); } } catch (e) {}
   $("soTips").innerHTML = T.length ? `<dl class="sotips">${T.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : `<p class="note">Les conseils apparaissent avec les prévisions.</p>`;
+  const box = $("soTips");
+  box.querySelectorAll("[data-kit]").forEach(b => b.onclick = () => { window.Equip.setBias(b.dataset.kit === "cold"); renderTips(r, wx); });
+  const ty = $("soTyre"); if (ty) ty.onchange = () => { try { localStorage.setItem("tyreW", JSON.stringify(+ty.value)); } catch (e) {} renderTips(r, wx); };
 }
 // ------------------------------------------------------------------ Nutrition
 // produits Decathlon de Nathan (glucides par unité) ; pâte de fruits : valeur moyenne d'étiquette, à corriger si besoin

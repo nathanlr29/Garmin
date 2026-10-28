@@ -334,26 +334,78 @@ class MyWhooshIdentity(unittest.TestCase):
                     out[f.name] = {("product" if x.name == "garmin_product" else x.name): x.raw_value for x in f.fields}
         return out
 
-    def run_as(self, ident):
+    def disguised(self):
         import tempfile
         import mywhoosh as mw
         d = Path(tempfile.mkdtemp())
         make_mywhoosh_fit(d / "mw.fit")
-        start, npts, watts = mw.disguise(d / "mw.fit", d / "out.fit", 3_456_789_012, 2922, ident)
+        start, npts, watts = mw.disguise(d / "mw.fit", d / "out.fit")
         self.assertEqual(npts, 600)
         self.assertEqual(watts, sum(200 + i % 50 for i in range(600)))
         return self.head(d / "out.fit")
 
     def test_appli_tacx(self):
-        h = self.run_as("tacx")
+        h = self.disguised()
         self.assertEqual((h["file_id"]["manufacturer"], h["file_id"]["product"], h["file_id"]["serial_number"]), (89, 20533, 1))
         self.assertEqual(h["device_info"]["manufacturer"], 89)
         self.assertEqual((h["session"]["sport"], h["session"]["sub_sport"]), (2, 58))   # reste du vélo virtuel
         self.assertEqual(h["session"]["avg_power"], round(sum(200 + i % 50 for i in range(600)) / 600))
 
-    def test_edge_540(self):
-        h = self.run_as("edge540")
-        self.assertEqual((h["file_id"]["manufacturer"], h["file_id"]["product"], h["file_id"]["serial_number"]), (1, 4061, 3_456_789_012))
+
+# ---------------------------------------------------------------- Confidentialité des traces publiées
+class Privacy(unittest.TestCase):
+    HOME = (48.0, -1.7)
+
+    def ray(self, bearing, km=15, step=50):
+        """Sortie en ligne droite qui part du domicile dans la direction donnée (degrés)."""
+        import math
+        b = math.radians(bearing)
+        return [(self.HOME[0] + i * step * math.cos(b) / 110540,
+                 self.HOME[1] + i * step * math.sin(b) / (111320 * math.cos(math.radians(self.HOME[0]))))
+                for i in range(int(km * 1000 / step))]
+
+    def test_pas_de_cercle_autour_du_domicile(self):
+        import random
+        import statistics
+        rnd = random.Random(1)
+        first = [fg.private_trace(self.ray(b), 400, 400, rnd)[0] for b in range(0, 360, 12)]
+        d = [fg.dist_m(p, self.HOME) for p in first]
+        self.assertGreaterEqual(min(d), 1400 - 60)          # rayon de 400 m + au moins 1 km le long du tracé
+        self.assertGreater(statistics.pstdev(d), 150)        # plus de cercle commun d'où retrouver le centre
+
+    def test_les_deux_bouts_et_trace_courte(self):
+        import random
+        pts = self.ray(90, km=15)
+        t = fg.private_trace(pts + pts[::-1], 400, 2000, random.Random(2))   # aller-retour : fin aussi au domicile
+        self.assertGreater(fg.dist_m(t[-1], self.HOME), 1300)
+        self.assertIsNone(fg.private_trace(self.ray(0, km=3), 400, 400, random.Random(3)))   # 3 km : rien ne reste
+
+    def test_flux_et_migration(self):
+        import random
+        g = [list(p) for p in self.ray(45, km=10)]
+        out = fg.trim_stream_g([0] * 5 + g + [0] * 5, random.Random(4))
+        kept = [p for p in out if p]
+        self.assertEqual(len(out), len(g) + 10)              # même longueur : les autres mesures restent alignées
+        self.assertGreater(fg.dist_m(kept[0], self.HOME), 950)
+        self.assertLess(len(kept), len(g))
+        self.assertIsNone(fg.trim_trace([list(p) for p in self.ray(0, km=2)], random.Random(5)))
+
+
+class RecoveryKeepsOldDay(unittest.TestCase):
+    def test_un_appel_en_echec_n_efface_pas_la_nuit(self):
+        import json
+        import tempfile
+        tmp = Path(tempfile.mkdtemp()) / "recovery.json"
+        today = datetime.now(rc.TZ).date().isoformat()
+        tmp.write_text(json.dumps({"days": {today: {"d": today, "f": 1, "sl": 27000, "hrv": 61, "wx": {"tMin": 9.0}}}}))
+        saved = rc.JSON_FILE, rc.weather, rc.fetch_profile
+        rc.JSON_FILE, rc.weather, rc.fetch_profile = tmp, (lambda *a: {}), (lambda *a, **k: {})
+        try:
+            rc.run(FakeApi(get_sleep_data=RuntimeError("500"), get_hrv_data=RuntimeError("500")))
+        finally:
+            rc.JSON_FILE, rc.weather, rc.fetch_profile = saved
+        day = json.loads(tmp.read_text())["days"][today]
+        self.assertEqual((day["sl"], day["hrv"], day["wx"]), (27000, 61, {"tMin": 9.0}))
 
 
 # ---------------------------------------------------------------- Points d'arrêt préparés (data/poi)

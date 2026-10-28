@@ -93,7 +93,7 @@ const goalKm=()=>+(runMode()?S.cfg.objectif_km_course:S.cfg.objectif_km)||0;   /
 
 // ------------------------------------------------------------------ Data loading
 async function getJSON(url,fallback){
-  try{const r=await fetch(url+"?v="+Date.now(),{cache:"no-store"});if(!r.ok)throw 0;return await r.json()}catch(e){return fallback}
+  try{const r=await fetch(url,{cache:"no-cache"});if(!r.ok)throw 0;return await r.json()}catch(e){return fallback}
 }
 async function load(){
   const [acts,traces,meta,cfg]=await Promise.all([
@@ -478,7 +478,7 @@ function facts(acts,Y,isCur,todayIdx){
   if(st.bestW>1) add(nf(st.bestW),"semaines d'affilée avec au moins une sortie","ta meilleure série",3);
   if(st.bestD>1) add(nf(st.bestD),"jours de suite sur le vélo","ta plus longue série",2);
   const lastA=S.all.filter(a=>RIDE_TYPES.has(a.t)).slice(-1)[0];
-  if(isCur&&lastA){const ago=Math.floor((Date.now()-lastA.dt)/864e5);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as roulé aujourd'hui":"depuis ta dernière sortie",lastA.n,2)}
+  if(isCur&&lastA){const ago=Charge.daysAgo(lastA.dt);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as roulé aujourd'hui":"depuis ta dernière sortie",lastA.n,2)}
   const elapsed=isCur?todayIdx+1:daysInYear(Y);add(`${nf(km/elapsed,1)}`,"km par jour en moyenne","week-ends et jours de pluie compris",2);
   const big=acts.filter(a=>a.km>=200);if(big.length) add(nf(big.length),`sorties de 200 km et plus`,`${nf(sum(big,a=>a.km))} km au total`,3);
   const beats=sum(acts.filter(a=>a.hr>0),a=>a.hr*a.mt/60);if(beats>0) add(beats>=1e6?`${nf(beats/1e6,1)} M`:nf(beats),"battements de cœur sur le vélo",`à ${nf(sum(acts.filter(a=>a.hr>0),a=>a.hr*a.mt)/Math.max(1,sum(acts.filter(a=>a.hr>0),a=>a.mt)))} bpm de moyenne`,2);
@@ -511,7 +511,7 @@ function factsRun(acts,Y,isCur,todayIdx){
   if(st.bestW>1) add(nf(st.bestW),"semaines d'affilée avec au moins une course","ta meilleure série",3);
   if(st.bestD>1) add(nf(st.bestD),"jours de suite à courir","ta plus longue série",2);
   const lastA=S.all.filter(isRunAct).slice(-1)[0];
-  if(isCur&&lastA){const ago=Math.floor((Date.now()-lastA.dt)/864e5);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as couru aujourd'hui":"depuis ta dernière course",lastA.n,2)}
+  if(isCur&&lastA){const ago=Charge.daysAgo(lastA.dt);add(ago===0?"Auj.":`${ago} j`,ago===0?"tu as couru aujourd'hui":"depuis ta dernière course",lastA.n,2)}
   const elapsed=isCur?todayIdx+1:daysInYear(Y);add(`${nf(km/elapsed,1)}`,"km par jour en moyenne","jours de repos compris",2);
   const semi=acts.filter(a=>a.km>=21.1);if(semi.length) add(nf(semi.length),`sortie${semi.length>1?"s":""} de 21,1 km et plus`,`${nf(sum(semi,a=>a.km))} km au total`,3);
   const hrA=acts.filter(a=>a.hr>0),beats=sum(hrA,a=>a.hr*a.mt/60);if(beats>0) add(beats>=1e6?`${nf(beats/1e6,1)} M`:nf(beats),"battements de cœur en courant",`à ${nf(sum(hrA,a=>a.hr*a.mt)/Math.max(1,sum(hrA,a=>a.mt)))} bpm de moyenne`,2);
@@ -581,6 +581,7 @@ setInterval(()=>{if(document.visibilityState==="visible")load()},5*60*1000);
 addEventListener("DOMContentLoaded",()=>load());   // après les scripts du bas de page (Charge, Nav, Recup…)
 </script>
 <script src="charge.js"></script>
+<script src="equip.js"></script>
 <script src="nav.js"></script>
 <script src="recup.js"></script>
 <script src="bilan.js"></script>

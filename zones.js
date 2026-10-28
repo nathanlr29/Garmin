@@ -86,7 +86,7 @@
     const dTxt = cur.total && verdict(cur).k !== "nodata" ? (d === 0 ? " (autant de facile)" : ` (${d > 0 ? "↑" : "↓"} ${Math.abs(d)} pt${Math.abs(d) > 1 ? "s" : ""} de facile)`) : "";
     return `Les 4 semaines d'avant : ${pct(a.easy)} % en zones 1-2, ${pct(a.gray)} % en zone 3, ${hm(prev.total)}${dTxt}. ${ref}`;
   }
-  const mondayOf = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d; };
+  const mondayOf = t => window.Charge.mondayOf(t);
   // heures par zone par semaine (lundi-dimanche), la plus ancienne d'abord, la semaine en cours en dernier
   function weeks(acts, sport, now, n = WEEKS) {
     const m0 = mondayOf(now), out = [];

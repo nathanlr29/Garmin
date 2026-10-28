@@ -235,11 +235,11 @@ def get_json(url, params):
             time.sleep(3)
 
 
-HOURLY = "temperature_2m,relative_humidity_2m,surface_pressure,precipitation,wind_speed_10m,cloud_cover"
+WX_DAYS = 10   # nuits dont on redemande la météo à chaque passage : les plus anciennes ne changent plus, elles sont gardées
 
 
 def weather(lat, lon, start, end):
-    """Retourne {date_reveil: {...}} pour la nuit précédente (22 h -> 7 h)."""
+    """Retourne {date_reveil: {tMin, tAvg}} : température de la nuit précédente (22 h -> 7 h)."""
     hours = {}
     today = date.today()
     arch_end = min(end, today - timedelta(days=6))
@@ -248,53 +248,20 @@ def weather(lat, lon, start, end):
         chunks.append(("https://archive-api.open-meteo.com/v1/archive",
                        {"start_date": (start - timedelta(days=1)).isoformat(), "end_date": arch_end.isoformat()}))
     chunks.append(("https://api.open-meteo.com/v1/forecast", {"past_days": 8, "forecast_days": 1}))
-    daily = {}
     for url, extra in chunks:
-        j = get_json(url, {"latitude": lat, "longitude": lon, "hourly": HOURLY,
-                           "daily": "sunrise,sunset,daylight_duration", "timezone": "Europe/Paris", **extra})
-        if not j:
-            continue
-        h = j.get("hourly") or {}
-        for i, t in enumerate(h.get("time") or []):
-            hours[t] = {k: (h.get(k) or [None] * (i + 1))[i] for k in HOURLY.split(",")}
-        dd = j.get("daily") or {}
-        for i, t in enumerate(dd.get("time") or []):
-            daily[t] = {"sunrise": (dd.get("sunrise") or [None])[i], "sunset": (dd.get("sunset") or [None])[i],
-                        "daylight": (dd.get("daylight_duration") or [None])[i]}
-
-    aq = get_json("https://air-quality-api.open-meteo.com/v1/air-quality",
-                  {"latitude": lat, "longitude": lon, "hourly": "european_aqi,grass_pollen,birch_pollen",
-                   "timezone": "Europe/Paris", "past_days": 92, "forecast_days": 1}) or {}
-    aqh = aq.get("hourly") or {}
-    air = {t: {"aqi": (aqh.get("european_aqi") or [None])[i], "grass": (aqh.get("grass_pollen") or [None])[i],
-               "birch": (aqh.get("birch_pollen") or [None])[i]} for i, t in enumerate(aqh.get("time") or [])}
+        j = get_json(url, {"latitude": lat, "longitude": lon, "hourly": "temperature_2m", "timezone": "Europe/Paris", **extra})
+        h = (j or {}).get("hourly") or {}
+        for t, v in zip(h.get("time") or [], h.get("temperature_2m") or []):
+            if v is not None:
+                hours[t] = v
 
     out = {}
     d = start
     while d <= end:
         night = [(datetime.combine(d - timedelta(days=1), datetime.min.time()) + timedelta(hours=22 + i)).strftime("%Y-%m-%dT%H:00") for i in range(10)]
-        rows = [hours[t] for t in night if t in hours]
-        if rows:
-            col = lambda k: [r[k] for r in rows if r.get(k) is not None]
-            temps, hum, rain, wind, cloud = col("temperature_2m"), col("relative_humidity_2m"), col("precipitation"), col("wind_speed_10m"), col("cloud_cover")
-            p_now = (hours.get(f"{d.isoformat()}T06:00") or {}).get("surface_pressure")
-            p_before = (hours.get(f"{(d - timedelta(days=1)).isoformat()}T06:00") or {}).get("surface_pressure")
-            a_rows = [air[t] for t in night if t in air]
-            acol = lambda k: [r[k] for r in a_rows if r.get(k) is not None]
-            dl = daily.get((d - timedelta(days=1)).isoformat()) or {}
-            out[d.isoformat()] = {
-                "tMin": round(min(temps), 1) if temps else None,
-                "tAvg": round(sum(temps) / len(temps), 1) if temps else None,
-                "hum": round(sum(hum) / len(hum)) if hum else None,
-                "rain": round(sum(rain), 1) if rain else None,
-                "wind": round(max(wind)) if wind else None,
-                "cloud": round(sum(cloud) / len(cloud)) if cloud else None,
-                "dP": round(p_now - p_before, 1) if p_now is not None and p_before is not None else None,
-                "aqi": round(max(acol("aqi"))) if acol("aqi") else None,
-                "pollen": round(max(acol("grass") + acol("birch")), 1) if (acol("grass") + acol("birch")) else None,
-                "sunset": (dl.get("sunset") or "")[11:16] or None,
-                "daylight": round(dl["daylight"] / 3600, 2) if dl.get("daylight") else None,
-            }
+        temps = [hours[t] for t in night if t in hours]
+        if temps:
+            out[d.isoformat()] = {"tMin": round(min(temps), 1), "tAvg": round(sum(temps) / len(temps), 1)}
         d += timedelta(days=1)
     return out
 
@@ -657,10 +624,8 @@ def run(api):
     missing = [d for d in reversed(all_dates[:-REFRESH_DAYS]) if todo(d)][:BACKFILL_PER_RUN]
 
     for d in recent + missing:
-        old_wx = days.get(d.isoformat(), {}).get("wx")
-        days[d.isoformat()] = fetch_day(api, d, with_hypno=d >= hypno_from)
-        if old_wx:
-            days[d.isoformat()]["wx"] = old_wx
+        # nouveau par-dessus l'ancien : un appel Garmin en échec (sommeil, VFC…) ne fait pas disparaître ce qu'on avait déjà
+        days[d.isoformat()] = {**days.get(d.isoformat(), {}), **fetch_day(api, d, with_hypno=d >= hypno_from)}
         time.sleep(0.4)
     # respiration au dixième des nuits déjà lues : on relit seulement le sommeil, sans toucher au reste
     resp_from = (today - timedelta(days=RESP_DAYS)).isoformat()
@@ -677,21 +642,18 @@ def run(api):
             for f in ("hyp", "nhr", "nhrv"):
                 v.pop(f, None)
 
-    wx = weather(lat, lon, START, today)
+    wx = weather(lat, lon, max(START, today - timedelta(days=WX_DAYS)), today)
     for k, v in wx.items():
         if k in days:
             days[k]["wx"] = v
         else:
             days[k] = {"d": k, "wx": v}
-    for k, v in state.get("wx_cache", {}).items():  # garde l'historique air (limité à 92 j par l'API)
-        if k in days and "wx" in days[k]:
-            for f in ("aqi", "pollen"):
-                if days[k]["wx"].get(f) is None and v.get(f) is not None:
-                    days[k]["wx"][f] = v[f]
+    for v in days.values():   # anciens champs (humidité, air, pollen…) retirés le 28/10/2026 : seule la température sert
+        if v.get("wx"):
+            v["wx"] = {f: v["wx"][f] for f in ("tMin", "tAvg") if v["wx"].get(f) is not None}
 
     new = {
         "days": dict(sorted(days.items())),
-        "wx_cache": {k: {"aqi": v["wx"].get("aqi"), "pollen": v["wx"].get("pollen")} for k, v in days.items() if v.get("wx")},
         "pending": len([d for d in all_dates if not days.get(d.isoformat(), {}).get("f")]),
         "profile": fetch_profile(api, START, today, state.get("profile")),
     }
