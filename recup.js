@@ -6,30 +6,11 @@ const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
 const hm = mins => `${Math.floor(mins / 60)} h ${pad(Math.round(mins % 60))}`;
 const hmin = mins => Math.round(mins) < 60 ? `${Math.round(mins)} min` : hm(mins);   // écarts : « 26 min » plutôt que « 0 h 26 »
-const durS = s => hm(s / 60);
 const clock = dt => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 const STAGES = { deep: ["Profond", "var(--deep)"], light: ["Léger", "var(--light)"], rem: ["Paradoxal", "var(--rem)"], awake: ["Éveil", "var(--awake)"] };
-const LEVELS = { PRIME: "au top", HIGH: "élevée", MODERATE: "modérée", LOW: "faible", POOR: "très faible" };
 const HRV_ST = { BALANCED: "équilibrée", UNBALANCED: "déséquilibrée", LOW: "basse", POOR: "très basse" };
-const FEEDBACK = { WELL_RECOVERED: "bien récupéré", RECOVERED: "récupéré", RECOVERING: "en récupération", HIGH_RECOVERY_NEEDS: "gros besoin de récupération", POOR_SLEEP: "nuit difficile", GOOD_SLEEP: "bonne nuit" };
 
-// ------------------------------------------------------------------ Lune
-const SYN = 29.530588853, NEW0 = Date.UTC(2000, 0, 6, 18, 14) / 864e5;
-function moon(dt) {
-  const age = (((dt.getTime() / 864e5 - NEW0) % SYN) + SYN) % SYN, p = age / SYN;
-  const illum = (1 - Math.cos(2 * Math.PI * p)) / 2;
-  const names = ["Nouvelle lune", "Premier croissant", "Premier quartier", "Gibbeuse croissante", "Pleine lune", "Gibbeuse décroissante", "Dernier quartier", "Dernier croissant"];
-  const idx = Math.floor((p * 8 + 0.5)) % 8;
-  return { age, p, illum, name: names[idx], full: Math.abs(age - SYN / 2) <= 2, nouv: age <= 2 || age >= SYN - 2 };
-}
-function moonSvg(m, size = 52) {
-  const r = size / 2 - 2, c = size / 2, rx = Math.abs(Math.cos(2 * Math.PI * m.p)) * r;
-  const wax = m.p < 0.5, cres = m.p < 0.25 || m.p > 0.75;
-  const outer = wax ? 1 : 0, inner = wax ? (cres ? 0 : 1) : (cres ? 1 : 0);
-  const lit = m.illum < 0.02 ? "" : m.illum > 0.98 ? `<circle cx="${c}" cy="${c}" r="${r}" fill="#f4ecd2"/>` :
-    `<path d="M${c},${c - r} A${r},${r} 0 0 ${outer} ${c},${c + r} A${rx.toFixed(2)},${r} 0 0 ${inner} ${c},${c - r}Z" fill="#f4ecd2"/>`;
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-label="${m.name}"><circle cx="${c}" cy="${c}" r="${r}" fill="#2a2a30"/>${lit}<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(255,255,255,.12)"/></svg>`;
-}
+const HOT_NIGHT = 15;   // nuit chaude : minimum ≥ 15 °C (même seuil que « Ce qui joue sur ton sommeil »)
 function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars / octobre)
   const m = d.getMonth(); if ((m !== 2 && m !== 9) || d.getDay() !== 0) return null;
   return d.getDate() > 24 ? (m === 2 ? "Passage à l'heure d'été (1 h de sommeil en moins)" : "Passage à l'heure d'hiver (1 h de plus)") : null;
@@ -37,7 +18,7 @@ function dstNight(d) { // nuit du changement d'heure (dernier dimanche de mars /
 
 // ------------------------------------------------------------------ Données
 async function fetchEnv() {
-  try { const r = await fetch("data/recovery.json?v=" + Date.now(), { cache: "no-store" }); if (r.ok) { const plain = await r.json(); return { plain, data: plain.updated_at || "" }; } } catch (e) {}
+  try { const r = await fetch("data/recovery.json", { cache: "no-cache" }); if (r.ok) { const plain = await r.json(); return { plain, data: plain.updated_at || "" }; } } catch (e) {}
   return null;
 }
 async function openRecup(refresh) {
@@ -53,7 +34,7 @@ async function openRecup(refresh) {
 }
 function prep() {
   const days = Object.values(RC.data.days || {}).filter(d => d.f).sort((a, b) => a.d < b.d ? -1 : 1);
-  days.forEach(d => { d.dt = parseLocal(d.d); d.bedDt = d.bed ? parseLocal(d.bed) : null; d.wakeDt = d.wake ? parseLocal(d.wake) : null; d.m = moon(new Date(d.dt.getTime() - 3 * 36e5)); });
+  days.forEach(d => { d.dt = parseLocal(d.d); d.bedDt = d.bed ? parseLocal(d.bed) : null; d.wakeDt = d.wake ? parseLocal(d.wake) : null; });
   RC.days = days; RC.nights = days.filter(d => d.sl);
   RC.pick = days.filter(d => d.sl || d.tr != null);   // jours consultables dans le bilan
   if (RC.sel == null || RC.sel < 0 || RC.sel >= RC.pick.length) RC.sel = RC.pick.length - 1;
@@ -265,23 +246,14 @@ function nightFacts(n) {
   return { acts, km, late: gapH != null && gapH < 3 && gapH > -2, gapH };
 }
 function renderCtx(n) {
-  const w = n.wx || {}, m = n.m, nf1 = (v, d = 0) => v == null ? "–" : nf(v, d);
+  const w = n.wx || {}, nf1 = (v, d = 0) => v == null ? "–" : nf(v, d);
   const it = (l, v, u) => `<div class="it"><div class="l">${l}</div><div class="v">${v}${u ? `<small> ${u}</small>` : ""}</div></div>`;
-  const nfo = nightFacts(n), dst = dstNight(n.dt);
+  const nfo = nightFacts(n), dst = dstNight(n.dt), hot = w.tMin != null && w.tMin >= HOT_NIGHT;
   const sport = nfo.acts.length ? `${nf(nfo.km, 0)} km${nfo.gapH != null ? ` <small>fini ${nfo.gapH < 0 ? "après" : `${nf(nfo.gapH, 1)} h avant`} le coucher</small>` : ""}` : "repos";
   const why = [nfo.acts.length ? `${nfo.km >= 1 ? `${nf(nfo.km)} km` : "une séance"} la veille${nfo.late ? ", fini moins de 3 h avant le coucher (ça peut retarder l'endormissement)" : ""}` : "repos la veille",
-    w.tMin != null && w.tMin >= 18 ? `nuit chaude (${nf(w.tMin)} °C au plus frais)` : "", dst ? "changement d'heure" : ""].filter(Boolean);
+    hot ? `nuit chaude (${nf(w.tMin)} °C au plus frais)` : "", dst ? "changement d'heure" : ""].filter(Boolean);
   $("rCtxAns").textContent = `Ce qui a pu jouer : ${why.join(", ")}.`;
-  $("rCtx").innerHTML = `<div class="moonrow">${moonSvg(m, 22)}<span>Lune : <b>${m.name.toLowerCase()}</b> · ${Math.round(m.illum * 100)} %</span></div>
-    ${it("Température la nuit", w.tMin != null ? `${nf1(w.tMin, 1)} → ${nf1(w.tAvg, 1)}` : "–", "°C min → moy.")}
-    ${it("Humidité", nf1(w.hum), "%")}
-    ${it("Pression (24 h)", w.dP != null ? `${w.dP > 0 ? "+" : ""}${nf(w.dP, 1)}` : "–", "hPa")}
-    ${it("Pluie la nuit", nf1(w.rain, 1), "mm")}
-    ${it("Vent max.", nf1(w.wind), "km/h")}
-    ${it("Couverture nuageuse", nf1(w.cloud), "%")}
-    ${it("Qualité de l'air", w.aqi != null ? `${w.aqi} <small>${w.aqi < 20 ? "bonne" : w.aqi < 40 ? "correcte" : w.aqi < 60 ? "moyenne" : "mauvaise"}</small>` : "–")}
-    ${it("Pollen (max.)", nf1(w.pollen), "grains/m³")}
-    ${it("Coucher du soleil", w.sunset || "–", w.daylight ? `· ${hm(w.daylight * 60)} de jour` : "")}
+  $("rCtx").innerHTML = `${it("Température la nuit", w.tMin != null ? `${nf1(w.tMin, 1)} → ${nf1(w.tAvg, 1)}` : "–", `°C min → moy. · ${hot ? "nuit chaude" : `chaude dès ${HOT_NIGHT} °C`}`)}
     ${it("Sport la veille", sport)}
     ${dst ? `<div class="flag">${dst}</div>` : ""}${nfo.late ? `<div class="flag">Effort terminé moins de 3 h avant le coucher</div>` : ""}`;
 }
@@ -687,7 +659,7 @@ function renderCmp() {
     ["Coucher tardif pour toi", `${CMP.lateBedMin} min ou plus après ton heure habituelle`, d => { const b = d.bedDt && bedBase(d); return b == null ? null : minsFrom18(d.bedDt) - b >= CMP.lateBedMin; }],
     ["Nuit courte la veille", `moins de ${nf(CMP.shortNightH, 1)} h`, d => { const p = prevDay(d); return p && p.sl ? p.sl / 3600 < CMP.shortNightH : null; }],
     ["Journée stressante", `stress moyen Garmin ≥ ${CMP.stress}`, d => { const p = prevDay(d); return p && p.stress != null && p.stress > 0 ? p.stress >= CMP.stress : null; }],
-    ["Nuit chaude", "min. ≥ 15 °C", d => d.wx?.tMin != null ? d.wx.tMin >= 15 : null],
+    ["Nuit chaude", `min. ≥ ${HOT_NIGHT} °C`, d => d.wx?.tMin != null ? d.wx.tMin >= HOT_NIGHT : null],
     ["Nuit de week-end", "vendredi et samedi soir", d => { const w = (d.dt.getDay() + 6) % 7; return w === 5 || w === 6; }],
   ];
   const rows = [];
