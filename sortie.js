@@ -1154,6 +1154,20 @@ function bindAlt() {
 }
 
 function loopTrace(c) { const st = Math.max(1, Math.floor(c.pts.length / 160)); return traceSvg(c.pts.filter((_, i) => i % st === 0).map(p => [p[0], p[1]])); }
+// phrase-réponse du générateur : le vent au départ à l'heure choisie, et donc par où partir (1 appel météo par jour et par départ, gardé en mémoire)
+const GA = new Map();
+async function genAnswer(st, s) {
+  const k = `${st.lat.toFixed(3)},${st.lon.toFixed(3)},${s.date}`;
+  try {
+    if (!GA.has(k)) GA.set(k, windHere(st, new Date(s.date + "T00:00:00")).catch(e => { GA.delete(k); throw e; }));
+    const w = await GA.get(k), h = w.loc[0].hourly, i = h.time.findIndex(t => +t.slice(11, 13) === s.hour), el = $("gAns");
+    if (!el || i < 0) return;
+    const v = Math.round(h.wind_speed_10m[i]), g = Math.round(h.wind_gusts_10m[i]), d = h.wind_direction_10m[i], t = Math.round(h.temperature_2m[i]), pp = h.precipitation_probability[i];
+    const day = new Date(s.date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
+    el.innerHTML = `${day.charAt(0).toUpperCase() + day.slice(1)} à ${s.hour} h : <b>${t} °C</b>, vent de ${vers(d)} à <b>${v} km/h</b> (rafales ${g})${pp >= 30 ? `, risque de pluie ${pp} %` : ""}. `
+      + (v < 10 ? "Vent faible : la direction compte peu, choisis la boucle qui te plaît." : `Pars vers ${vers(d)}, face au vent, pour rentrer vent dans le dos.`);
+  } catch (e) { const el = $("gAns"); if (el) el.textContent = ""; }
+}
 function renderGen() {
   const box = $("soGen"); if (!box) return;
   const st = startPt(), s = settings(), R = GEN.res;
@@ -1173,6 +1187,7 @@ function renderGen() {
       ${on ? (chosen === c.id ? `<button class="btn2" disabled>Boucle affichée ✓</button>` : `<button class="btn2 primary" id="gChoose">Choisir cette boucle</button>`) : ""}
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
+    <p class="rans" id="gAns"></p>
     <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>
     <div class="soform gform">
       <label>Distance <input type="number" id="gKm" min="20" max="300" step="5" value="${LS.get("soGenKm", 80)}"> km</label>
@@ -1197,6 +1212,7 @@ function renderGen() {
     if (!SO.route) return renderGen();
     renderLoad(); if (t0 !== `${$("gDate").value}|${$("gHour").value}`) compute(); };
   ["gKm", "gRel", "gDate", "gHour"].forEach(id => $(id).onchange = save);
+  genAnswer(st, s);
   $("gGo").onclick = async () => { if (GEN.busy) return; dropRes(); GEN.busy = "new"; GEN.msg = "Préparation…"; renderGen();
     try { GEN.res = await makeLoops(genOpts()); GEN.fit = true; saveRes(); GEN.msg = ""; }
     catch (e) { GEN.msg = e.message || "Création impossible pour l'instant."; }

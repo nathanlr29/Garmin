@@ -459,11 +459,14 @@ function miniCurve(box, pts, pk) {
   box.innerHTML = s;
 }
 // Jauge colorée avec repère. segs : [[borne haute, couleur, libellé]] du plus bas au plus haut ; good : borne basse de la zone « bon pour toi »
+// « bon pour toi » au début de la zone verte, ou au bout de la jauge si le repère tomberait dessus (jusqu'à 26 % de large sur téléphone)
+const goodLab = (g, m) => { const L = 26, at = (m < g - 4 || m > g + L) ? `left:${g}%` : (m < 100 - L - 4 ? "right:0" : null);
+  return at ? `<em class="sygood" style="${at}">bon pour toi${at.startsWith("left") ? " ›" : ""}</em>` : ""; };
 function gauge(v, min, max, segs, good, unitTxt) {
   const pos = x => clamp01((x - min) / (max - min) * 100);
   let lo = min; const bars = segs.map(([hi, c, l]) => { const w = pos(Math.min(hi, max)) - pos(lo), out = `<i style="width:${w}%;background:${c}" title="${l}"></i>`; lo = hi; return out; }).join("");
   const labs = (() => { let l0 = min; return segs.map(([hi, , l]) => { const a = pos(l0), b = pos(Math.min(hi, max)); l0 = hi; return `<span style="left:${(a + b) / 2}%">${l}</span>`; }).join(""); })();
-  return `<div class="sygbar" role="img" aria-label="${unitTxt}"><div class="sygseg">${bars}</div>${good != null ? `<em class="sygood" style="left:${pos(good)}%">bon pour toi ›</em>` : ""}<b class="sygmark" style="left:${pos(v)}%"></b></div><div class="sygl">${labs}</div>`;
+  return `<div class="sygbar" role="img" aria-label="${unitTxt}"><div class="sygseg">${bars}</div>${good != null ? goodLab(pos(good), pos(v)) : ""}<b class="sygmark" style="left:${pos(v)}%"></b></div><div class="sygl">${labs}</div>`;
 }
 const FRAIS = { min: -40, max: 25, segs: [[-25, "var(--bad)", "très chargé"], [-10, "var(--warn)", "chargé"], [5, "var(--info)", "équilibré"], [25, "var(--good)", "frais"]], good: 5 };
 const RECUPG = { min: 0, max: 100, segs: [[READY_LOW, RECUP_COL[3], "basse"], [65, RECUP_COL[2], "moyenne"], [100, RECUP_COL[0], "bonne"]], good: 65 };

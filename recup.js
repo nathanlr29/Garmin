@@ -255,7 +255,7 @@ function renderCtx(n) {
   $("rCtxAns").textContent = `Ce qui a pu jouer : ${why.join(", ")}.`;
   $("rCtx").innerHTML = `${it("Température la nuit", w.tMin != null ? `${nf1(w.tMin, 1)} → ${nf1(w.tAvg, 1)}` : "–", `°C min → moy. · ${hot ? "nuit chaude" : `chaude dès ${HOT_NIGHT} °C`}`)}
     ${it("Sport la veille", sport)}
-    ${dst ? `<div class="flag">${dst}</div>` : ""}${nfo.late ? `<div class="flag">Effort terminé moins de 3 h avant le coucher</div>` : ""}`;
+    ${dst ? `<div class="flag">${dst}</div>` : ""}`;
 }
 
 // ------------------------------------------------------------------ Cœur et VFC de la nuit sélectionnée
@@ -268,7 +268,7 @@ function nightChart(el, d, key, opt) {
   let lo = Math.min(...vals), hi = Math.max(...vals); const pv = (hi - lo) * .15 || 5; lo = Math.max(0, lo - pv); hi += pv;
   const x = t => m.l + (t - start) / (end - start || 1) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${opt.title}">`;
-  (d.hyp || []).forEach(([st, mins, k]) => { const a = (parseLocal(st) - d.bedDt) / 6e4; s += `<rect x="${x(a)}" y="${m.t}" width="${Math.max(0, x(a + mins) - x(a))}" height="${ih}" fill="${STAGES[k][1]}" opacity=".10"/>`; });
+  (d.hyp || []).forEach(([st, mins, k]) => { const a = (parseLocal(st) - d.bedDt) / 6e4; s += `<rect x="${x(a)}" y="${m.t}" width="${Math.max(0, x(a + mins) - x(a))}" height="${ih}" fill="${STAGES[k][1]}" opacity=".22"/>`; });
   const stp = niceTicks(hi - lo, 4)[1] || 1; s += `<g class="axis">`;
   for (let t = Math.ceil(lo / stp) * stp; t <= hi; t += stp) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${nf(t)}</text>`;
   const h0 = new Date(d.bedDt); h0.setMinutes(0, 0, 0);
@@ -338,7 +338,7 @@ function tsChart(el, days, series, opt = {}) {
   let lo = Math.min(...vals), hi = Math.max(...vals); const padv = (hi - lo) * .12 || 5; lo = Math.max(0, lo - padv); hi += padv;
   const n = days.length, x = i => m.l + (n === 1 ? iw / 2 : i / (n - 1) * iw), y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
   const stp = niceTicks(hi - lo, 4)[1] || 1, ticks = []; for (let t = Math.ceil(lo / stp) * stp; t <= hi; t += stp) ticks.push(t);
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img"><g class="axis">${ticks.map(t => `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${nf(t)}</text>`).join("")}`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img"><g class="axis">${ticks.map(t => `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${nf(t, stp < 1 ? 1 : 0)}</text>`).join("")}`;
   const step = Math.max(1, Math.ceil(n / (W < 480 ? 5 : 8)));
   days.forEach((d, i) => { if (i % step === 0) s += `<text x="${x(i)}" y="${H - 5}" text-anchor="middle">${d.dt.getDate()} ${MONTHS[d.dt.getMonth()]}</text>`; });
   s += "</g>";
@@ -405,15 +405,14 @@ function renderReg(P) {
   // heures cibles (médiane de tes 30 dernières nuits) : bande de ± SRI.tol et pointillé ; sinon moyennes de la période
   if (tg) [[tg.bed, "var(--accent)"], [tg.wake, "var(--amber)"]].forEach(([v, c]) => { s += `<rect x="${m.l}" width="${iw}" y="${y(v - SRI.tol)}" height="${y(v + SRI.tol) - y(v - SRI.tol)}" fill="${c}" opacity=".12"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${c}" stroke-dasharray="3 4" opacity=".8"/>`; });
   else s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(ab)}" y2="${y(ab)}" stroke="var(--accent)" stroke-dasharray="3 4" opacity=".7"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(aw)}" y2="${y(aw)}" stroke="var(--amber)" stroke-dasharray="3 4" opacity=".7"/>`;
-  N.forEach((d, i) => { const cx = m.l + gw * i + gw / 2; s += `<rect x="${cx - bw / 2}" y="${y(bs[i])}" width="${bw}" height="${Math.max(2, y(ws[i]) - y(bs[i]))}" rx="${bw / 2}" fill="url(#rg)" data-i="${i}"/>`; });
-  s = s.replace("<g class=\"axis\">", `<defs><linearGradient id="rg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--deep)"/><stop offset="1" stop-color="var(--light)"/></linearGradient></defs><g class="axis">`);
+  N.forEach((d, i) => { const cx = m.l + gw * i + gw / 2; s += `<rect x="${cx - bw / 2}" y="${y(bs[i])}" width="${bw}" height="${Math.max(2, y(ws[i]) - y(bs[i]))}" rx="${bw / 2}" fill="var(--light)" data-i="${i}"/>`; });
   box.innerHTML = s + "</svg>";
   const fmt = v => `${pad(Math.floor((18 * 60 + v) / 60) % 24)}:${pad(Math.round(v % 60))}`;
   const sd = arr => { const a = arr.reduce((x, y) => x + y, 0) / arr.length; return Math.sqrt(arr.reduce((x, y) => x + (y - a) ** 2, 0) / arr.length); };
   const sdb = Math.round(sd(bs));
-  $("rRegInfo").textContent = `coucher moyen ${fmt(ab)} · lever ${fmt(aw)} · ± ${sdb} min`;
+  $("rRegInfo").textContent = `coucher moyen ${fmt(ab)} · lever ${fmt(aw)} · ton coucher varie de ${sdb} min`;
   const all = RC.days.map((d, i) => sriAt(RC.days, i)), last = all.filter(Boolean).pop() || null, hist = last ? all.filter(t => t && (last.d.dt - t.d.dt) / 864e5 < 365).map(t => t.score) : [];
-  if (tg) $("rRegInfo").textContent = `cible ${fmt(tg.bed)} → ${fmt(tg.wake)} · ± ${sdb} min`;
+  if (tg) $("rRegInfo").textContent = `cible ${fmt(tg.bed)} → ${fmt(tg.wake)}, à ± ${SRI.tol} min · ton coucher varie de ${sdb} min`;
   $("rRegAns").innerHTML = sriAnswer(last, hist, tg) + (tg ? `<br>${targetLine(tg)}` : "");
   P.forEach(d => { const t = all[RC.days.indexOf(d)]; d._sri = t ? t.score : null; d._sLo = t ? SRI.good : null; d._sHi = t ? 100 : null; });
   tsChart("rSri", P, [{ k: "_sri", l: "régularité", c: "var(--accent)", w: 2, u: "/100" }], { band: ["_sLo", "_sHi", "var(--teal)", .14], h: 140 });
@@ -442,9 +441,11 @@ function renderRhr(P) {
   const step = Math.max(1, Math.ceil(N.length / (W < 480 ? 5 : 8)));
   N.forEach((d, i) => { if (i % step === 0) svg += `<text x="${m.l + gw * i + gw / 2}" y="${H - 5}" text-anchor="middle">${d.dt.getDate()} ${MONTHS[d.dt.getMonth()]}</text>`; });
   svg += "</g>";
-  // barres : au-dessus de ta moyenne glissante de 3 bpm ou plus en ambre, sinon en vert ; ligne pointillée = moyenne glissante des 30 jours d'avant
-  N.forEach((d, i) => { const r = rhrOf(d), b = rhrBase(d), cx = m.l + gw * i + gw / 2, c = b != null && r - b >= RHR_HI ? "var(--amber)" : "var(--teal)";
-    svg += `<rect x="${cx - bw / 2}" y="${y(r)}" width="${bw}" height="${Math.max(1, y(lo) - y(r))}" rx="${Math.min(3, bw / 2)}" fill="${c}" opacity=".85" data-i="${i}"/>`; });
+  // points reliés (l'axe ne part pas de zéro : des barres exagéreraient les écarts) ; 3 bpm ou plus au-dessus de ta moyenne en ambre
+  let ln = ""; N.forEach((d, i) => { ln += (i ? "L" : "M") + (m.l + gw * i + gw / 2).toFixed(1) + "," + y(rhrOf(d)).toFixed(1); });
+  svg += `<path d="${ln}" fill="none" stroke="var(--teal)" stroke-width="1.5" stroke-linejoin="round" opacity=".7"/>`;
+  N.forEach((d, i) => { const r = rhrOf(d), b = rhrBase(d), cx = m.l + gw * i + gw / 2, hi_ = b != null && r - b >= RHR_HI;
+    svg += `<rect x="${cx - gw / 2}" y="${m.t}" width="${gw}" height="${ih}" fill="transparent" data-i="${i}"/><circle cx="${cx}" cy="${y(r)}" r="${hi_ ? 4 : Math.min(3, Math.max(1.6, gw * .3))}" fill="${hi_ ? "var(--amber)" : "var(--teal)"}" pointer-events="none"/>`; });
   let path = "", pen = false;
   N.forEach((d, i) => { const b = rhrBase(d); if (b == null) { pen = false; return; } path += (pen ? "L" : "M") + (m.l + gw * i + gw / 2).toFixed(1) + "," + y(b).toFixed(1); pen = true; });
   if (path) svg += `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 4" opacity=".55"/>`;
@@ -674,13 +675,15 @@ function renderCmp() {
   });
   rows.sort((a, b) => b.w - a.w); rows.splice(CMP.max);
   if (!rows.length) { $("rCmpAns").textContent = N.length < 30 ? "Pas encore assez de nuits pour voir ce qui joue sur ton sommeil." : "Rien ne ressort nettement : tes nuits varient sans lien clair avec ce qui est mesuré ici."; $("rCmp").innerHTML = ""; return; }
-  const top = rows[0], eff = r => Math.abs(r.ds) >= CMP.pts ? `${r.ds >= 0 ? "+" : "−"}${nf(Math.abs(r.ds), 1)} pts de score` : `${r.dm >= 0 ? "+" : "−"}${nf(Math.abs(r.dm))} min de sommeil`;
+  const top = rows[0], eff = r => Math.abs(r.ds) / 5 >= Math.abs(r.dm) / 20 ? `${r.ds >= 0 ? "+" : "−"}${nf(Math.abs(r.ds), 1)} pts de score` : `${r.dm >= 0 ? "+" : "−"}${nf(Math.abs(r.dm))} min de sommeil`;
   $("rCmpAns").innerHTML = `Ce qui joue le plus sur tes nuits : <b>${top.label.toLowerCase()}</b> (${eff(top)} en moyenne).`;
-  const sc = 12;
-  $("rCmp").innerHTML = rows.map(r => { const w = Math.min(50, Math.abs(r.ds) / sc * 50), pos = r.ds >= 0;
+  // barre = même mesure que le classement (l'effet le plus fort : points de score, ou minutes de sommeil), pour que la 1re ligne soit la plus longue
+  const wMax = rows[0].w || 1;
+  $("rCmp").innerHTML = rows.map(r => { const byPts = Math.abs(r.ds) / 5 >= Math.abs(r.dm) / 20, v = byPts ? r.ds : r.dm, w = r.w / wMax * 50, pos = v >= 0;
+    const pts = `${r.ds >= 0 ? "+" : "−"}${nf(Math.abs(r.ds), 1)} pts`, min = `${r.dm >= 0 ? "+" : "−"}${nf(Math.abs(r.dm))} min`;
     return `<div class="row"><div>${r.label}<small>${r.sub ? r.sub + " · " : ""}${r.n} nuits</small></div>
       <div class="bar"><div style="${pos ? `left:50%;width:${w}%` : `right:50%;width:${w}%`};background:${pos ? "var(--teal)" : "var(--rose)"}"></div><span class="mid"></span></div>
-      <div class="d">${r.ds >= 0 ? "+" : "−"}${nf(Math.abs(r.ds), 1)} pts<small><br>${r.dm >= 0 ? "+" : "−"}${nf(Math.abs(r.dm))} min${r.dh != null ? ` · VFC ${r.dh >= 0 ? "+" : "−"}${nf(Math.abs(r.dh))}` : ""}</small></div></div>`; }).join("");
+      <div class="d">${byPts ? pts : min}<small><br>${byPts ? min : pts}${r.dh != null ? ` · VFC ${r.dh >= 0 ? "+" : "−"}${nf(Math.abs(r.dh))}` : ""}</small></div></div>`; }).join("");
 }
 
 // ------------------------------------------------------------------ Anecdotes
@@ -705,7 +708,7 @@ function renderFacts() {
   let seed = RC.factSeed * 9301 + 777; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const pool = F.map(f => ({ f, k: Math.pow(rnd(), 1 / f.w) })).sort((a, b) => b.k - a.k).slice(0, 6).map(x => x.f);
   $("rFacts").innerHTML = pool.map(f => { const i = f.day ? RC.pick.findIndex(p => p.d === f.day) : -1;
-    return i >= 0 ? `<button class="fact factlink" data-i="${i}"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")} · voir la nuit →</small></div></button>`
+    return i >= 0 ? `<button class="fact factlink" data-i="${i}"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")} · voir la nuit</small></div></button>`
       : `<div class="fact"><div class="n">${esc(String(f.n))}</div><div class="t">${esc(f.t)}<small>${esc(f.sub || "")}</small></div></div>`; }).join("");
   $("rFacts").querySelectorAll("[data-i]").forEach(b => b.onclick = () => { selectDay(+b.dataset.i); $("rMorning").scrollIntoView({ behavior: "smooth", block: "start" }); });
 }

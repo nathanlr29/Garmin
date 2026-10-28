@@ -799,7 +799,7 @@ function renderHead(prof, form, ready, ph, c) {
   const goalH = `
   <section class="card hud span12 goalcard">
     <div class="gc">
-      <div class="g"><div class="gl">FTP</div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts"><span>W</span><span class="arrow">→ ${G.ftp} W</span></div>
+      <div class="g"><div class="gl">FTP <small>· touche le chiffre pour la changer</small></div><div class="gv"><input id="pFtp" type="number" min="80" max="600" step="1" value="${prof.ftp}" aria-label="FTP en watts" title="Changer ta FTP" style="width:${String(prof.ftp).length * .46 + .08}em"><span>W</span><span class="arrow">→ ${G.ftp} W</span></div>
         <div class="pbar"><div style="width:${pct(prof.ftp, Math.min(ftp0, prof.ftp) - 20, G.ftp)}%"></div></div>
         <div class="gs">${need > 0 ? `encore <b>+${need} W</b> en ${weeksLeft} semaines, soit +${perW.toFixed(1).replace(".", ",")} W/sem · ${verdict}` : "objectif atteint"} · source : ${prof.ftpSrc}${prof.det && prof.det.ftp > prof.ftp ? ` · <b>détectée : ${prof.det.ftp} W</b> (${prof.det.l} à ${prof.det.w} W)` : ""}</div></div>
       <div class="g"><div class="gl">VO2max (Garmin)</div><div class="gv"><b>${vo2 != null ? String(vo2).replace(".", ",") : "–"}</b><span class="arrow">→ ${String(G.vo2).replace(".", ",")}</span></div>
@@ -812,7 +812,7 @@ function renderHead(prof, form, ready, ph, c) {
   const formH = `<section class="card span12 formc">
     <div class="formrow">
       <div class="fi"><div class="l">Récupération</div><div class="v" style="color:${rc}">${r ?? "–"}<small>/100</small></div><div class="s">${ready.today == null && r != null ? "dernier score connu" : ready.avg3 != null ? `moy. 3 j : ${Math.round(ready.avg3)}` : "onglet Récup"}</div></div>
-      <div class="fi"><div class="l">Forme (charge en TSS)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
+      <div class="fi"><div class="l">Forme (fraîcheur)</div><div class="v">${form.tsb >= 0 ? "+" : ""}${Math.round(form.tsb)}</div><div class="s">${tsbTxt} · fond ${Math.round(form.ctl)} / fatigue ${Math.round(form.atl)}</div></div>
       <div class="fi"><div class="l">7 derniers jours</div><div class="v">${Math.round(form.km7)}<small> km</small></div><div class="s">${form.n7} séance${form.n7 > 1 ? "s" : ""}${form.c7 ? ` + ${form.c7} trajet${form.c7 > 1 ? "s" : ""}` : ""} · ${form.h7.toFixed(1).replace(".", ",")} h</div></div>
       <div class="fi"><div class="l">Dernière séance dure</div><div class="v sm">${form.lastHard == null ? "–" : form.lastHard === 0 ? "aujourd'hui" : form.lastHard === 1 ? "hier" : `il y a ${form.lastHard} j`}</div><div class="s">intensité ou effet aérobie élevé</div></div>
       <div class="fi wide"><div class="l">Cycle d'entraînement</div><div class="v sm">${ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4`}${ph.deload && !ph.final ? " (allégée)" : ""}</div><div class="s">${esc(ph.focus)}</div></div>
@@ -846,7 +846,7 @@ const editable = (W, it) => W.td < 0 || it.day >= W.td;   // jour à venir (ou a
 const addRunBtn = it => `<button class="wadd" data-addrun="${ymd(it.date)}" title="Ajouter une course ce jour-là, même avec du vélo ou de la muscu">+ course</button>`;
 function runDetail(W, it) {
   const r = it.run;
-  let h = `<p class="sg">${esc(r.w.goal)}</p>${runTable(r.w)}<p class="note">≈ ${nf(r.w.km, 1)} km, charge ≈ ${r.w.tss} TSS. Allures calculées sur ton allure seuil (${fmtPace(r.w.thr)} /km) ; footing = ${String(RUN_EASY).replace(".", ",")} × cette allure.${r.rep ? ` Remplace : ${TYPES[r.rep.t].l.toLowerCase()} de ${fmtMin(r.rep.dur)} au vélo.` : ""}</p>`;
+  let h = `<p class="sg">${esc(r.w.goal)}</p>${runTable(r.w)}<p class="note">≈ ${nf(r.w.km, 1)} km, charge ≈ ${r.w.tss}. Allures calculées sur ton allure seuil (${fmtPace(r.w.thr)} /km) ; footing = ${String(RUN_EASY).replace(".", ",")} × cette allure.${r.rep ? ` Remplace : ${TYPES[r.rep.t].l.toLowerCase()} de ${fmtMin(r.rep.dur)} au vélo.` : ""}</p>`;
   if (r.st === "done" && r.acts) h += `<div class="ddone">${r.acts.map(a => `<button class="btn2 primary" data-bilan="${a.id}">Bilan : ${esc(a.n)}</button>`).join("")}</div>`;
   if (r.st === "plan" && editable(W, it)) {
     const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`, durs = RUN_OWN_DURS.includes(r.dur) ? RUN_OWN_DURS : RUN_OWN_DURS.concat(r.dur).sort((a, b) => a - b);
@@ -866,8 +866,8 @@ function renderDay(W, ready) {
   if (W.td < 0 || W.td > 6) return "";
   const it = W.items[W.td], b = it.bike, r = ready.today;
   const morning = it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : `<span class="dnone">Pas de muscu</span>`;
-  const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)}${rn.cool ? " · très facile" : ""} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
-  const evening = b ? `<button class="dbk" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}"><span class="badge">${TYPES[b.t].l}</span><span class="dbt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>`
+  const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)}${rn.cool ? " · très facile" : ""} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} de charge`}</small>${runStatus(rn)}</button>` : "";
+  const evening = b ? `<button class="dbk" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}"><span class="badge">${TYPES[b.t].l}</span><span class="dbt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} de charge`}</small>${bikeStatus(b)}</button>`
     : rn && rn.slot === "alt" ? runBtn : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
   const undoN = (store2.get("planUndo:" + ymd(W.mon)) || []).length;
   const last = rides().filter(isTraining).slice(-1)[0];
@@ -877,7 +877,7 @@ function renderDay(W, ready) {
     <div class="drow"><span class="dk">${b && isLong(b.t) ? "Sortie" : "Soir"}</span><div>${evening}</div></div>
     ${W.changes.length ? `<div class="chgh">Ajustements de la semaine</div><ul class="chg">${W.changes.map(x => `<li>${esc(x.text)}${x.id ? ` <button class="lnk" data-undo="${esc(x.id)}">Annuler</button>` : ""}</li>`).join("")}</ul>` : ""}
     ${undoN ? `<button class="lnk small" id="pRedo">Rétablir ${undoN > 1 ? `les ${undoN} ajustements annulés` : "l'ajustement annulé"}</button>` : ""}
-    ${last ? `<div class="dlast"><button class="lnk" data-bilan="${last.id}">Bilan de ta dernière séance : ${esc(last.n)} (${dShort(last.dt)}) →</button></div>` : ""}
+    ${last ? `<div class="dlast"><button class="lnk" data-bilan="${last.id}">Bilan de ta dernière séance : ${esc(last.n)} (${dShort(last.dt)})</button></div>` : ""}
   </section>`;
 }
 function detailHtml(W, it, prof) {
@@ -906,10 +906,10 @@ ${STEPS[b.t] ? `<select data-ov="k" aria-label="Palier">${STEPS[b.t].map((_, k) 
 }
 function weekRow(W, it, prof) {
   const now = W.isCur && it.day === W.td, past = W.td > it.day, b = it.bike, open = !!PS.open[ymd(it.date)];
-  const bikeH = b ? `<button class="wsess" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}" aria-expanded="${open}"><span class="badge">${TYPES[b.t].l}</span><span class="wt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} TSS`}</small>${bikeStatus(b)}</button>` : "";
-  const extra = it.extra.map(a => `<button class="wextra" data-bilan="${a.id}"><span>+ ${esc(a.n)}</span><small>${Charge.RUN_TYPES.has(a.t) ? runDone([a]) : doneSummary([a])} · bilan →</small></button>`).join("");
+  const bikeH = b ? `<button class="wsess" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}" aria-expanded="${open}"><span class="badge">${TYPES[b.t].l}</span><span class="wt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} de charge`}</small>${bikeStatus(b)}</button>` : "";
+  const extra = it.extra.map(a => `<button class="wextra" data-bilan="${a.id}"><span>+ ${esc(a.n)}</span><small>${Charge.RUN_TYPES.has(a.t) ? runDone([a]) : doneSummary([a])} · bilan</small></button>`).join("");
   const rn = it.run, openR = !!PS.open[ymd(it.date) + ":r"];
-  const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"}${rn.cool ? " · très facile" : ""} · ≈ ${rn.w.tss} TSS`}</small>${runStatus(rn)}</button>` : "";
+  const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"}${rn.cool ? " · très facile" : ""} · ≈ ${rn.w.tss} de charge`}</small>${runStatus(rn)}</button>` : "";
   return `<div class="wrow${now ? " now" : ""}${past ? " past" : ""}"><div class="wday"><b>${DAYN[it.day].slice(0, 3)}</b><span>${it.date.getDate()} ${it.date.toLocaleDateString("fr-FR", { month: "short" })}</span></div>
     <div class="wmus">${it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
     <div class="wbike">${bikeH}${runH}${extra}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}${!rn && editable(W, it) ? addRunBtn(it) : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(W, it) : ""}`;
@@ -939,7 +939,7 @@ function renderWeek(W, prof) {
   const doneT = Math.round((S.all || []).filter(a => { const k = dayIndex(a.dt, W.mon); return k >= 0 && k <= 6; }).reduce((s, a) => s + Charge.tssOf(a), 0));
   const cyc = ph.final ? "Semaine finale" : ph.out ? "Hors plan" : `Bloc ${ph.block} · semaine ${ph.wk}/4${ph.deload ? " (allégée)" : ""}`;
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
-  return `<section class="card span12 wkc" id="pWeek"><h2>La semaine <small>${cyc} · ≈ ${plannedT} TSS prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
+  return `<section class="card span12 wkc" id="pWeek"><h2>La semaine <small>${cyc} · ≈ ${plannedT} de charge prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
     <p class="pnote">${esc(ph.focus)}.${W.tired ? " Version allégée : fatigue détectée." : ""}${W.td < 0 ? " Aperçu : la semaine se fige lundi, puis s'ajuste chaque jour." : ""} Muscu le matin, vélo le soir ; jamais les jambes le jour ou la veille d'une séance clé.</p>
     <div class="wk">${pastFold(W, prof)}</div>${runNote}
     ${mw.length ? `<div class="factions">${mw.length > 1 ? `<button class="btn2 primary" id="pZip">Télécharger les ${mw.length} séances MyWhoosh (.zip)</button>` : ""}</div>
@@ -1001,7 +1001,7 @@ function renderToday(form, ready, W) {
     <div class="tdbar"><div class="tg" style="left:${X(L.lo)}%;width:${X(L.hi) - X(L.lo)}%"></div>${done ? `<div class="dn" style="width:${X(done)}%"></div>` : ""}${planned ? `<div class="pl" style="left:${X(done)}%;width:${X(done + planned) - X(done)}%"></div>` : ""}</div>
     <div class="tdleg"><span><i class="g"></i>cible</span>${done ? `<span><i class="d"></i>déjà fait : ${done}</span>` : ""}${planned ? `<span><i class="p"></i>prévu : ≈ ${planned}</span>` : ""}</div>
     <p class="tdmsg">${msg}</p>
-    <p class="note">Charge en TSS, calculée avec ta puissance (home trainer) ou ta fréquence cardiaque (dehors) : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100.</p></section>`;
+    <p class="note">Charge calculée avec ta puissance (home trainer) ou ta fréquence cardiaque (dehors) : 1 h d'endurance ≈ 50, 1 h au seuil ≈ 100.</p></section>`;
 }
 
 // Tranches d'âge acceptées (carte « Tes performances » de perf.js, import d'un lien #plan=)
@@ -1225,11 +1225,11 @@ async function open() {
   $("title").textContent = "Mon plan";
   const ok = await Recup.ensure("plan", () => open());
   if (!ok) return;
-  migrateFtp();
   render();
 }
 window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
+migrateFtp();  // dès le chargement : la Synthèse et la charge lisent la même FTP que le Plan, même sans avoir ouvert le Plan
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
 let rt3, lw3 = innerWidth; addEventListener("resize", () => { if (innerWidth === lw3) return; lw3 = innerWidth; clearTimeout(rt3); rt3 = setTimeout(() => { if (Nav.curTab() === "plan" && PS.W) { const a = $("pAna"); if (a) delete a.dataset.sig; render(); } }, 200); });

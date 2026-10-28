@@ -206,6 +206,11 @@ function countUp(el,to,dur=1100){
   requestAnimationFrame(step);
 }
 
+// année suivie en partie seulement (l'historique Garmin commence en cours d'année) : on le dit à côté de la comparaison
+function since(y){
+  const f=S.all.reduce((m,a)=>a.dt<m?a.dt:m,new Date(8.64e15));
+  return f.getFullYear()===y&&f>new Date(y,0,15)?` (suivi depuis le ${f.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})})`:"";
+}
 function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
   const goal=goalKm();
   const n=daysInYear(Y), elapsed=todayIdx+1;
@@ -237,7 +242,7 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
     <div>
       <div class="kick">${label[0].toUpperCase()+label.slice(1)} en ${Y}${isCur?`, au ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long"})}`:""}</div>
       <div class="big"><span id="bigkm">0</span><span class="unit">km</span></div>
-      ${prev.length?`<div class="delta${diff<0?" down":""}"><b>${diff>=0?"↑ +":"↓ −"}${nf(Math.abs(diff))} km</b> par rapport à ${Y-1}${isCur?" à la même date":""}</div>`:""}
+      ${prev.length?`<div class="delta${diff<0?" down":""}"><b>${diff>=0?"↑ +":"↓ −"}${nf(Math.abs(diff))} km</b> par rapport à ${Y-1}${isCur?" à la même date":""}${since(Y-1)}</div>`:""}
     </div>${goalHtml}`;
   countUp(document.getElementById("bigkm"),km);
   const last=[...acts].reverse().find(a=>!(runMode()?isRunIndoor(a):isIndoor(a))&&(S.traces[a.id]||[]).length>=10);   // filigrane : ta dernière sortie dehors
@@ -318,7 +323,7 @@ function renderCum(cur,prev,todayIdx,isCur,Y){
   const cp=path(cur,curEnd);
   s+=`<path d="${cp}L${x(curEnd)},${y(0)}L${x(0)},${y(0)}Z" fill="var(--accent)" fill-opacity=".09"/><path d="${cp}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
   s+=`<circle cx="${x(curEnd)}" cy="${y(cur[curEnd])}" r="5" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`;
-  if(prev.length) s+=`<text x="${W-m.r}" y="${y(prev[prev.length-1])-7}" text-anchor="end" font-size="12" font-weight="600" fill="var(--muted)">${Y-1} : ${nf(prev[prev.length-1])} km</text>`;
+  if(prev.length) s+=`<text x="${W-m.r}" y="${y(prev[prev.length-1])-7}" text-anchor="end" font-size="12" font-weight="600" fill="var(--muted)">${Y-1} : ${nf(prev[prev.length-1])} km${since(Y-1)}</text>`;
   if(showGoal) s+=`<text x="${W-m.r}" y="${y(goal)-7}" text-anchor="end" font-size="12" font-weight="600" fill="var(--muted)">objectif ${nf(goal)} km</text>`;
   const lx=x(curEnd), anchor=lx>W-140?"end":"start";
   s+=`<text x="${lx+(anchor==="end"?-9:9)}" y="${y(cur[curEnd])-9}" text-anchor="${anchor}" font-weight="700" font-size="15" font-style="italic" font-family="Barlow Condensed,Barlow,sans-serif" fill="var(--ink)">${Y} : ${nf(cur[curEnd])} km</text>`;

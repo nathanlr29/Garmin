@@ -1,4 +1,6 @@
 /* ------------------------------------------------------------------ Onglet Sortie */
+/* Exception assumée (comme la barre d'onglets) : ce qui est posé SUR la carte Leaflet (vent, montées, arrêts) garde un fond blanc,
+   du texte foncé et une petite ombre, pour rester lisible sur le fond de carte, de jour comme de nuit. */
 #sortie .span7{grid-column:span 7}#sortie .span5{grid-column:span 5}
 @media (max-width:860px){#sortie .span7,#sortie .span5{grid-column:span 12}}
 #sortie .sosub{min-width:0}
@@ -25,7 +27,7 @@
 #soMap{height:440px;border-radius:var(--r-md);overflow:hidden;z-index:0}
 @media (max-width:620px){#soMap{height:340px}}
 #sortie .sowind{display:flex;flex-direction:column;align-items:center}
-#sortie .sowind b{font-size:11px;font-weight:800;color:#1e88e5;background:#fff;border-radius:var(--r-sm);padding:0 4px;margin-top:-2px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+#sortie .sowind b{font-size:11px;font-weight:800;color:var(--info);background:#fff;border-radius:var(--r-sm);padding:0 4px;margin-top:-2px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
 #sortie .soclimb span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 #sortie .sobest{display:flex;align-items:flex-end;gap:4px;height:110px}
 #sortie .sobest button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%;border:0;background:none;padding:0;cursor:pointer;color:var(--muted);font:inherit;font-size:11px;min-width:0}
@@ -85,7 +87,7 @@
 #gMap svg{width:auto;height:auto;display:block}
 #sortie .gchev svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))}
 #sortie .gwindctl{display:flex;flex-direction:column;align-items:center;gap:2px;background:#fff;color:#222226;border-radius:var(--r-md);padding:6px 8px;box-shadow:0 1px 4px rgba(0,0,0,.25);font-size:11px;line-height:1.2;text-align:center}
-#sortie .gwindctl b{font-size:12px;color:#1e88e5}#sortie .gwindctl small{color:#555}
+#sortie .gwindctl b{font-size:12px;color:var(--info)}#sortie .gwindctl small{color:#555}
 #sortie .gact{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 #sortie .gact .btn2 small{font-weight:500;color:var(--muted);margin-left:4px}
 #sortie .gact .btn2:disabled{opacity:.6;cursor:default}

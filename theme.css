@@ -156,7 +156,7 @@ h1{font:italic 800 clamp(30px,6vw,40px)/1 var(--font-num);letter-spacing:-.01em;
 .big .unit{font-size:.3em;font-weight:700;color:var(--muted);margin-left:.12em;letter-spacing:0}
 .sub{color:var(--muted);margin-top:8px;font-size:15px}
 .delta{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:14px;color:var(--muted)}
-.delta b{font-weight:700;color:var(--good)}
+.delta b{font-weight:700;color:var(--good);white-space:nowrap;align-self:flex-start}
 .delta.down b{color:var(--muted)}
 .goal{display:flex;flex-direction:column;gap:9px}
 .goalbar{height:10px;border-radius:2px;background:var(--h0);position:relative}
