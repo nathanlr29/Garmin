@@ -115,6 +115,41 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
   assert.equal(E._.respTrend(E.days), null); assert.match(E._.respAnswer(null), /Pas encore/);
 }
 
+// ------------------------------------------------------------------ 6) Régularité du sommeil et moniteur santé
+{
+  const ymd = t => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  const mk = (n, f = () => ({})) => { const days = {}; for (let k = 0; k < n; k++) { const t = new Date(2026, 8, 1 + k), e = new Date(2026, 8, k), d = ymd(t);
+    days[d] = { d, f: 1, sl: 7.75 * 3600, bed: ymd(e) + "T22:00", wake: d + "T05:45", rhr: 45, hrv: 100, hrvLo: 85, hrvUp: 120, rx: 11.2, spo2: 98, sstress: 12, ...f(k, ymd(e), d) }; } return { days }; };
+  // mêmes heures chaque soir : 100
+  let { Recup: R } = await load([], mk(40));
+  let t = R._.sriAt(R.days, R.days.length - 1);
+  assert.equal(t.score, 100); assert.match(R._.sriAnswer(t, []), /<b>100\/100<\/b> sur 7 jours, régulier/);
+  // une nuit décalée de 4 h (coucher 2 h, lever 9 h 45) : 2 paires sur 7 à 8 h d'écart chacune
+  ({ Recup: R } = await load([], mk(40, (k, e, d) => k === 37 ? { bed: d + "T02:00", wake: d + "T09:45" } : {})));
+  t = R._.sriAt(R.days, R.days.length - 1);
+  assert.equal(t.score, Math.round(200 * (1 - (2 * 480 / 7) / 1440) - 100)); assert.equal(t.worst.d, "2026-10-08");
+  assert.match(R._.sriAnswer(t, Array(40).fill(100)), /assez régulier.*19 points en dessous de ta médiane de l'année \(100\)\. Le plus gros écart : la nuit du 7 au 8 oct\., de 02:00 à 09:45 \(d'habitude 22:00 → 05:45\)/);
+  // trou de plus d'un jour : pas de paire ; moins de 4 paires = pas de score
+  ({ Recup: R } = await load([], mk(40, k => k % 2 ? { bed: undefined, wake: undefined } : {})));
+  assert.equal(R._.sriAt(R.days, R.days.length - 1), null); assert.match(R._.sriAnswer(null), /Il faut 4 paires/);
+  // moniteur santé : tout normal
+  ({ Recup: R } = await load([], mk(40)));
+  let h = R._.healthAt(R.days, R.days.length - 1);
+  assert.equal(h.bad.length, 0); assert.match(R._.healthAnswer(h, true), /<b>5 mesures sur 5<\/b> dans ta normale cette nuit/);
+  // un signal (cœur +4), puis deux (cœur +4 et oxygène −3), cœur plus bas = hors normale mais dans le bon sens
+  ({ Recup: R } = await load([], mk(40, k => k === 39 ? { rhr: 49 } : {})));
+  h = R._.healthAt(R.days, 39); assert.deepEqual([...h.bad.map(x => x.k)], ["rhr"]); assert.match(R._.healthAnswer(h, true), /<b>1 signal<\/b> hors de ta normale cette nuit : cœur au repos plus haut/);
+  ({ Recup: R } = await load([], mk(40, k => k === 39 ? { rhr: 49, spo2: 95 } : {})));
+  h = R._.healthAt(R.days, 39); assert.deepEqual([...h.bad.map(x => x.k)], ["rhr", "spo2"]); assert.match(R._.healthAnswer(h, false), /<b>2 signaux<\/b> hors de ta normale cette nuit-là : cœur au repos plus haut et oxygène plus bas\. .*allège/);
+  ({ Recup: R } = await load([], mk(40, k => k === 39 ? { rhr: 40, hrv: 125, sstress: 30, rx: 12.5 } : {})));
+  h = R._.healthAt(R.days, 39);
+  assert.equal(h.rows.find(x => x.k === "rhr").st, "off"); assert.equal(h.rows.find(x => x.k === "hrv").st, "off");
+  assert.deepEqual([...h.bad.map(x => x.k)], ["resp", "sstress"], "stress du sommeil > normale + 8, respiration +1,3");
+  // historique trop court : pas de normale, pas de signal
+  ({ Recup: R } = await load([], mk(5, () => ({ hrvLo: undefined, hrvUp: undefined }))));
+  h = R._.healthAt(R.days, 4); assert.equal(h.bad.length, 0); assert.ok(h.rows.every(x => x.st === "nobase")); assert.match(R._.healthAnswer(h, true), /pas encore assez d'historique/);
+}
+
 // ------------------------------------------------------------------ 5) Contrôle sur les vraies données : la séance seuil ratée du 20/10/2026
 {
   const acts = JSON.parse(readFileSync(here("../data/activities.json"), "utf8")).map(a => ({ ...a, dt: parseLocal(a.d), km: a.m / 1000 }));
