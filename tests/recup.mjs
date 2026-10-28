@@ -132,6 +132,12 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
   // trou de plus d'un jour : pas de paire ; moins de 4 paires = pas de score
   ({ Recup: R } = await load([], mk(40, k => k % 2 ? { bed: undefined, wake: undefined } : {})));
   assert.equal(R._.sriAt(R.days, R.days.length - 1), null); assert.match(R._.sriAnswer(null), /Il faut 4 paires/);
+  // heures cibles : médiane des 30 derniers jours, arrondie à 5 min ; nuits de la semaine dans la marge
+  ({ Recup: R } = await load([], mk(40, (k, e, d) => k === 37 ? { bed: d + "T02:00", wake: d + "T09:45" } : k === 38 ? { bed: e + "T22:12", wake: d + "T05:52" } : {})));
+  let tg = R._.sleepTarget(R.days);
+  assert.equal(tg.bed, 240); assert.equal(tg.wake, 705); assert.equal(tg.n, 30); assert.equal(tg.week, 7); assert.equal(tg.ok, 6);
+  assert.match(R._.targetLine(tg), /couche-toi vers <b>22:00<\/b> et lève-toi vers <b>05:45<\/b>, à 30 min près.*7 h 45 au lit\)\. 6 des 7 dernières nuits y étaient/);
+  ({ Recup: R } = await load([], mk(6))); assert.equal(R._.sleepTarget(R.days), null, "moins de 7 nuits : pas de cible");
   // moniteur santé : tout normal
   ({ Recup: R } = await load([], mk(40)));
   let h = R._.healthAt(R.days, R.days.length - 1);

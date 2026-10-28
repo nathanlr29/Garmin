@@ -84,7 +84,7 @@ function renderRecup() {
     <section class="card span6"><h2>VFC pendant la nuit <small id="rHrvInfo"></small></h2><p class="rans" id="rHrvAns"></p><div id="rHrv"></div><div class="note" id="rHrvNote"></div></section>
     <section class="card span6"><h2>Durée et phases <span class="legend">${Object.values(STAGES).map(([l, c]) => `<span><i style="background:${c};height:8px;width:8px;border-radius:2px"></i>${l}</span>`).join("")}</span></h2><p class="rans" id="rSleepAns"></p><div id="rSleep"></div></section>
     <section class="card span6"><h2>Régularité du sommeil <small id="rRegInfo"></small></h2><p class="rans" id="rRegAns"></p><div id="rReg"></div><div id="rSri"></div>
-      <p class="note">Barres : de ton coucher à ton lever ; pointillés : coucher (orange) et lever (ambre) moyens. Courbe : ta régularité sur 7 jours, la part de la journée où tu dors ou es éveillé aux mêmes heures d'un jour à l'autre, sur 100 (bande verte : ${SRI.good} et plus, régulier).</p></section>
+      <p class="note">Barres : de ton coucher à ton lever ; pointillés et bandes : heures cibles de coucher (orange) et de lever (ambre), à ${SRI.tol} min près. Courbe : ta régularité sur 7 jours, la part de la journée où tu dors ou es éveillé aux mêmes heures d'un jour à l'autre, sur 100 (bande verte : ${SRI.good} et plus, régulier).</p></section>
     <section class="card span12"><h2>Fréquence cardiaque au repos <small id="rRhrInfo"></small></h2><p class="rans" id="rRhrAns"></p><div id="rRhr"></div></section>
     <section class="card span12"><h2>Tendance de la VFC <small id="rHrvTInfo"></small></h2><p class="rans" id="rHrvTAns"></p><div id="rHrvT"></div>
       <p class="note">Trait orange : moyenne de tes 7 dernières nuits ; points gris : chaque nuit ; bande verte : ta zone normale, calculée par Garmin sur tes dernières semaines. Une mauvaise nuit compte peu : c'est quand la moyenne sort de la zone qu'il faut lever le pied.</p></section>
@@ -422,15 +422,17 @@ function renderReg(P) {
   if (!N.length) { box.innerHTML = `<div class="empty">Pas de nuit sur la période</div>`; $("rRegAns").textContent = ""; return; }
   const W = Math.max(300, box.clientWidth), H = Math.round(Math.min(280, Math.max(190, W * .48))), m = { l: 40, r: 6, t: 8, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const bs = N.map(d => minsFrom18(d.bedDt)), ws = N.map(d => minsFrom18(d.wakeDt));
-  const lo = Math.floor((Math.min(...bs) - 30) / 60) * 60, hi = Math.ceil((Math.max(...ws) + 30) / 60) * 60, y = v => m.t + (v - lo) / (hi - lo) * ih;
+  const tg0 = sleepTarget(RC.days), lo = Math.floor((Math.min(...bs, tg0 ? tg0.bed - SRI.tol : Infinity) - 30) / 60) * 60, hi = Math.ceil((Math.max(...ws, tg0 ? tg0.wake + SRI.tol : -Infinity) + 30) / 60) * 60, y = v => m.t + (v - lo) / (hi - lo) * ih;
   const gw = iw / N.length, bw = Math.max(2, Math.min(10, gw * .55));
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Heures de coucher et de lever"><g class="axis">`;
   for (let v = lo; v <= hi; v += 120) s += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end">${pad((18 + v / 60) % 24)} h</text>`;
   const step = Math.max(1, Math.ceil(N.length / (W < 480 ? 5 : 8)));
   N.forEach((d, i) => { if (i % step === 0) s += `<text x="${m.l + gw * i + gw / 2}" y="${H - 5}" text-anchor="middle">${d.dt.getDate()} ${MONTHS[d.dt.getMonth()]}</text>`; });
   s += "</g>";
-  const ab = bs.reduce((a, b) => a + b, 0) / bs.length, aw = ws.reduce((a, b) => a + b, 0) / ws.length;
-  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(ab)}" y2="${y(ab)}" stroke="var(--accent)" stroke-dasharray="3 4" opacity=".7"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(aw)}" y2="${y(aw)}" stroke="var(--amber)" stroke-dasharray="3 4" opacity=".7"/>`;
+  const ab = bs.reduce((a, b) => a + b, 0) / bs.length, aw = ws.reduce((a, b) => a + b, 0) / ws.length, tg = sleepTarget(RC.days);
+  // heures cibles (médiane de tes 30 dernières nuits) : bande de ± SRI.tol et pointillé ; sinon moyennes de la période
+  if (tg) [[tg.bed, "var(--accent)"], [tg.wake, "var(--amber)"]].forEach(([v, c]) => { s += `<rect x="${m.l}" width="${iw}" y="${y(v - SRI.tol)}" height="${y(v + SRI.tol) - y(v - SRI.tol)}" fill="${c}" opacity=".12"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${c}" stroke-dasharray="3 4" opacity=".8"/>`; });
+  else s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(ab)}" y2="${y(ab)}" stroke="var(--accent)" stroke-dasharray="3 4" opacity=".7"/><line x1="${m.l}" x2="${W - m.r}" y1="${y(aw)}" y2="${y(aw)}" stroke="var(--amber)" stroke-dasharray="3 4" opacity=".7"/>`;
   N.forEach((d, i) => { const cx = m.l + gw * i + gw / 2; s += `<rect x="${cx - bw / 2}" y="${y(bs[i])}" width="${bw}" height="${Math.max(2, y(ws[i]) - y(bs[i]))}" rx="${bw / 2}" fill="url(#rg)" data-i="${i}"/>`; });
   s = s.replace("<g class=\"axis\">", `<defs><linearGradient id="rg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--deep)"/><stop offset="1" stop-color="var(--light)"/></linearGradient></defs><g class="axis">`);
   box.innerHTML = s + "</svg>";
@@ -438,8 +440,9 @@ function renderReg(P) {
   const sd = arr => { const a = arr.reduce((x, y) => x + y, 0) / arr.length; return Math.sqrt(arr.reduce((x, y) => x + (y - a) ** 2, 0) / arr.length); };
   const sdb = Math.round(sd(bs));
   $("rRegInfo").textContent = `coucher moyen ${fmt(ab)} · lever ${fmt(aw)} · ± ${sdb} min`;
-  const all = RC.days.map((d, i) => sriAt(RC.days, i)), last = all.filter(Boolean).pop() || null, hist = all.filter(t => t && (last.d.dt - t.d.dt) / 864e5 < 365).map(t => t.score);
-  $("rRegAns").innerHTML = sriAnswer(last, hist);
+  const all = RC.days.map((d, i) => sriAt(RC.days, i)), last = all.filter(Boolean).pop() || null, hist = last ? all.filter(t => t && (last.d.dt - t.d.dt) / 864e5 < 365).map(t => t.score) : [];
+  if (tg) $("rRegInfo").textContent = `cible ${fmt(tg.bed)} → ${fmt(tg.wake)} · ± ${sdb} min`;
+  $("rRegAns").innerHTML = sriAnswer(last, hist, tg) + (tg ? `<br>${targetLine(tg)}` : "");
   P.forEach(d => { const t = all[RC.days.indexOf(d)]; d._sri = t ? t.score : null; d._sLo = t ? SRI.good : null; d._sHi = t ? 100 : null; });
   tsChart("rSri", P, [{ k: "_sri", l: "régularité", c: "var(--accent)", w: 2, u: "/100" }], { band: ["_sLo", "_sHi", "var(--teal)", .14], h: 140 });
   box.querySelector("svg").addEventListener("pointermove", e => { const r = e.target.closest("rect[data-i]"); if (!r) return hideTip(); const d = N[+r.dataset.i];
@@ -565,7 +568,7 @@ function renderResp(P) {
 // de la journée où tu es dans le même état (endormi ou éveillé) à 24 h d'écart, d'après le coucher et le lever Garmin ;
 // moyenne des paires des 7 derniers jours (4 au moins), ramenée de −100 à 100 (100 = mêmes heures chaque soir, 0 = au hasard).
 // Repères (UK Biobank) : les dormeurs les plus réguliers sont au-dessus de 87, les plus irréguliers sous 72.
-const SRI = { days: 7, min: 4, good: 85, mid: 72 };
+const SRI = { days: 7, min: 4, good: 85, mid: 72, tgt: 30, tgtMin: 7, tol: 30 };
 function pairMismatch(a, b) { // minutes de la journée où l'état diffère entre deux nuits, en minutes depuis 18 h la veille
   const ab = minsFrom18(a.bedDt), aw = ab + (a.wakeDt - a.bedDt) / 6e4, bb = minsFrom18(b.bedDt), bw = bb + (b.wakeDt - b.bedDt) / 6e4;
   return Math.min(1440, (aw - ab) + (bw - bb) - 2 * Math.max(0, Math.min(aw, bw) - Math.max(ab, bb)));
@@ -586,13 +589,28 @@ function sriAt(days, i) {
   const off = x => Math.abs(minsFrom18(x.bedDt) - mb) + Math.abs(minsFrom18(x.wakeDt) - mw), worst = nights.reduce((w, x) => off(x) > off(w) ? x : w);
   return { d, score: Math.round(200 * (1 - mis / 1440) - 100), mis, pairs, mb, mw, worst, off: off(worst) };
 }
-function sriAnswer(t, hist) {
+// Heures cibles pour être plus régulier : médiane de tes 30 dernières nuits (une soirée ne la déplace pas), arrondie à 5 min,
+// à tenir à ± SRI.tol près, week-end compris ; et combien des 7 dernières nuits y étaient.
+function sleepTarget(days) {
+  const N = days.filter(d => d.bedDt && d.wakeDt), last = N[N.length - 1];
+  if (!last) return null;
+  const R = N.filter(d => (last.dt - d.dt) / 864e5 < SRI.tgt);
+  if (R.length < SRI.tgtMin) return null;
+  const r5 = v => Math.round(v / 5) * 5, bed = r5(median(R.map(d => minsFrom18(d.bedDt)))), wake = r5(median(R.map(d => minsFrom18(d.wakeDt))));
+  const wk = R.filter(d => (last.dt - d.dt) / 864e5 < SRI.days), ok = wk.filter(d => Math.abs(minsFrom18(d.bedDt) - bed) <= SRI.tol && Math.abs(minsFrom18(d.wakeDt) - wake) <= SRI.tol);
+  return { bed, wake, n: R.length, week: wk.length, ok: ok.length };
+}
+function targetLine(t) {
+  const at = v => `${pad(Math.floor((18 * 60 + v) / 60) % 24)}:${pad(Math.round(v % 60))}`;
+  return `Pour plus de régularité : couche-toi vers <b>${at(t.bed)}</b> et lève-toi vers <b>${at(t.wake)}</b>, à ${SRI.tol} min près, week-end compris (tes heures habituelles des ${SRI.tgt} derniers jours, ${hm(t.wake - t.bed)} au lit). ${t.ok === t.week ? `Les ${t.week} dernières nuits y étaient toutes.` : !t.ok ? `Aucune des ${t.week} dernières nuits n'y était (coucher et lever à ${SRI.tol} min près).` : `${t.ok} des ${t.week} dernières nuits y étaient (coucher et lever à ${SRI.tol} min près).`}`;
+}
+function sriAnswer(t, hist, tg) {
   if (!t) return `Il faut ${SRI.min} paires de nuits qui se suivent sur ${SRI.days} jours pour mesurer ta régularité.`;
   const lvl = t.score >= SRI.good ? "régulier" : t.score >= SRI.mid ? "assez régulier" : "irrégulier";
   const med = hist.length >= 30 ? median(hist) : null, gap = med != null ? t.score - med : null;
   const rep = med == null ? "" : Math.abs(gap) < 3 ? `, comme d'habitude (médiane de l'année ${nf(med)})` : `, ${nf(Math.abs(gap))} points ${gap > 0 ? "au-dessus" : "en dessous"} de ta médiane de l'année (${nf(med)})`;
   const w = t.worst, at = v => `${pad(Math.floor((18 * 60 + v) / 60) % 24)}:${pad(Math.round(v % 60))}`, dm = x => `${x.getDate()} ${MONTHS[x.getMonth()]}`, eve = new Date(w.dt.getTime() - 864e5);
-  const why = t.off >= 45 ? ` Le plus gros écart : la nuit du ${eve.getMonth() === w.dt.getMonth() ? eve.getDate() : dm(eve)} au ${dm(w.dt)}, de ${clock(w.bedDt)} à ${clock(w.wakeDt)} (d'habitude ${at(t.mb)} → ${at(t.mw)}).` : "";
+  const why = t.off >= 45 ? ` Le plus gros écart : la nuit du ${eve.getMonth() === w.dt.getMonth() ? eve.getDate() : dm(eve)} au ${dm(w.dt)}, de ${clock(w.bedDt)} à ${clock(w.wakeDt)} (d'habitude ${at(tg ? tg.bed : t.mb)} → ${at(tg ? tg.wake : t.mw)}).` : "";
   return `Ta régularité est de <b>${t.score}/100</b> sur ${SRI.days} jours, ${lvl} (${SRI.good} et plus : régulier)${rep}.${t.score < SRI.good ? why : ""}${t.score < SRI.mid ? " Des heures fixes, même le week-end, aident autant la récupération que la durée." : ""}`;
 }
 
@@ -728,7 +746,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
