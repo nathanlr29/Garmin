@@ -668,7 +668,7 @@ function gather() {
 // ------------------------------------------------------------------ Météo du week-end (« Ce week-end, dehors ? »)
 // Fenêtre de sortie : 9 h-18 h. Verdict par jour, seuils simples : bon = sec (< 1 mm, risque < 50 %), vent < 30 km/h, rafales < 55, au moins 6 °C ;
 // mauvais = 5 mm ou plus, moins de 3 h sèches, vent ≥ 40 km/h, rafales ≥ 70 ou moins de 2 °C ; sinon mitigé.
-const WX = { from: 9, to: 18, dryMm: .2, dryPct: 40, good: { mm: 1, pct: 50, wind: 30, gust: 55, t: 6 }, bad: { mm: 5, dryH: 3, wind: 40, gust: 70, t: 2 }, ttl: 36e5, far: 4 };
+const WX = { from: 9, to: 18, dryMm: .2, dryPct: 40, good: { mm: 1, pct: 50, wind: 30, gust: 55, t: 6 }, bad: { mm: 5, dryH: 3, wind: 40, gust: 70, t: 2 }, ttl: 36e5, far: 4, speed: 27 };   // speed : vitesse supposée pour la tenue (km/h)
 const K_WX = "synWx";
 const DIRS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
 const windFrom = deg => { const d = DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; return (/^[eo]/.test(d) ? "d'" : "de ") + d; };
@@ -714,7 +714,8 @@ const DIRS_S = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
 const dirShort = deg => DIRS_S[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 function wxHoursHtml(d) {
   if (!d.ok || !d.hours) return "";
-  return `<table class="sywxh"><thead><tr><th>heure</th><th>°C</th><th>pluie</th><th>vent km/h</th></tr></thead><tbody>${d.hours.map(x =>
+  const kit = window.Equip ? `<p class="sywxkit"><b>Tenue à vélo</b> : ${window.Equip.wearLine({ tmin: d.tmin, tmax: d.tmax, wind: d.wind, speed: WX.speed, rain: d.rain, pp: d.pct })}</p>` : "";
+  return kit + `<table class="sywxh"><thead><tr><th>heure</th><th>°C</th><th>pluie</th><th>vent km/h</th></tr></thead><tbody>${d.hours.map(x =>
     `<tr${x.dry ? "" : ' class="wet"'}><td>${x.h} h</td><td>${nf(x.t)}</td><td>${x.mm >= .1 ? `${nf(x.mm, 1)} mm` : "–"}${x.pct >= 30 ? ` <small>${nf(x.pct)} %</small>` : ""}</td><td>${nf(x.wind)} ${dirShort(x.dir)}${x.gust >= WX.good.gust ? ` <small>raf. ${nf(x.gust)}</small>` : ""}</td></tr>`).join("")}</tbody></table>`;
 }
 // page de prévisions complètes (meteoblue, 7 jours heure par heure) au centre de la ville de config.json : jamais le point de départ
