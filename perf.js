@@ -21,7 +21,6 @@
   const sg = (n, d = 0) => (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n), d);   // signe typographique
   const E = s => (typeof esc === "function" ? esc(s) : String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]));
   const dfr = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
-  const dfrY = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
   const ls = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
 
   // ------------------------------------------------------------------ Fonctions pures

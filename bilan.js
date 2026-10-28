@@ -16,7 +16,7 @@ const HZL = ["zone 1 (récup)", "zone 2 (endurance)", "zone 3 (tempo)", "zone 4 
 
 // ------------------------------------------------------------------ Données
 async function getIndex() {
-  if (!B.idx) { try { const r = await fetch("data/streams/index.json?v=" + Date.now(), { cache: "no-store" }); B.idx = r.ok ? await r.json() : {}; } catch (e) { B.idx = {}; } }
+  if (!B.idx) { try { const r = await fetch("data/streams/index.json", { cache: "no-cache" }); B.idx = r.ok ? await r.json() : {}; } catch (e) { B.idx = {}; } }
   return B.idx;
 }
 async function stream(id) {
