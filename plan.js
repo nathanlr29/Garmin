@@ -5,10 +5,10 @@
 (() => {
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
-const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const ymd = d => Charge.ymd(d);
 const parseYmd = s => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); };
 const addDays = (d, n) => { const t = new Date(d); t.setDate(t.getDate() + n); return t; };
-const mondayOf = d => { const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()); t.setDate(t.getDate() - (t.getDay() + 6) % 7); return t; };
+const mondayOf = d => Charge.mondayOf(d);
 const dayIndex = (d, mon) => Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - mon) / 864e5);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? " " + pad(m % 60) : ""}` : `${m} min`;
@@ -113,7 +113,7 @@ function fitness() {
   const today = new Date(), f = Charge.fitness(today), p = profile();
   const hard = rides().filter(a => a.te >= 3.8 || ((a.np || a.w) && (a.np || a.w) / p.ftp >= .85 && a.mt >= 1500)).pop();
   const wk = rides().filter(a => a.dt >= addDays(today, -7)), tr = wk.filter(isTraining);
-  return { ctl: f.ctl, atl: f.atl, tsb: f.tsb, lastHard: hard ? Math.floor((today - hard.dt) / 864e5) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: tr.length, c7: wk.length - tr.length };
+  return { ctl: f.ctl, atl: f.atl, tsb: f.tsb, lastHard: hard ? Charge.daysAgo(hard.dt, today) : null, km7: wk.reduce((s, a) => s + a.km, 0), h7: wk.reduce((s, a) => s + a.mt, 0) / 3600, n7: tr.length, c7: wk.length - tr.length };
 }
 function readiness() {
   const k = ymd(new Date()), days = ((window.Recup && Recup.days) || []).filter(d => (d.sl || d.tr != null) && d.d <= k), last = days.slice(-3);

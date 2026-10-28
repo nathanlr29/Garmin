@@ -22,7 +22,7 @@
 
   const RUN = () => (window.Charge && window.Charge.RUN_TYPES) || new Set(["running", "trail_running", "treadmill_running", "track_running", "virtual_run"]);
   const parseYmd = s => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, m - 1, d); };
-  const mondayOf = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d; };
+  const mondayOf = t => window.Charge.mondayOf(t);
   const addDays = (d, n) => { const t = new Date(d); t.setDate(t.getDate() + n); return t; };
   const dayIdx = (t, mon) => Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - mon) / DAY);
   const sum = a => a.reduce((s, x) => s + x, 0);

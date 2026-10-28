@@ -46,7 +46,7 @@ const K_RELEVE = "synReleve:";   // + date du lundi : relevé refermé
 const dayStart = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d; };
 const addDays = (d, n) => { const t = new Date(d); t.setDate(t.getDate() + n); return t; };
 const ymd = d => window.Charge.ymd(d);
-const mondayOf = d => { const t = dayStart(d); t.setDate(t.getDate() - (t.getDay() + 6) % 7); return t; };
+const mondayOf = d => window.Charge.mondayOf(d);
 
 // fond / fatigue / forme tels que la carte Forme du Plan les affiche pour le jour t (charges des 120 jours d'avant, le jour t exclu)
 function fitAt(loads, t) { const s = window.Charge.series(loads, new Date(t), FIT_DAYS); return { ctl: s.ctl, atl: s.atl, tsb: s.tsb }; }
