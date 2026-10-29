@@ -217,5 +217,3 @@
 #sortie .stgkey{display:flex;gap:8px;margin-top:8px}
 #sortie .stgkey input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit}
 #sortie .sthelp > .sosmall{margin:8px 0}
-/* Plan IGN : routes orange et jaunes adoucies, pour que le tracé orange reste devant */
-#sortie .ign-plan{filter:saturate(.25) contrast(.95)}
