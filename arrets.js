@@ -284,7 +284,8 @@ function telOf(t) {  // { href: "tel:+33299…", txt: "02 99 …" }
 // « corriger sur OSM » : seulement pour les commerces (horaires à compléter ou à corriger), pour garder une ligne courte
 const osmUrl = id => { const m = /^([nwr])(\d+)$/.exec(id || ""); return m ? `https://www.openstreetmap.org/${{ n: "node", w: "way", r: "relation" }[m[1]]}/${m[2]}` : null; };
 function linksHtml(p, noHours) {
-  const h = noHours ? "" : p.hrs ?? hoursLine(p), w = webUrl(p.t), tel = telOf(p.t), osm = osmUrl(p.id), A = (u, x) => `<a href="${esc(u)}" target="_blank" rel="noopener">${x}</a>`;
+  const h0 = noHours ? "" : p.hrs ?? hoursLine(p), rt = p.rate ? `★ ${fmt(p.rate.rt, 1)} (${p.rate.rn} avis)` : "", src = /^g:/.test(p.id) ? "trouvé sur Google" : "";
+  const h = [h0, rt, src].filter(Boolean).join(" · "), w = webUrl(p.t), tel = telOf(p.t), osm = osmUrl(p.id), A = (u, x) => `<a href="${esc(u)}" target="_blank" rel="noopener">${x}</a>`;
   return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(p.g && p.g.url || gmapsUrl(p), "Google Maps")}${!p.g && SHOP_K.has(p.k) && gUse() ? `<button class="stgchk" data-gchk="${esc(p.id)}">vérifier sur Google</button>` : ""}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
 }
 function statusTxt(p) {
@@ -341,6 +342,7 @@ function gState(R, t) {
 // applique un résultat Google au point : statut, état au passage, ligne d'horaires ; Google sans horaires : on garde ceux d'OSM
 function gApply(p, g, now = new Date()) {
   p.g = g; if (!g) return;
+  p.rate = g.rt != null && g.rn ? { rt: g.rt, rn: g.rn } : null;
   if (g.miss) { p.hrs = (p.hrs && !/^horaires inconnus/.test(p.hrs) ? p.hrs + " · " : "") + "absent de Google : peut-être fermé"; return; }
   if (g.st === "CLOSED_PERMANENTLY" || g.st === "CLOSED_TEMPORARILY") { p.oh = { open: false, dead: true }; p.hrs = `fermé ${g.st === "CLOSED_PERMANENTLY" ? "définitivement" : "temporairement"} (Google)`; return; }
   // horaires de la semaine qui vient (jours fériés, congés) si la sortie y est, sinon les horaires habituels
@@ -351,21 +353,81 @@ function gApply(p, g, now = new Date()) {
   p.hrs = (R.length === 1 && R[0][0] === 0 && R[0][1] >= 1440 ? `${w} ouvert 24 h/24` : R.length ? `${w} ${R.map(([a, b]) => `${hMin(a)}-${hMin(b)}`).join(", ")}`
     : `fermé ${/^(aujourd|demain)/.test(w) ? w : "le " + w}`) + " (Google)";
 }
+// compteur des requêtes du jour sur cet appareil : le quota Google Cloud de Nathan est de 30 par jour (G_DAY) ;
+// l'automatique s'arrête à G_AUTO pour garder des « vérifier sur Google » à la demande
+const K_GDAY = "gpDay", G_DAY = 30, G_AUTO = 24;
+const gToday = () => { const d = LS.get(K_GDAY, {}); return d && d.d === new Date().toDateString() ? d.n || 0 : 0; };
+const rect = (lat, lon, m) => { const dl = m / 110540, dn = m / (111320 * Math.cos(rad(lat))); return { rectangle: { low: { latitude: lat - dl, longitude: lon - dn }, high: { latitude: lat + dl, longitude: lon + dn } } }; };
+async function gPost(textQuery, lat, lon, m, n) {
+  if (gToday() >= G_DAY) throw Object.assign(new Error("quota"), { status: 429, why: "RATE_LIMIT_EXCEEDED" });
+  LS.set(K_GDAY, { d: new Date().toDateString(), n: gToday() + 1 });
+  const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST",
+    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": gKey(),
+      "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.businessStatus,places.primaryType,places.types,places.rating,places.userRatingCount,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri" },
+    body: JSON.stringify({ textQuery, languageCode: "fr", regionCode: "FR", pageSize: n, locationRestriction: rect(lat, lon, m) }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const er = j.error || {}, why = (er.details || []).map(d => d.reason).find(Boolean) || er.status || "";
+    throw Object.assign(new Error(er.message || "Google " + r.status), { status: r.status, why }); }
+  return j.places || [];
+}
+const gOf = q => ({ st: q.businessStatus || "OPERATIONAL", url: /^https:\/\//.test(q.googleMapsUri || "") ? q.googleMapsUri : null, reg: q.regularOpeningHours || null, cur: q.currentOpeningHours || null,
+  rt: typeof q.rating === "number" ? q.rating : null, rn: q.userRatingCount || 0 });
 function gFetch(p) {
   if (G.has(p.id)) return G.get(p.id);
-  const dl = G_BOX / 110540, dn = G_BOX / (111320 * Math.cos(rad(p.lat)));
-  const pr = fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST",
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": gKey(), "X-Goog-FieldMask": "places.displayName,places.location,places.businessStatus,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri" },
-    body: JSON.stringify({ textQuery: p.t.name || G_Q[p.k] || p.name, languageCode: "fr", regionCode: "FR", pageSize: 5,
-      locationRestriction: { rectangle: { low: { latitude: p.lat - dl, longitude: p.lon - dn }, high: { latitude: p.lat + dl, longitude: p.lon + dn } } } }) })
-    .then(async r => { const j = await r.json().catch(() => ({}));
-      if (!r.ok) { const er = j.error || {}, why = (er.details || []).map(d => d.reason).find(Boolean) || er.status || "";
-        throw Object.assign(new Error(er.message || "Google " + r.status), { status: r.status, why }); }
-      const q = gMatch(j.places, p);
-      const g = q ? { st: q.businessStatus || "OPERATIONAL", url: /^https:\/\//.test(q.googleMapsUri || "") ? q.googleMapsUri : null, reg: q.regularOpeningHours || null, cur: q.currentOpeningHours || null } : { miss: true };
-      GV.set(p.id, g); return g; });
+  const pr = gPost(p.t.name || G_Q[p.k] || p.name, p.lat, p.lon, G_BOX, 5).then(pl => { const q = gMatch(pl, p), g = q ? gOf(q) : { miss: true }; GV.set(p.id, g); return g; });
   G.set(p.id, pr); pr.catch(() => G.delete(p.id));
   return pr;
+}
+
+// ------------------------------------------------------------------ Bourgs au moment du ravito (Google)
+// Une recherche « boulangerie » par bourg (carré de ±G_TOWN m) vérifie d'un coup les commerces du bourg et ajoute ceux qu'OSM
+// ne connaît pas. Bourgs = groupes de commerces OSM autour de l'heure du ravito (comme advise), les plus proches de cette heure
+// d'abord, à plus de 3 km l'un de l'autre ; sans commerce OSM à ce moment-là, le point du tracé à cette heure.
+const G_TOWN = 700, G_TOWNS = 2, G_WIN = .75;
+function gTowns(stops, P, r, n = G_TOWNS) {
+  const h = r.secs / 3600, t0 = r.T[0], hot = r.ok && r.tmax >= 25, early = hot ? EARLY_HOT : EARLY;
+  if (h <= (hot ? MIN_H_HOT : MIN_H)) return [];
+  const target = Math.max(early, Math.min(h * .55, h - LATE)), atH = p => (p.t0 - t0) / 3600e3;
+  const key = (lat, lon) => `${Math.round(lat * 200)}_${Math.round(lon * 200)}`;  // ~500 m : même bourg, même recherche
+  const S = stops.filter(p => p.cat === "ravito" && Math.abs(atH(p) - target) <= G_WIN && atH(p) >= early && atH(p) <= h - LATE).sort((a, b) => Math.abs(atH(a) - target) - Math.abs(atH(b) - target));
+  const out = [];
+  for (const p of S) {
+    if (out.length >= n) break;
+    if (out.some(c => dist([c.lat, c.lon], [p.lat, p.lon]) < 3000)) continue;
+    const g = S.filter(q => dist([q.lat, q.lon], [p.lat, p.lon]) < 600), lat = g.reduce((a, q) => a + q.lat, 0) / g.length, lon = g.reduce((a, q) => a + q.lon, 0) / g.length;
+    out.push({ lat, lon, key: key(lat, lon) });
+  }
+  if (!out.length) { const tt = t0 + target * 3600e3; let i = 0; while (i < P.length - 1 && r.T[i] < tt) i++; out.push({ lat: P[i].lat, lon: P[i].lon, key: key(P[i].lat, P[i].lon) }); }
+  return out;
+}
+// type Google → étiquettes OSM (pour kindOf) ; McDonald's par son nom ; le reste (restaurants…) n'est pas un ravito
+const G_T = { bakery: { shop: "bakery" }, convenience_store: { shop: "convenience" }, grocery_store: { shop: "convenience" }, food_store: { shop: "convenience" },
+  supermarket: { shop: "supermarket" }, cafe: { amenity: "cafe" }, coffee_shop: { amenity: "cafe" }, bar: { amenity: "bar" }, pub: { amenity: "pub" }, gas_station: { amenity: "fuel" } };
+function gTags(q) {
+  const n = (q.displayName && q.displayName.text) || "";
+  if (/mcdonald/i.test(n)) return { amenity: "fast_food", name: n };
+  const ty = [q.primaryType, ...(q.types || [])].find(t => G_T[t]);
+  return ty ? { ...G_T[ty], name: n } : null;
+}
+// lieux Google → commerces OSM déjà connus (hits : [id OSM, lieu]) ou nouveaux points (extra) ; un point OSM sans nom
+// n'est rapproché que d'un lieu du même type à moins de 60 m (sinon toutes les boulangeries du bourg lui seraient attribuées)
+function gMerge(places, stops) {
+  const hits = [], extra = [];
+  (places || []).forEach(q => { const l = q.location, t = gTags(q); if (!l) return;
+    let best = null, bd = Infinity;
+    stops.forEach(p => { if (!SHOP_K.has(p.k)) return;
+      const d = dist([p.lat, p.lon], [l.latitude, l.longitude]);
+      const ok = p.t.name ? gMatch([q], p) === q : d < 60 && t && kindOf(t) === p.k;
+      if (ok && d < bd) { bd = d; best = p; } });
+    if (best) hits.push([best.id, q]);
+    else if (t && q.id && q.businessStatus !== "CLOSED_PERMANENTLY" && q.businessStatus !== "CLOSED_TEMPORARILY") extra.push({ id: "g:" + q.id, lat: l.latitude, lon: l.longitude, t, q });
+  });
+  return { hits, extra };
+}
+const GT = new Map(), GX = new Map();  // recherches de bourg (promesses) et commerces trouvés seulement sur Google, pour la page
+function gTown(c) {
+  if (!GT.has(c.key)) { const pr = gPost("boulangerie", c.lat, c.lon, G_TOWN, 20); GT.set(c.key, pr); pr.catch(() => GT.delete(c.key)); }
+  return GT.get(c.key);
 }
 // raison donnée par Google (details[].reason), traduite quand elle est connue : sans la console Google, la cause se lit dans la page
 const G_WHY = {
@@ -383,8 +445,23 @@ async function gCheck(seq) {
   if (!gUse() || !ST.ctx) return;
   let ran = false;
   try {
+    // bourgs : les recherches déjà faites sur la page sont relues sans nouvel appel
+    const towns = gTowns(ST.stops, ST.ctx.P, ST.ctx.r);
+    let room = G_AUTO - gToday();
+    const go = towns.filter(c => GT.has(c.key) || room-- > 0);
+    if (go.length) {
+      if (go.some(c => !GT.has(c.key))) { ran = ST.gRun = true; render(); }
+      const res = await Promise.all(go.map(gTown));
+      if (seq !== ST.seq) return;
+      let n = GX.size;
+      res.forEach(pl => { const m = gMerge(pl, ST.stops);
+        m.hits.forEach(([id, q]) => { if (!GV.has(id)) GV.set(id, gOf(q)); });
+        m.extra.forEach(e => { GX.set(e.id, e); GV.set(e.id, gOf(e.q)); }); });
+      if (ran || GX.size > n || ST.stops.some(p => GV.has(p.id) && !p.g)) { annotate(); ran = true; }
+    }
     for (let round = 0; round < 4; round++) {
-      const todo = ST.adv.map(a => a.p).filter(p => SHOP_K.has(p.k) && !p.g);
+      let todo = ST.adv.map(a => a.p).filter(p => SHOP_K.has(p.k) && !p.g);
+      todo = todo.slice(0, Math.max(0, G_AUTO - gToday()));
       if (!todo.length) break;
       ran = ST.gRun = true; render();
       const res = await Promise.all(todo.map(gFetch));
@@ -435,7 +512,7 @@ function advise(L, r, nut) {
   const town = p => L.filter(q => q !== p && q.cat !== "voir" && dist([p.lat, p.lon], [q.lat, q.lon]) < 300).length >= 2 ? -8 : 0;
   const pick = (cands, target, cost) => { let best = null, bc = Infinity; cands.forEach(p => { if (used.has(p.id) || !inRange(p)) return; const c = Math.abs(atH(p) - target) * 40 + p.off / 15 + cost(p) + town(p); if (c < bc) { bc = c; best = p; } }); return best; };
   const cap = nut ? nut.cap : 1.2, drink = nut ? nut.drink : .6, rate = nut ? nut.rate : 0;
-  const shut = p => p.oh && p.oh.open === false, known = p => p.oh && p.oh.open === true, gone = p => p.g && p.g.miss ? 30 : 0;  // absent de Google
+  const shut = p => p.oh && p.oh.open === false, known = p => p.oh && p.oh.open === true, gone = p => (p.g && p.g.miss ? 30 : 0) + (p.rate && p.rate.rt < 3.8 && p.rate.rn >= 10 ? 10 : 0);  // absent de Google, mal noté
   const refill = p => p.k === "water" ? 0 : p.k === "cemetery" ? 25 + (p.winter ? 30 : 0) : p.cat === "ravito" ? (shut(p) ? Infinity : (known(p) ? 8 : 22) + (p.k === "fuel" ? 8 : 0) + gone(p)) : Infinity;
   // eau : vers le milieu des longues sorties, plus tôt s'il fait chaud ou si les bidons sont vides avant
   if (h > MIN_H || (hot && h > MIN_H_HOT)) {
@@ -511,7 +588,7 @@ function render() {
     <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).filter(([k]) => k !== "voir" || decouv()).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
     ${shown.length ? `<div class="stlist">${shown.slice(0, lim).map(p => row(p)).join("")}</div>${shown.length > lim ? `<button class="btn2 stmore" id="stMore">Afficher les ${shown.length} points</button>` : ""}` : `<p class="note">Rien dans ces catégories près du tracé.</p>`}
     </details>
-    <p class="note">Données OpenStreetMap${gKey() ? ", commerces conseillés vérifiés sur Google (« (Google) » sur les horaires)" : ""}, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
+    <p class="note">Données OpenStreetMap${gKey() ? ", commerces au moment du ravito vérifiés et complétés sur Google (« (Google) » sur les horaires)" : ""}, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
     ${gHtml()}${HELP}`;
   box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const k = b.dataset.cat, c = LS.get(K_CAT, {}); c[k] = !catsOn()[k]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
   box.querySelectorAll("[data-gps]").forEach(i => i.onchange = () => { setGps(i.dataset.gps, i.checked); box.querySelectorAll(`[data-gps="${i.dataset.gps}"]`).forEach(x => x.checked = i.checked); });
@@ -535,7 +612,7 @@ function voirHtml() {
 function gHtml() {
   const k = gKey();
   return `<details class="sthelp" id="stG"${ST.gOpen ? " open" : ""}><summary>${k ? "Vérification Google activée" : "Vérifier les commerces sur Google"}</summary>
-  <p class="sosmall">${k ? "Les commerces des arrêts conseillés sont vérifiés d'office (fermé définitivement, horaires du jour) ; touche « vérifier sur Google » pour les autres. Clé enregistrée sur cet appareil seulement."
+  <p class="sosmall">${k ? `Les bourgs traversés à l'heure du ravito sont cherchés sur Google : commerces fermés écartés, horaires du jour, note, et boulangeries absentes d'OpenStreetMap ajoutées. Touche « vérifier sur Google » pour les autres. Aujourd'hui : ${gToday()} requête${gToday() > 1 ? "s" : ""} sur ${G_DAY} (compteur de cet appareil). Clé enregistrée sur cet appareil seulement.`
     : "OpenStreetMap ne sait pas toujours qu'un commerce a fermé ou changé d'horaires. Avec ta clé Google, les arrêts conseillés sont vérifiés (5 à 10 requêtes par sortie, 1 000 gratuites par mois)."}</p>
   ${k ? `<button class="btn2" id="stGDel">Retirer la clé de cet appareil</button>` : `<ol>
     <li>Sur <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> : crée un projet, puis active <b>Places API (New)</b> (Google demande une carte bancaire).</li>
@@ -559,7 +636,7 @@ const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</s
   <li><b>Envoie</b> le parcours vers l'appareil (bouton « Envoyer vers l'appareil », puis synchronise l'Edge). Sur l'Edge : Navigation → Parcours → ce parcours → Rouler. L'écran « À venir » liste les arrêts avec la distance restante, et une alerte s'affiche à l'approche.</li>
 </ol><p class="note">Sans ordinateur : branche l'Edge en USB et copie le .fit dans le dossier Garmin/NewFiles.</p></details>`;
 function annotate() {
-  const { P, r } = ST.ctx, all = place(ST.poi, P, r);
+  const { P, r } = ST.ctx, all = place(GX.size ? ST.poi.concat([...GX.values()]) : ST.poi, P, r);
   all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; p.hrs = hoursLine(p); if (GV.has(p.id)) gApply(p, GV.get(p.id)); });
   ST.stops = all.filter(p => p.cat !== "voir"); ST.cands = all.filter(p => p.cat === "voir");
   ST.adv = advise(ST.stops, r, ST.ctx.nut);
@@ -678,5 +755,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf, _gMatch: gMatch, _gDay: gDay, _gApply: gApply, _gErrTxt: gErrTxt };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf, _gMatch: gMatch, _gDay: gDay, _gApply: gApply, _gErrTxt: gErrTxt, _gTowns: gTowns, _gMerge: gMerge, _gTags: gTags };
 })();
