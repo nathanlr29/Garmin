@@ -34,7 +34,7 @@ Langue de l'interface et des échanges : **français**.
 | `reprise.js` | Carte **Ta reprise course** du Plan (après « Ton programme FTP ») : programme de reprise course par paliers, voir « Reprise course ». Fonctions pures dans `Reprise._`, test `node tests/reprise.mjs` |
 | `perf.js/.css` | Carte **Tes performances** du Plan (remplace « Ton niveau ») : phrase-réponse, tuiles (FTP en W/kg, VO2max, volume vélo 4 sem., vitesse dehors ≥ 40 km, plus longue sortie), records 5 s → 1 h sur 90 j contre les 90 j d'avant et les 12 mois, courbe de puissance (log), repère de classement en une ligne, champs Poids `#pKg` / Âge `#pAge` (branchés par plan.js). Fonctions pures dans `Perf._`, test `node tests/perf.mjs` |
 | `bilan.js` | Bilan de séance (modal), **vélo** : NP/IF/TSS, zones, découplage, conformité au plan, coût du vent, profil Coggan, progression FTP ; **course** : voir « Onglet Activités et bilan de course ». Tests : `node tests/bilan-course.mjs`. Carte **Progression** du Plan (`progress`) : chaque bloc commence par une phrase-réponse (`Bilan._prog`), courbes étiquetées au bout, FTP de travail en repère ; test `node tests/progression.mjs` |
-| `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, export GPX |
+| `sortie.js/.css` | Onglet **Sortie** : météo/vent, générateur de boucles face au vent (BRouter + profil perso) avec carte de comparaison, nutrition (voir « Nutrition »), export GPX |
 | `arrets.js` | Points d'arrêt le long d'une sortie (eau, ravito, toilettes, réparation) : carreaux `data/poi/`, sinon Overpass ; horaires, arrêts conseillés. Utilisé par sortie.js |
 | `scripts/fetch_poi.py` | Prépare `data/poi/<lat>_<lon>.json` (carreaux OpenStreetMap de 0,5° sur la Bretagne) + `index.json`, voir « Points d'arrêt » |
 | `fitcourse.js` | Encodeur de parcours FIT (course + course_point typés) pour les alertes « À venir » des Garmin |
@@ -78,6 +78,13 @@ Langue de l'interface et des échanges : **français**.
 - « Inverser le sens » : points inversés en local + score de vent recalculé (note : attention aux sens uniques, pas de recalcul d'itinéraire).
 - Invalidation : distance, relief ou point de départ changés → propositions effacées ; date, heure ou vitesse changées → tracés gardés, vent et scores recalculés (`syncRes`, 1 appel météo si la date change).
 - Clés localStorage : `gpKey` (clé Google Places, jamais publiée), `soGenRes` (réglages de calcul, point de départ, météo au départ, propositions avec leurs points, combinaisons essayées), `soGenSel` (sélection), plus `soGenKm`, `soGenRel`, `soStart`, `soBrf`, `sortieRoute`, `sortieSet`. `soGenRes` contient le point de départ : **localStorage uniquement**, jamais dans le dépôt ni dans une URL.
+
+## Nutrition (sortie.js, carte Nutrition)
+- Demande de Nathan du 29/10/2026 (« être réaliste ») : **un seul bidon de boisson**, 850 ml avec **140 g de poudre au plus** (boisson 1:0,8 CMA CGM Decathlon, ≈ 95 % de glucides, `NUT_POW`), l'autre bidon à l'eau (`BIDON` = 0,85 L, donc 1,7 L par plein, aussi utilisé par les arrêts conseillés) ; **6 produits en poche au plus** (`POCHE`) ; des sachets à emporter seulement en ultra (≥ 6 h, `ULTRA_H`), un par remplissage au plus.
+- **« Ce que tu prends »** : phrase-réponse (`nutAnswer` : glucides apportés contre l'objectif = g/h × durée, ce qui manque et comment le combler, alerte si plus de 6 produits en poche), puis un menu avec +/− : bidon (poudre, pas de 10 g), poches (pâte de fruits 20 g, gel 1:0,8 45 g), sachets (ultra), achats au ravito (Coca 33 cl ≈ 35 g, pain au chocolat ≈ 30 g, banane ≈ 25 g ; valeurs moyennes) à l'arrêt ravito conseillé par `Arrets.advice()` (sinon le premier commerce conseillé). Barre de progression vers l'objectif.
+- **Proposition** (`nutSuggest`) : bidon d'abord, puis poches (pâtes de fruits tant que ça suffit, sinon gels), puis achats au ravito s'il y a un commerce, puis sachets (ultra). La sélection réglée à la main est gardée par parcours (localStorage `soNutSel`, clé = nom + km) ; « revenir à la proposition » l'efface.
+- **Pendant** (`nutSchedule`) : produits des poches répartis de 40 min à 20 min de l'arrivée (pâtes de fruits d'abord, gels pour la fin), « Acheter et manger » à l'arrêt ravito, remplissages à l'eau (ou + sachet en ultra) avec le point d'eau conseillé.
+- Test : `node tests/nutrition.mjs`.
 
 ## Points d'arrêt (arrets.js)
 - Concerne toutes les traces : boucle générée, GPX importé, sortie Garmin refaite. `Arrets.update(ctx)` est appelé en fin de `compute()` dans sortie.js.
