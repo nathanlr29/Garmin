@@ -41,7 +41,7 @@ Langue de l'interface et des échanges : **français**.
 | `chain.js` | Suivi du graissage de chaîne (localStorage, synchronisé via `sync.js` si configuré) |
 | `plansync.js` | Synchro du Plan entre appareils (collection `plan` de `sync.js`), chargé après `sync.js`. Voir « Synchro entre appareils ». Test : `node tests/plansync.mjs` |
 | `sync.js` | Synchro générique entre appareils (Google Sheet + Apps Script), voir plus bas |
-| `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) |
+| `apps-script/sync.gs` | Code Apps Script à coller dans la Sheet (non déployé sur Pages, sans secret) : synchro et commentaire IA (voir « Commentaire IA ») |
 | `scripts/fetch_garmin.py` | Récupère activités, récup, traces, parcours (`data/routes.json`) ; extrait les flux FIT (vélo et course) → `data/streams/<id>.json` + `index.json` |
 | `scripts/mywhoosh.py` | Réécrit les FIT MyWhoosh (laps/session reconstruits depuis les records) et les envoie sur Garmin. Identité : appli Tacx Training (depuis le 14/10/2026, partenaire dont Garmin compte les séances pour la VO2max) ; l'ancienne identité Edge 540 (ni VO2max ni FTP) a été retirée le 28/10/2026. Test : `MyWhooshIdentity` dans `tests/test_garmin.py` |
 | `scripts/recovery.py`, `scripts/garmin_setup.py` | Récup (+ profil : FTP, VO2max, zones, bloc course `profile.run`) et configuration initiale Garmin |
@@ -162,6 +162,15 @@ Demande de Nathan du 29/10/2026 (« booster Breizh Watts » avec des API gratuit
   - La Synthèse (« séance prévue ce soir ») n'est pas redessinée en direct après une réception : elle suit au prochain changement d'onglet.
   - Test local à deux appareils : `localhost` et `127.0.0.1` (localStorage séparés), faux Apps Script qui exécute le vrai `sync.gs`.
 - À réutiliser pour le journal muscu : nouvelle collection, rien à changer dans `sync.gs`.
+
+## Commentaire IA (bilan.js + sync.js + apps-script/sync.gs)
+Demande de Nathan du 29/10/2026 (audit IA : Google Gemini, palier gratuit, appelé par l'Apps Script de synchro).
+- **Clé Gemini** dans les propriétés du script (`GEMINI_KEY`), jamais sur le site, dans le dépôt ni dans une URL ; appel `UrlFetchApp` avec la clé dans l'en-tête `x-goog-api-key`. Modèle : le Gemini Flash-Lite stable le plus récent de la liste des modèles de la clé (`model_`, gardé 6 h en cache, recherché à nouveau après un 404), sinon l'alias `gemini-flash-lite-latest` ; `GEMINI_MODEL` l'impose.
+- **Opération `ai`** de `sync.gs` (même clé de synchro `SYNC_KEY` que la synchro) : `{ op: "ai", kind: "seance", ctx }` → `{ ok, text, model }`. Seuls les usages prévus (`AI_SYS`, consigne système fixe côté script : 3-4 phrases, tutoiement, seulement les chiffres fournis, pas de sigles, aucun conseil médical) ; pas de prompt libre. Erreurs : `config_ia` (clé absente), `quota_ia` (429), `ia` (+ message Gemini), `op` (ancien script : « script de synchro à mettre à jour »). `Sync.ai(body)` côté site.
+- **Bilan de séance** (vélo et course) : section « Commentaire de l'entraîneur » (étiquetée IA), visible seulement si la synchro est configurée, **à la demande** (bouton, jamais automatique). Texte envoyé (`aiCtx`) = ce que le bilan affiche déjà (tuiles, constat, zones, prévu/réalisé), **sans le nom de la sortie** (il peut contenir un lieu) ni graphique, plus le sport, la FTP de travail et les objectifs du Plan ; 5 500 caractères au plus. La phrase calculée du bilan reste en premier. **Contrôle** (`aiCheck`) : un commentaire qui cite un chiffre (≥ 10 ou décimal) absent du texte envoyé est écarté. Gardé sur l'appareil (`aiNote:<id>`, 40 au plus), « Redemander » pour un nouveau.
+- **Mise en route** (une fois) : coller la nouvelle version de `sync.gs` dans l'éditeur Apps Script de la Sheet, ajouter la propriété `GEMINI_KEY`, puis Déployer → Gérer les déploiements → modifier → Nouvelle version (l'URL ne change pas).
+- Tests : `node tests/ai.mjs` (contrôle des chiffres ; `sync.gs` exécuté avec un faux Google : clés, usages, choix du modèle, quota, erreurs).
+- Clés localStorage : `aiNote:<id>`.
 
 ## Profil course (scripts/recovery.py, `profile.run`)
 - Bloc `profile.run` de `data/recovery.json`, rafraîchi **une seule fois par jour** : si `run.d` est la date du jour, `fetch_profile` reprend le bloc tel quel (aucun appel Garmin en plus à l'heure). Sur un 429, les appels course s'arrêtent et l'ancien bloc est gardé (réessai au passage suivant). Chaque appel est indépendant : en échec ou sans donnée de la montre, le champ est simplement absent.
