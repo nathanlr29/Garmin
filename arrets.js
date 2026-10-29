@@ -312,9 +312,10 @@ const G_STOP = new Set(["boulangerie", "patisserie", "epicerie", "cafe", "bar", 
 const normN = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 // le lieu Google qui correspond au point OSM : le plus proche à moins de G_BOX m ; si le point OSM a un nom, il doit ressembler
 // (un mot de plus de 3 lettres en commun, hors mots génériques) ou le lieu être à moins de 40 m
+const gWords = p => normN(p.t.name).split(" ").filter(w => w.length > 3 && !G_STOP.has(w));  // vide : nom absent ou générique (« Boulangerie »)
+function gLike(q, p) { const n = normN(p.t.name), m = normN(q.displayName && q.displayName.text); return !!n && !!m && (m === n || gWords(p).some(w => m.split(" ").includes(w))); }
 function gMatch(places, p) {
-  const n = normN(p.t.name), words = n.split(" ").filter(w => w.length > 3 && !G_STOP.has(w));
-  const like = q => { const m = normN(q.displayName && q.displayName.text); return !!m && (m === n || words.some(w => m.split(" ").includes(w))); };
+  const n = normN(p.t.name), like = q => gLike(q, p);
   let best = null, bc = Infinity;
   (places || []).forEach(q => { const l = q.location; if (!l) return;
     const d = dist([p.lat, p.lon], [l.latitude, l.longitude]), ok = !n || like(q) || d < 40; if (d > G_BOX || !ok) return;
@@ -356,11 +357,13 @@ function gApply(p, g, now = new Date()) {
 // compteur des requêtes du jour sur cet appareil : le quota Google Cloud de Nathan est de 30 par jour (G_DAY) ;
 // l'automatique s'arrête à G_AUTO pour garder des « vérifier sur Google » à la demande
 const K_GDAY = "gpDay", G_DAY = 30, G_AUTO = 24;
-const gToday = () => { const d = LS.get(K_GDAY, {}); return d && d.d === new Date().toDateString() ? d.n || 0 : 0; };
+// le quota Google repart à minuit heure du Pacifique (9 h à Paris en hiver) : même jour pour le compteur
+const gDayKey = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+const gToday = () => { const d = LS.get(K_GDAY, {}); return d && d.d === gDayKey() ? d.n || 0 : 0; };
 const rect = (lat, lon, m) => { const dl = m / 110540, dn = m / (111320 * Math.cos(rad(lat))); return { rectangle: { low: { latitude: lat - dl, longitude: lon - dn }, high: { latitude: lat + dl, longitude: lon + dn } } }; };
 async function gPost(textQuery, lat, lon, m, n) {
   if (gToday() >= G_DAY) throw Object.assign(new Error("quota"), { status: 429, why: "RATE_LIMIT_EXCEEDED" });
-  LS.set(K_GDAY, { d: new Date().toDateString(), n: gToday() + 1 });
+  LS.set(K_GDAY, { d: gDayKey(), n: gToday() + 1 });
   const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST",
     headers: { "Content-Type": "application/json", "X-Goog-Api-Key": gKey(),
       "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.businessStatus,places.primaryType,places.types,places.rating,places.userRatingCount,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri" },
@@ -382,14 +385,14 @@ function gFetch(p) {
 // ------------------------------------------------------------------ Bourgs au moment du ravito (Google)
 // Une recherche « boulangerie » par bourg (carré de ±G_TOWN m) vérifie d'un coup les commerces du bourg et ajoute ceux qu'OSM
 // ne connaît pas. Bourgs = groupes de commerces OSM autour de l'heure du ravito (comme advise), les plus proches de cette heure
-// d'abord, à plus de 3 km l'un de l'autre ; sans commerce OSM à ce moment-là, le point du tracé à cette heure.
+// d'abord, à plus de 3 km l'un de l'autre. Une recherche faite à moins de G_TOWN m est réutilisée (vitesse ou heure changée).
 const G_TOWN = 700, G_TOWNS = 2, G_WIN = .75;
 function gTowns(stops, P, r, n = G_TOWNS) {
   const h = r.secs / 3600, t0 = r.T[0], hot = r.ok && r.tmax >= 25, early = hot ? EARLY_HOT : EARLY;
   if (h <= (hot ? MIN_H_HOT : MIN_H)) return [];
   const target = Math.max(early, Math.min(h * .55, h - LATE)), atH = p => (p.t0 - t0) / 3600e3;
   const key = (lat, lon) => `${Math.round(lat * 200)}_${Math.round(lon * 200)}`;  // ~500 m : même bourg, même recherche
-  const S = stops.filter(p => p.cat === "ravito" && Math.abs(atH(p) - target) <= G_WIN && atH(p) >= early && atH(p) <= h - LATE).sort((a, b) => Math.abs(atH(a) - target) - Math.abs(atH(b) - target));
+  const S = stops.filter(p => p.cat === "ravito" && !/^g:/.test(p.id) && Math.abs(atH(p) - target) <= G_WIN && atH(p) >= early && atH(p) <= h - LATE).sort((a, b) => Math.abs(atH(a) - target) - Math.abs(atH(b) - target));
   const out = [];
   for (const p of S) {
     if (out.length >= n) break;
@@ -397,8 +400,7 @@ function gTowns(stops, P, r, n = G_TOWNS) {
     const g = S.filter(q => dist([q.lat, q.lon], [p.lat, p.lon]) < 600), lat = g.reduce((a, q) => a + q.lat, 0) / g.length, lon = g.reduce((a, q) => a + q.lon, 0) / g.length;
     out.push({ lat, lon, key: key(lat, lon) });
   }
-  if (!out.length) { const tt = t0 + target * 3600e3; let i = 0; while (i < P.length - 1 && r.T[i] < tt) i++; out.push({ lat: P[i].lat, lon: P[i].lon, key: key(P[i].lat, P[i].lon) }); }
-  return out;
+  return out;  // sans commerce OSM à ce moment-là : pas de recherche (un point de campagne qui bouge avec la vitesse coûtait une requête à chaque réglage)
 }
 // type Google → étiquettes OSM (pour kindOf) ; McDonald's par son nom ; le reste (restaurants…) n'est pas un ravito
 const G_T = { bakery: { shop: "bakery" }, convenience_store: { shop: "convenience" }, grocery_store: { shop: "convenience" }, food_store: { shop: "convenience" },
@@ -406,28 +408,32 @@ const G_T = { bakery: { shop: "bakery" }, convenience_store: { shop: "convenienc
 function gTags(q) {
   const n = (q.displayName && q.displayName.text) || "";
   if (/mcdonald/i.test(n)) return { amenity: "fast_food", name: n };
+  if (q.primaryType && !G_T[q.primaryType]) return null;  // restaurant qui fait aussi bar, boulangerie-restaurant… : pas d'ambiguïté
   const ty = [q.primaryType, ...(q.types || [])].find(t => G_T[t]);
   return ty ? { ...G_T[ty], name: n } : null;
 }
 // lieux Google → commerces OSM déjà connus (hits : [id OSM, lieu]) ou nouveaux points (extra) ; un point OSM sans nom
 // n'est rapproché que d'un lieu du même type à moins de 60 m (sinon toutes les boulangeries du bourg lui seraient attribuées)
 function gMerge(places, stops) {
-  const hits = [], extra = [];
-  (places || []).forEach(q => { const l = q.location, t = gTags(q); if (!l) return;
-    let best = null, bd = Infinity;
-    stops.forEach(p => { if (!SHOP_K.has(p.k)) return;
-      const d = dist([p.lat, p.lon], [l.latitude, l.longitude]);
-      const ok = p.t.name ? gMatch([q], p) === q : d < 60 && t && kindOf(t) === p.k;
-      if (ok && d < bd) { bd = d; best = p; } });
-    if (best) hits.push([best.id, q]);
-    else if (t && q.id && q.businessStatus !== "CLOSED_PERMANENTLY" && q.businessStatus !== "CLOSED_TEMPORARILY") extra.push({ id: "g:" + q.id, lat: l.latitude, lon: l.longitude, t, q });
-  });
+  const Q = (places || []).filter(q => q.location && q.id), pairs = [];
+  stops.forEach(p => { if (!SHOP_K.has(p.k) || /^g:/.test(p.id)) return;
+    const gen = !gWords(p).length;
+    Q.forEach(q => { const t = gTags(q), d = dist([p.lat, p.lon], [q.location.latitude, q.location.longitude]), like = gLike(q, p), same = !!t && kindOf(t) === p.k;
+      // nom ressemblant : jusqu'à G_BOX ; sinon même type, à 40 m (90 m si le nom OSM est absent ou générique : centre du bâtiment)
+      if (like ? d <= G_BOX : same && d < (gen ? 90 : 40)) pairs.push({ p, q, c: d - (like ? 300 : 0) }); }); });
+  pairs.sort((a, b) => a.c - b.c);
+  const usedP = new Set(), usedQ = new Set(), hits = [];
+  pairs.forEach(({ p, q }) => { if (usedP.has(p.id) || usedQ.has(q.id)) return; usedP.add(p.id); usedQ.add(q.id); hits.push([p.id, q]); });
+  const extra = Q.filter(q => !usedQ.has(q.id) && gTags(q) && q.businessStatus !== "CLOSED_PERMANENTLY" && q.businessStatus !== "CLOSED_TEMPORARILY")
+    .map(q => ({ id: "g:" + q.id, lat: q.location.latitude, lon: q.location.longitude, t: gTags(q), q }));
   return { hits, extra };
 }
 const GT = new Map(), GX = new Map();  // recherches de bourg (promesses) et commerces trouvés seulement sur Google, pour la page
+const gNear = c => { for (const [k, v] of GT) if (dist([v.lat, v.lon], [c.lat, c.lon]) < G_TOWN) return k; return null; };
 function gTown(c) {
-  if (!GT.has(c.key)) { const pr = gPost("boulangerie", c.lat, c.lon, G_TOWN, 20); GT.set(c.key, pr); pr.catch(() => GT.delete(c.key)); }
-  return GT.get(c.key);
+  const k = gNear(c); if (k) return GT.get(k).pr;
+  const pr = gPost("boulangerie", c.lat, c.lon, G_TOWN, 20); GT.set(c.key, { lat: c.lat, lon: c.lon, pr }); pr.catch(() => GT.delete(c.key));
+  return pr;
 }
 // raison donnée par Google (details[].reason), traduite quand elle est connue : sans la console Google, la cause se lit dans la page
 const G_WHY = {
@@ -444,17 +450,20 @@ const gErrTxt = e => G_WHY[e.why] || (e.status === 429 ? "quota Google du jour a
 async function gCheck(seq) {
   if (!gUse() || !ST.ctx) return;
   let ran = false;
+  ST.gErr = "";
   try {
     // bourgs : les recherches déjà faites sur la page sont relues sans nouvel appel
     const towns = gTowns(ST.stops, ST.ctx.P, ST.ctx.r);
     let room = G_AUTO - gToday();
-    const go = towns.filter(c => GT.has(c.key) || room-- > 0);
+    const go = towns.filter(c => gNear(c) || room-- > 0);
     if (go.length) {
-      if (go.some(c => !GT.has(c.key))) { ran = ST.gRun = true; render(); }
-      const res = await Promise.all(go.map(gTown));
+      if (go.some(c => !gNear(c))) { ran = ST.gRun = true; render(); }
+      // une recherche en échec n'empêche ni l'autre bourg ni la vérification des conseillés (sauf clé refusée)
+      const res = await Promise.allSettled(go.map(gTown));
       if (seq !== ST.seq) return;
+      const bad = res.find(x => x.status === "rejected"); if (bad) { console.warn("Google Places", bad.reason); gStop(bad.reason); if (gOff) throw bad.reason; }
       let n = GX.size;
-      res.forEach(pl => { const m = gMerge(pl, ST.stops);
+      res.filter(x => x.status === "fulfilled").forEach(({ value: pl }) => { const m = gMerge(pl, ST.stops);
         m.hits.forEach(([id, q]) => { if (!GV.has(id)) GV.set(id, gOf(q)); });
         m.extra.forEach(e => { GX.set(e.id, e); GV.set(e.id, gOf(e.q)); }); });
       if (ran || GX.size > n || ST.stops.some(p => GV.has(p.id) && !p.g)) { annotate(); ran = true; }
@@ -469,7 +478,6 @@ async function gCheck(seq) {
       todo.forEach((p, i) => gApply(p, res[i]));
       ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut);
     }
-    ST.gErr = "";
   } catch (e) { if (seq !== ST.seq) return; console.warn("Google Places", e); gStop(e); }
   if (!ran) return;
   ST.gRun = false; render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone();
@@ -477,7 +485,7 @@ async function gCheck(seq) {
 function gStop(e) { ST.gErr = gErrTxt(e); if (e.status === 400 || e.status === 403) { gOff = true; ST.gErr += ". Corrige dans Google Cloud, puis recharge la page"; } }
 async function gOne(id) {
   const p = ST.stops.find(q => q.id === id), seq = ST.seq; if (!p || !gUse()) return;
-  try { const g = await gFetch(p); if (seq !== ST.seq) return; gApply(p, g); ST.gErr = ""; ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut); }
+  try { const g = await gFetch(p); if (seq !== ST.seq) return; gApply(ST.stops.find(q => q.id === id) || p, g); ST.gErr = ""; ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut); }
   catch (e) { if (seq !== ST.seq) return; gStop(e); }
   render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone(); gCheck(seq);
 }

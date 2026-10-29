@@ -183,9 +183,8 @@ console.log("arrets erreurs google ok");
   assert.equal(T4.length, 2, "deux bourgs au plus, à plus de 3 km");
   assert.ok(Math.abs(T4[0].lat - (48.1 + .5425 * 100000 / 111320)) < .002, "le bourg le plus proche de l'heure du ravito d'abord (centre des commerces)");
   assert.equal(A._gTowns(L4, P, { ...r, secs: 2 * 3600 }).length, 0, "sortie courte : pas de recherche");
-  const T5 = A._gTowns(L4.filter(p => p.name === "Trop tôt"), P, r);
-  assert.equal(T5.length, 1, "aucun commerce au bon moment : le point du tracé à l'heure du ravito");
-  assert.ok(Math.abs(T5[0].lat - (48.1 + .55 * 100000 / 111320)) < .003);
+  assert.equal(A._gTowns(L4.filter(p => p.name === "Trop tôt"), P, r).length, 0, "aucun commerce au bon moment : pas de recherche en pleine campagne");
+  assert.equal(A._gTowns(L4.map(p => ({ ...p, id: "g:" + p.id })), P, r).length, 0, "les points trouvés sur Google ne déplacent pas les bourgs");
   // types Google
   assert.equal(A._gTags({ primaryType: "bakery", displayName: { text: "Au Bon Pain" } }).shop, "bakery");
   assert.equal(A._gTags({ primaryType: "restaurant", types: ["restaurant"], displayName: { text: "Crêperie" } }), null, "restaurant : pas un ravito");
@@ -213,5 +212,19 @@ console.log("arrets erreurs google ok");
   const rv = A._advise(extra.filter(p => p.cat === "ravito"), r, null).find(a => /ravito/.test(a.role));
   assert.equal(rv && rv.p.id, "g:b", "boulangerie Google bien notée préférée à celle notée 3,1");
   assert.match(A._linksHtml(gb), /★ 4,7 \(80 avis\).*trouvé sur Google/);
+}
+// 10) relecture : un bar nommé à 30 m d'une boulangerie Google n'en reçoit pas les horaires ; le meilleur couple d'abord ;
+// un point OSM au nom générique est rapproché par type (pas de doublon)
+{ const at_ = (f, off) => ({ latitude: 48.1 + f * 100000 / 111320, longitude: -1.68 + off / 74000 });
+  const L6 = A._place([node(.54, 30, { amenity: "bar", name: "Le Narval" }), node(.545, 30, { shop: "bakery" }), node(.55, 30, { shop: "bakery", name: "Boulangerie" })], P, r);
+  const narval = L6.find(p => p.name === "Le Narval"), anon = L6.find(p => p.k === "bakery" && !p.t.name), gen = L6.find(p => p.t.name === "Boulangerie");
+  const q = (id, name, f, off, st = "OPERATIONAL") => ({ id, displayName: { text: name }, primaryType: "bakery", location: at_(f, off), businessStatus: st });
+  const M = A._gMerge([q("x", "Boulangerie Martin", .54027, 30), q("A", "Vieille boulangerie", .5455, 30, "CLOSED_PERMANENTLY"), q("B", "Pains et Cie", .54509, 30), q("C", "Boulangerie Roux", .5506, 30)], L6);
+  const hit = id => (M.hits.find(([i]) => i === id) || [])[1];
+  assert.equal(hit(narval.id), undefined, "bar : pas rapproché d'une boulangerie");
+  assert.equal(hit(anon.id).id, "B", "boulangerie sans nom : le lieu le plus proche (B à 10 m), pas A à 55 m");
+  assert.equal(hit(gen.id).id, "C", "« Boulangerie » (nom générique) : rapprochée par type à ~65 m");
+  assert.equal(JSON.stringify(M.extra.map(e => e.id)), JSON.stringify(["g:x"]), "la boulangerie Martin est ajoutée, la fermée non");
+  assert.equal(A._gTags({ primaryType: "restaurant", types: ["restaurant", "bar"], displayName: { text: "Le Relais" } }), null, "restaurant qui fait bar : écarté");
 }
 console.log("arrets bourgs google ok");
