@@ -169,3 +169,9 @@ console.log("arrets mcdo ok");
   assert.match(A._linksHtml({ ...p, g: { url: "https://maps.google.com/?cid=123" } }), /cid=123/);
 }
 console.log("arrets google ok");
+// 8) raison du refus Google affichée en clair
+assert.match(A._gErrTxt({ status: 403, why: "API_KEY_HTTP_REFERRER_BLOCKED" }), /Sites Web/);
+assert.match(A._gErrTxt({ status: 403, why: "SERVICE_DISABLED" }), /pas activée/);
+assert.match(A._gErrTxt({ status: 403, why: "BILLING_DISABLED" }), /facturation/);
+assert.match(A._gErrTxt({ status: 403, why: "AUTRE", message: "Requests are blocked." }), /AUTRE.*Requests are blocked/);
+console.log("arrets erreurs google ok");
