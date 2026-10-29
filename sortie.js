@@ -129,13 +129,13 @@ function climbs(P) {
   return out;
 }
 
-// Fond de carte : Plan IGN (Géoplateforme, sans clé ; petites routes et bourgs plus lisibles), OpenStreetMap au choix ;
-// le choix est gardé sur l'appareil (soBase). Hors de France le Plan IGN reste lisible mais pauvre : OpenStreetMap y est conseillé.
+// Fond de carte : OpenStreetMap par défaut (ses couleurs : bois en vert, eau en bleu ; Nathan les préfère, 29/10/2026),
+// Plan IGN (Géoplateforme, sans clé) au choix ; le choix est gardé sur l'appareil (soBase).
 const IGN_PLAN = "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
 function baseLayers(map) {
-  const B = { "Plan IGN": L.tileLayer(IGN_PLAN, { maxZoom: 19, className: "ign-plan", attribution: "© IGN-F / Géoplateforme" }),
-    "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }) };
-  const pick = LS.get("soBase", "Plan IGN"); (B[pick] || B["Plan IGN"]).addTo(map);
+  const B = { "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }),
+    "Plan IGN": L.tileLayer(IGN_PLAN, { maxZoom: 19, attribution: "© IGN-F / Géoplateforme" }) };
+  const pick = LS.get("soBase", "OpenStreetMap"); (B[pick] || B.OpenStreetMap).addTo(map);
   L.control.layers(B, null, { position: "topleft" }).addTo(map);
   map.on("baselayerchange", e => LS.set("soBase", e.name));
 }
