@@ -355,15 +355,25 @@ function gFetch(p) {
     body: JSON.stringify({ textQuery: p.t.name || G_Q[p.k] || p.name, languageCode: "fr", regionCode: "FR", pageSize: 5,
       locationRestriction: { rectangle: { low: { latitude: p.lat - dl, longitude: p.lon - dn }, high: { latitude: p.lat + dl, longitude: p.lon + dn } } } }) })
     .then(async r => { const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw Object.assign(new Error((j.error && j.error.message) || "Google " + r.status), { status: r.status });
+      if (!r.ok) { const er = j.error || {}, why = (er.details || []).map(d => d.reason).find(Boolean) || er.status || "";
+        throw Object.assign(new Error(er.message || "Google " + r.status), { status: r.status, why }); }
       const q = gMatch(j.places, p);
       const g = q ? { st: q.businessStatus || "OPERATIONAL", url: /^https:\/\//.test(q.googleMapsUri || "") ? q.googleMapsUri : null, reg: q.regularOpeningHours || null, cur: q.currentOpeningHours || null } : { miss: true };
       GV.set(p.id, g); return g; });
   G.set(p.id, pr); pr.catch(() => G.delete(p.id));
   return pr;
 }
-const gErrTxt = e => e.status === 429 ? "quota Google du jour atteint" : e.status === 403 ? "clé refusée (restriction au site ou Places API (New) non activée)"
-  : e.status === 400 ? "clé Google invalide" : "Google ne répond pas";
+// raison donnée par Google (details[].reason), traduite quand elle est connue : sans la console Google, la cause se lit dans la page
+const G_WHY = {
+  API_KEY_HTTP_REFERRER_BLOCKED: "clé refusée pour ce site : dans Google Cloud, la restriction « Sites Web » doit être https://nathanlr29.github.io/*",
+  API_KEY_SERVICE_BLOCKED: "clé refusée pour cette API : dans les restrictions de la clé, coche Places API (New)",
+  SERVICE_DISABLED: "Places API (New) n'est pas activée dans ton projet Google Cloud",
+  BILLING_DISABLED: "facturation non activée sur ton projet Google Cloud (obligatoire, même pour la tranche gratuite)",
+  API_KEY_INVALID: "clé Google invalide (mal copiée ?)",
+  RATE_LIMIT_EXCEEDED: "quota Google du jour atteint", RESOURCE_EXHAUSTED: "quota Google du jour atteint",
+};
+const gErrTxt = e => G_WHY[e.why] || (e.status === 429 ? "quota Google du jour atteint" : e.status === 400 ? "clé Google invalide"
+  : e.status === 403 ? `clé refusée${e.why ? ` (${e.why})` : ""}${e.message ? ` : « ${e.message} »` : ""}` : "Google ne répond pas");
 // commerces des arrêts conseillés : vérifiés ; un conseillé fermé est remplacé (advise l'écarte), puis le nouveau est vérifié à son tour
 async function gCheck(seq) {
   if (!gKey() || !ST.ctx) return;
@@ -663,5 +673,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf, _gMatch: gMatch, _gDay: gDay, _gApply: gApply };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf, _gMatch: gMatch, _gDay: gDay, _gApply: gApply, _gErrTxt: gErrTxt };
 })();
