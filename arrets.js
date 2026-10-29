@@ -285,7 +285,7 @@ function telOf(t) {  // { href: "tel:+33299…", txt: "02 99 …" }
 const osmUrl = id => { const m = /^([nwr])(\d+)$/.exec(id || ""); return m ? `https://www.openstreetmap.org/${{ n: "node", w: "way", r: "relation" }[m[1]]}/${m[2]}` : null; };
 function linksHtml(p, noHours) {
   const h = noHours ? "" : p.hrs ?? hoursLine(p), w = webUrl(p.t), tel = telOf(p.t), osm = osmUrl(p.id), A = (u, x) => `<a href="${esc(u)}" target="_blank" rel="noopener">${x}</a>`;
-  return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(p.g && p.g.url || gmapsUrl(p), "Google Maps")}${!p.g && SHOP_K.has(p.k) && gKey() ? `<button class="stgchk" data-gchk="${esc(p.id)}">vérifier sur Google</button>` : ""}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
+  return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(p.g && p.g.url || gmapsUrl(p), "Google Maps")}${!p.g && SHOP_K.has(p.k) && gUse() ? `<button class="stgchk" data-gchk="${esc(p.id)}">vérifier sur Google</button>` : ""}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
 }
 function statusTxt(p) {
   const o = p.oh; if (o && o.dead) return p.hrs;
@@ -301,6 +301,10 @@ function statusTxt(p) {
 // d'office et les autres à la demande (« vérifier sur Google »). Rien n'est gardé au-delà de la page (conditions de Google).
 const K_GKEY = "gpKey", G_BOX = 250;
 const gKey = () => { const k = LS.get(K_GKEY, ""); return typeof k === "string" && /^[\w-]{20,80}$/.test(k) ? k : ""; };
+// clé refusée ou invalide (400 / 403) : plus aucun appel jusqu'au rechargement de la page ou à une nouvelle clé
+// (sans ça, chaque recalcul de la sortie redemandait : 51 requêtes refusées le 29/10/2026)
+let gOff = false;
+const gUse = () => !gOff && !!gKey();
 const G = new Map(), GV = new Map();  // requêtes de la page (en cours ou faites) et résultats, par id OSM
 const G_Q = { bakery: "boulangerie", shop: "épicerie", fuel: "station-service", cafe: "café", mcdo: "McDonald's", bikeshop: "magasin de vélo" };
 const G_STOP = new Set(["boulangerie", "patisserie", "epicerie", "cafe", "bar", "tabac", "presse", "brasserie", "station", "service", "magasin", "cycles", "velo", "chez", "les", "des", "aux"]);
@@ -376,7 +380,7 @@ const gErrTxt = e => G_WHY[e.why] || (e.status === 429 ? "quota Google du jour a
   : e.status === 403 ? `clé refusée${e.why ? ` (${e.why})` : ""}${e.message ? ` : « ${e.message} »` : ""}` : "Google ne répond pas");
 // commerces des arrêts conseillés : vérifiés ; un conseillé fermé est remplacé (advise l'écarte), puis le nouveau est vérifié à son tour
 async function gCheck(seq) {
-  if (!gKey() || !ST.ctx) return;
+  if (!gUse() || !ST.ctx) return;
   let ran = false;
   try {
     for (let round = 0; round < 4; round++) {
@@ -389,14 +393,15 @@ async function gCheck(seq) {
       ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut);
     }
     ST.gErr = "";
-  } catch (e) { if (seq !== ST.seq) return; console.warn("Google Places", e); ST.gErr = gErrTxt(e); }
+  } catch (e) { if (seq !== ST.seq) return; console.warn("Google Places", e); gStop(e); }
   if (!ran) return;
   ST.gRun = false; render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone();
 }
+function gStop(e) { ST.gErr = gErrTxt(e); if (e.status === 400 || e.status === 403) { gOff = true; ST.gErr += ". Corrige dans Google Cloud, puis recharge la page"; } }
 async function gOne(id) {
-  const p = ST.stops.find(q => q.id === id), seq = ST.seq; if (!p || !gKey()) return;
+  const p = ST.stops.find(q => q.id === id), seq = ST.seq; if (!p || !gUse()) return;
   try { const g = await gFetch(p); if (seq !== ST.seq) return; gApply(p, g); ST.gErr = ""; ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut); }
-  catch (e) { if (seq !== ST.seq) return; ST.gErr = gErrTxt(e); }
+  catch (e) { if (seq !== ST.seq) return; gStop(e); }
   render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone(); gCheck(seq);
 }
 
@@ -543,10 +548,10 @@ function gHtml() {
 function gBind(box) {
   const d = box.querySelector("#stG"); if (!d) return;
   d.ontoggle = () => { ST.gOpen = d.open; };
-  const del = box.querySelector("#stGDel"); if (del) del.onclick = () => { try { localStorage.removeItem(K_GKEY); } catch (e) {} ST.gErr = ""; render(); };
+  const del = box.querySelector("#stGDel"); if (del) del.onclick = () => { try { localStorage.removeItem(K_GKEY); } catch (e) {} gOff = false; ST.gErr = ""; render(); };
   const set = box.querySelector("#stGSet"); if (set) set.onclick = () => { const v = box.querySelector("#stGKey").value.trim();
     if (!/^[\w-]{20,80}$/.test(v)) { box.querySelector("#stGMsg").textContent = "Ce n'est pas une clé API Google (elle commence en général par AIza)."; return; }
-    LS.set(K_GKEY, v); ST.gErr = ""; render(); gCheck(ST.seq); };
+    LS.set(K_GKEY, v); gOff = false; ST.gErr = ""; render(); gCheck(ST.seq); };
 }
 const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</summary><ol>
   <li><b>Exporte</b> avec « Exporter pour Garmin (.fit) » en haut de la page : les arrêts cochés deviennent des points de parcours typés (eau, nourriture, toilettes…). Le GPX marche aussi, mais il perd souvent les types.</li>
