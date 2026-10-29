@@ -42,13 +42,44 @@ function thin(pts) {  // au plus un point tous les 10 m, pour alléger
   for (let i = 1; i < pts.length; i++) { acc += dist(pts[i - 1], pts[i]); if (acc >= 10 || i === pts.length - 1) { out.push(pts[i]); acc = 0; } }
   return out.map(p => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5, p[2] == null ? null : Math.round(p[2] * 10) / 10]);
 }
-async function fillElevation(pts) {  // GPX sans altitude (ou trace d'une sortie) : on demande l'altitude à Open-Meteo
+// indices de n points régulièrement espacés le long de la trace, et retour à tous les points par interpolation
+function evenIdx(pts, n) {
+  const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+  const total = cum[cum.length - 1], idx = [];
+  for (let k = 0, j = 0; k < n; k++) { const t = total * k / (n - 1); while (j < cum.length - 1 && cum[j] < t) j++; idx.push(j); }
+  return { idx, total };
+}
+function spreadEl(pts, idx, el) {
+  let k = 0;
+  return pts.map((p, i) => { while (k < idx.length - 2 && idx[k + 1] <= i) k++; const a = idx[k], b = idx[k + 1], f = b > a ? (i - a) / (b - a) : 0; return [p[0], p[1], Math.round((el[k] + (el[k + 1] - el[k]) * clamp(f, 0, 1)) * 10) / 10]; });
+}
+// Altitude IGN (RGE ALTI de la Géoplateforme, sans clé ; demande de Nathan du 29/10/2026) : précise au mètre en France, là où
+// BRouter (SRTM) et Open-Meteo (Copernicus 90 m) lissent les côtes bretonnes. Un point tous les 25 m (le pas du profil), 2 500 par
+// requête, l'une après l'autre. En mer ou hors de France l'IGN répond -99999 : au-delà de 10 % de tels points, on n'utilise pas l'IGN.
+const IGN_ALTI = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json", IGN_STEP = 25, IGN_MAX = 2500;
+async function ignElevation(pts) {
+  const { total } = evenIdx(pts, 2), n = clamp(Math.round(total / IGN_STEP) + 1, 2, 16000), I = evenIdx(pts, n).idx, el = [];
+  for (let s = 0; s < I.length; s += IGN_MAX) {
+    const part = I.slice(s, s + IGN_MAX);
+    const r = await fetch(IGN_ALTI, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lon: part.map(i => pts[i][1].toFixed(5)).join("|"), lat: part.map(i => pts[i][0].toFixed(5)).join("|"), resource: "ign_rge_alti_wld", zonly: "true" }) });
+    if (!r.ok) throw new Error("IGN " + r.status);
+    const e = (await r.json()).elevations; if (!Array.isArray(e) || e.length !== part.length) throw new Error("IGN : réponse illisible");
+    el.push(...e);
+  }
+  const ok = v => typeof v === "number" && v > -500;
+  if (el.filter(v => !ok(v)).length > el.length * .1) throw new Error("hors de la zone IGN");
+  // quelques points sans valeur (bord de mer, pont) : la valeur valable la plus proche
+  for (let i = 0; i < el.length; i++) if (!ok(el[i])) { let a = i - 1, b = i + 1; while (a >= 0 && !ok(el[a])) a--; while (b < el.length && !ok(el[b])) b++; el[i] = a >= 0 ? el[a] : el[b]; }
+  return spreadEl(pts, I, el);
+}
+// altitude d'une trace : IGN d'abord ; sinon celle de la trace (GPX, BRouter) ; sinon Open-Meteo. Rend { pts, src }.
+async function fillElevation(pts) {
+  try { return { pts: await ignElevation(pts), src: "ign" }; } catch (e) { console.warn("Altitude IGN", e); }
   const have = pts.filter(p => p[2] != null).length;
-  if (have > pts.length * .8) return pts;
-  let cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
-  const total = cum[cum.length - 1], n = clamp(Math.min(pts.length, Math.round(total / 100)), 2, 200);  // l'API compte chaque point : on reste sobre
-  const idx = []; for (let k = 0, j = 0; k < n; k++) { const t = total * k / (n - 1); while (j < cum.length - 1 && cum[j] < t) j++; idx.push(j); }
-  const el = [];
+  if (have > pts.length * .8) return { pts, src: "" };
+  const { total } = evenIdx(pts, 2), n = clamp(Math.min(pts.length, Math.round(total / 100)), 2, 200);  // l'API compte chaque point : on reste sobre
+  const { idx } = evenIdx(pts, n), el = [];
   for (let s = 0; s < idx.length; s += 100) {
     const part = idx.slice(s, s + 100);
     const url = `https://api.open-meteo.com/v1/elevation?latitude=${part.map(i => pts[i][0]).join(",")}&longitude=${part.map(i => pts[i][1]).join(",")}`;
@@ -57,8 +88,7 @@ async function fillElevation(pts) {  // GPX sans altitude (ou trace d'une sortie
     if (!r.ok) throw new Error(r.status === 429 ? "Le service d'altitude est saturé, réessaie dans une minute." : "Altitude indisponible pour cette trace.");
     el.push(...(await r.json()).elevation);
   }
-  let k = 0;
-  return pts.map((p, i) => { while (k < idx.length - 2 && idx[k + 1] <= i) k++; const a = idx[k], b = idx[k + 1], f = b > a ? (i - a) / (b - a) : 0; return [p[0], p[1], Math.round((el[k] + (el[k + 1] - el[k]) * clamp(f, 0, 1)) * 10) / 10]; });
+  return { pts: spreadEl(pts, idx, el), src: "" };
 }
 
 // Profil régulier tous les 25 m : altitude lissée, pente, cap
@@ -99,7 +129,29 @@ function climbs(P) {
   return out;
 }
 
+// Fond de carte : Plan IGN (Géoplateforme, sans clé ; petites routes et bourgs plus lisibles), OpenStreetMap au choix ;
+// le choix est gardé sur l'appareil (soBase). Hors de France le Plan IGN reste lisible mais pauvre : OpenStreetMap y est conseillé.
+const IGN_PLAN = "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
+function baseLayers(map) {
+  const B = { "Plan IGN": L.tileLayer(IGN_PLAN, { maxZoom: 19, className: "ign-plan", attribution: "© IGN-F / Géoplateforme" }),
+    "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }) };
+  const pick = LS.get("soBase", "Plan IGN"); (B[pick] || B["Plan IGN"]).addTo(map);
+  L.control.layers(B, null, { position: "topleft" }).addTo(map);
+  map.on("baselayerchange", e => LS.set("soBase", e.name));
+}
+
 // ------------------------------------------------------------------ Météo (Open-Meteo, sans clé)
+// AROME HD de Météo-France (maille de 1,3 km, ~2 jours d'échéance) pour le vent côtier, sinon le modèle par défaut d'Open-Meteo
+// (déjà Météo-France en France, maille de 2,5 km, puis d'autres modèles au-delà de 4 jours) ; le risque de pluie et l'UV n'existent
+// que dans le modèle par défaut. Demande de Nathan du 29/10/2026. Même fusion dans synthese.js.
+const AROME = "&models=meteofrance_arome_france_hd,best_match";
+function arome(j) {
+  for (const s of ["hourly", "daily"]) { const h = j[s]; if (!h) continue; const out = { time: h.time };
+    for (const k in h) { const m = /^(.+)_best_match$/.exec(k); if (!m) continue; const a = h[m[1] + "_meteofrance_arome_france_hd"];
+      out[m[1]] = h[k].map((v, i) => a && a[i] != null ? a[i] : v); }
+    if (Object.keys(out).length > 1) j[s] = out; }
+  return j;
+}
 function samples(P) {  // points météo tous les ~12 km
   const total = P[P.length - 1].d, n = clamp(Math.round(total / 12000) + 1, 2, 16), out = [];
   for (let k = 0; k < n; k++) { const d = total * k / (n - 1); out.push(P[Math.min(P.length - 1, Math.round(d / STEP))]); }
@@ -110,11 +162,11 @@ async function loadWx(P, day) {  // uniquement le jour choisi (et le lendemain),
   const S_ = samples(P), key = S_.map(p => p.lat.toFixed(2) + "," + p.lon.toFixed(2)).join(";") + "|" + ymd(day) + "|" + new Date().toISOString().slice(0, 13);
   if (SO.wxKey === key && SO.wx) return SO.wx;
   const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${S_.map(p => p.lat.toFixed(3)).join(",")}&longitude=${S_.map(p => p.lon.toFixed(3)).join(",")}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${S_.map(p => p.lat.toFixed(3)).join(",")}&longitude=${S_.map(p => p.lon.toFixed(3)).join(",")}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis${AROME}`;
   const r = await fetch(url);
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
-  let j = await r.json(); if (!Array.isArray(j)) j = [j];
+  let j = await r.json(); if (!Array.isArray(j)) j = [j]; j = j.map(arome);
   const t0 = parseLocal(j[0].hourly.time[0]).getTime();
   SO.wx = { S: S_, loc: j, t0, nH: j[0].hourly.time.length, step: P[P.length - 1].d / Math.max(1, S_.length - 1) };
   SO.wxKey = key;
@@ -226,7 +278,7 @@ function shell() {
 function renderLoad() {
   const r = SO.route, s = settings();
   $("soLoad").innerHTML = r ? `
-    <div class="sohead"><div><div class="soname">${esc(r.name)}</div><div class="sosmall">${fmt(SO.P[SO.P.length - 1].d / 1000, 1)} km · ${fmt(gain(SO.P))} m D+${r.src === "garmin" ? ` · ${cutNote()}` : ""}</div></div>
+    <div class="sohead"><div><div class="soname">${esc(r.name)}</div><div class="sosmall">${fmt(SO.P[SO.P.length - 1].d / 1000, 1)} km · ${fmt(gain(SO.P))} m D+${r.ev === "ign" ? " · altitude IGN" : ""}${r.src === "garmin" ? ` · ${cutNote()}` : ""}</div></div>
       <div class="soform">
         <label>Départ <input type="date" id="soDate" value="${s.date}" min="${ymd(new Date())}"></label>
         <label><select id="soHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.hour ? "selected" : ""}>${h} h</option>`).join("")}</select></label>
@@ -315,7 +367,7 @@ async function setRoute(r) {
   const seq = SO.routeSeq = (SO.routeSeq || 0) + 1, body = $("soBody");
   if (body) body.classList.add("sobusy");   // pas d'écran d'attente : l'ancienne analyse s'estompe le temps du calcul
   try {
-    r.pts = await fillElevation(r.pts);
+    const fe = await fillElevation(r.pts); r.pts = fe.pts; r.ev = fe.src;
     if (seq !== SO.routeSeq) return;
     if (!LS.set("sortieRoute", r)) { r.pts = r.pts.filter((_, i) => i % 3 === 0 || i === r.pts.length - 1); LS.set("sortieRoute", r); }
     SO.route = r; SO.P = profile(r.pts); SO.climbs = climbs(SO.P); SO.wx = null;
@@ -396,7 +448,7 @@ async function renderMap(r, wx) {
   if (SO.res !== r) return;   // un autre parcours a été choisi entre-temps
   if (!SO.map) {
     SO.map = L.map("soMap", { zoomControl: true, attributionControl: true });
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(SO.map);
+    baseLayers(SO.map);
   }
   SO.layers.forEach(l => l.remove()); SO.layers = [];
   const P = SO.P, add = l => { l.addTo(SO.map); SO.layers.push(l); return l; };
@@ -894,10 +946,10 @@ async function brRoute(wps, prof) {
 async function windHere(st, day) {  // prévisions à un seul point (départ) pour noter les boucles
   const d2 = new Date(day); d2.setDate(d2.getDate() + 1);
   const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
-  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${st.lat.toFixed(3)}&longitude=${st.lon.toFixed(3)}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis`);
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${st.lat.toFixed(3)}&longitude=${st.lon.toFixed(3)}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis${AROME}`);
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
-  const j = await r.json();
+  const j = arome(await r.json());
   return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: parseLocal(j.hourly.time[0]).getTime(), nH: j.hourly.time.length, step: 1e12 };
 }
 // --- Allers-retours (éperons) : un point de passage tombé dans une impasse fait faire à BRouter un aller-retour sur la même route.
@@ -1164,7 +1216,7 @@ async function renderGenMap() {
   if (GEN.res !== R || !el.isConnected) return;
   if (!GEN.map) {
     GEN.map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: .25 });  // cadrage plus serré sur les boucles
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(GEN.map);
+    baseLayers(GEN.map);
     GEN.wind = L.control({ position: "topright" }); GEN.wind.onAdd = () => L.DomUtil.create("div", "gwindctl"); GEN.wind.addTo(GEN.map);
     GEN.fit = true;
   }
