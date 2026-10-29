@@ -333,15 +333,15 @@ for (const k in Y.HELP) assert.ok(Y.HELP[k].split(/[.!?]\s/).length <= 3, "expli
   L = Y.weekendWx(mk(sec, pluie), days);
   assert.equal(L.map(d => d.verdict).join(), "good,bad", "dimanche : 7,5 mm"); assert.match(Y.weekendAnswer(L), /^Oui, mise sur samedi .* dimanche s'annonce mauvais/);
   L = Y.weekendWx(mk(pluie, tempete), days);
-  assert.equal(L[0].verdict, "bad"); assert.equal(L[0].win.from, 9); assert.equal(L[0].win.to, 13, "sec de 9 h à 13 h");
+  assert.equal(L[0].verdict, "bad"); assert.equal(L[0].win.from, 9); assert.equal(L[0].win.to, 12, "sec de 9 h à 12 h : la pluie de l'étiquette 13 h tombe entre 12 h et 13 h (cumul de l'heure précédente)");
   L = Y.weekendWx(mk(i => [12, i === 15 ? .5 : 0, i === 15 ? 60 : 20, 18, 35, 250], tempete), days);
-  assert.equal(L[0].verdict, "mid"); assert.match(Y.weekendAnswer(L), /^Week-end mitigé : vise samedi, sec de 9 h à 15 h/);
+  assert.equal(L[0].verdict, "mid"); assert.match(Y.weekendAnswer(L), /^Week-end mitigé : vise samedi, sec de 9 h à 14 h/, "averse de l'étiquette 15 h = entre 14 h et 15 h");
   assert.match(Y.weekendAnswer(Y.weekendWx(mk(tempete, tempete), days)), /^Plutôt home trainer/);
   assert.equal(Y.weekendWx({ time: [] }, days).every(d => !d.ok), true); assert.match(Y.weekendAnswer([]), /Pas encore/);
   // détail heure par heure (déplié au clic) : 9 h à 17 h, heures de pluie marquées
   L = Y.weekendWx(mk(sec, pluie), days);
-  assert.equal(L[1].hours.length, 9); assert.equal(L[1].hours[0].h, 9); assert.equal(L[1].hours.filter(x => !x.dry).length, 5, "pluie de 13 h à 17 h");
-  const th = Y.wxHoursHtml(L[1]); assert.equal((th.match(/<tr class="wet">/g) || []).length, 5); assert.match(th, /<td>9 h<\/td><td>12<\/td><td>–<\/td>/); assert.match(th, /<td>13 h<\/td><td>12<\/td><td>1[,.]5 mm <small>90 %<\/small><\/td><td>18 O<\/td>/);
+  assert.equal(L[1].hours.length, 9); assert.equal(L[1].hours[0].h, 9); assert.equal(L[1].hours.filter(x => !x.dry).length, 6, "pluie de 12 h à 18 h : l'heure 12 h-13 h prend la pluie de l'étiquette 13 h");
+  const th = Y.wxHoursHtml(L[1]); assert.equal((th.match(/<tr class="wet">/g) || []).length, 6); assert.match(th, /<td>9 h<\/td><td>12<\/td><td>–<\/td>/); assert.match(th, /<td>13 h<\/td><td>12<\/td><td>1[,.]5 mm <small>90 %<\/small><\/td><td>18 O<\/td>/);
   assert.equal(Y.wxHoursHtml({ ok: false }), "");
   assert.equal(Y.wxMoreUrl(48.1173, -1.6778), "https://www.meteoblue.com/fr/meteo/semaine/48.12N1.68W");
 }

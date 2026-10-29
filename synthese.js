@@ -510,7 +510,7 @@ async function loadWx() {
   let j = null; try { const c = JSON.parse(localStorage.getItem(K_WX)); if (c && c.key === key && Date.now() - c.at < WX.ttl) j = c.j; } catch (e) {}
   if (!j) {
     try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m&start_date=${a}&end_date=${b}&timezone=Europe%2FParis&models=meteofrance_arome_france_hd,best_match`);
-      if (!r.ok) return; j = arome((await r.json()).hourly); if (!j) return; lsSet(K_WX, JSON.stringify({ key, at: Date.now(), j })); } catch (e) { return; }
+      if (!r.ok) return; const J = await r.json(); j = arome(J.hourly); if (!j) return; j.off = J.utc_offset_seconds; lsSet(K_WX, JSON.stringify({ key, at: Date.now(), j })); } catch (e) { return; }
   }
   const el = document.getElementById("syWx"); if (!el) return;
   const L = weekendWx(j, days); if (!L.some(d => d.ok)) return;
@@ -679,7 +679,7 @@ function gather() {
 // Fenêtre de sortie : 9 h-18 h. Verdict par jour, seuils simples : bon = sec (< 1 mm, risque < 50 %), vent < 30 km/h, rafales < 55, au moins 6 °C ;
 // mauvais = 5 mm ou plus, moins de 3 h sèches, vent ≥ 40 km/h, rafales ≥ 70 ou moins de 2 °C ; sinon mitigé.
 const WX = { from: 9, to: 18, dryMm: .2, dryPct: 40, good: { mm: 1, pct: 50, wind: 30, gust: 55, t: 6 }, bad: { mm: 5, dryH: 3, wind: 40, gust: 70, t: 2 }, ttl: 36e5, far: 4, speed: 27 };   // speed : vitesse supposée pour la tenue (km/h)
-const K_WX = "synWx";
+const K_WX = "synWx2";  // v2 : décalage horaire d'Open-Meteo gardé avec la réponse
 const DIRS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
 const windFrom = deg => { const d = DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8]; return (/^[eo]/.test(d) ? "d'" : "de ") + d; };
 // samedi et dimanche à venir (aujourd'hui compris) ; le dimanche à partir de 17 h, c'est le week-end suivant
@@ -693,10 +693,13 @@ function weekendDays(now) {
 // h : réponse horaire d'Open-Meteo (time en heure locale « AAAA-MM-JJTHH:MM ») ; days : dates locales
 function weekendWx(h, days) {
   return days.map(dt => {
-    const key = ymd(dt), I = [];
-    (h.time || []).forEach((t, i) => { const hr = +t.slice(11, 13); if (t.slice(0, 10) === key && hr >= WX.from && hr < WX.to) I.push(i); });
+    // heure réelle de chaque étiquette (décalage unique d'Open-Meteo, faux de l'autre côté d'un changement d'heure)
+    const key = ymd(dt), I = [], at = t => h.off != null ? new Date(Date.parse(t + "Z") - h.off * 1000) : new Date(t);
+    (h.time || []).forEach((t, i) => { const d = at(t), hr = d.getHours(); if (ymd(d) === key && hr >= WX.from && hr < WX.to) I.push(i); });
     if (!I.length || I.some(i => h.temperature_2m[i] == null)) return { dt, key, ok: false };
-    const v = k => I.map(i => +h[k][i] || 0), T = v("temperature_2m"), P = v("precipitation"), PP = v("precipitation_probability"), W = v("wind_speed_10m"), G = v("wind_gusts_10m");
+    // pluie et risque : cumul de l'heure qui précède l'étiquette, donc l'étiquette suivante pour l'heure qui commence
+    const v = k => I.map(i => +h[k][i] || 0), nx = k => I.map(i => +(h[k][i + 1] ?? h[k][i]) || 0);
+    const T = v("temperature_2m"), P = nx("precipitation"), PP = nx("precipitation_probability"), W = v("wind_speed_10m"), G = v("wind_gusts_10m");
     const rain = P.reduce((a, b) => a + b, 0), pct = Math.max(...PP), wind = W.reduce((a, b) => a + b, 0) / W.length, gust = Math.max(...G);
     const dir = (() => { let x = 0, y = 0; I.forEach(i => { const r = (+h.wind_direction_10m[i] || 0) * Math.PI / 180; x += Math.sin(r); y += Math.cos(r); }); return Math.atan2(x, y) * 180 / Math.PI; })();
     const dry = I.map((_, k) => P[k] < WX.dryMm && PP[k] < WX.dryPct);
@@ -704,9 +707,9 @@ function weekendWx(h, days) {
     const dryH = dry.filter(Boolean).length, tmin = Math.min(...T), tmax = Math.max(...T);
     const g = WX.good, b = WX.bad;
     const verdict = rain < g.mm && pct < g.pct && wind < g.wind && gust < g.gust && tmax >= g.t ? "good"
-      : rain >= b.mm || dryH < b.dryH || wind >= b.wind || gust >= b.gust || tmax < b.t ? "bad" : "mid";
+      : rain >= b.mm || (dryH < b.dryH && rain >= g.mm) || wind >= b.wind || gust >= b.gust || tmax < b.t ? "bad" : "mid";
     const win = best ? { from: WX.from + best.a, to: WX.from + best.b + 1 } : null;
-    const hours = I.map((i, k) => ({ h: WX.from + k, t: T[k], mm: P[k], pct: PP[k], wind: W[k], gust: G[k], dir: +h.wind_direction_10m[i] || 0, dry: dry[k] }));
+    const hours = I.map((i, k) => ({ h: at(h.time[i]).getHours(), t: T[k], mm: P[k], pct: PP[k], wind: W[k], gust: G[k], dir: +h.wind_direction_10m[i] || 0, dry: dry[k] }));
     return { dt, key, ok: true, verdict, rain, pct, wind, gust, dir, tmin, tmax, dryH, win, hours };
   });
 }
