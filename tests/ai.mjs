@@ -25,7 +25,7 @@ const c2 = {
       { name: "models/text-embedding-9", supportedGenerationMethods: ["embedContent"] }] });
     const g = gen(); return res(g.code, g.body); } },
   ContentService: { createTextOutput: t => ({ setMimeType() { return JSON.parse(t); } }), MimeType: { JSON: 1 } },
-  LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) }, SpreadsheetApp: {},
+  LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) }, SpreadsheetApp: {}, Logger: { log() {} },
 };
 vm.createContext(c2); vm.runInContext(readFileSync(new URL("../apps-script/sync.gs", import.meta.url), "utf8"), c2);
 const post = b => c2.doPost({ postData: { contents: JSON.stringify({ k: props.SYNC_KEY, ...b }) } });
