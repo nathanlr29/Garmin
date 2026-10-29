@@ -285,13 +285,109 @@ function telOf(t) {  // { href: "tel:+33299…", txt: "02 99 …" }
 const osmUrl = id => { const m = /^([nwr])(\d+)$/.exec(id || ""); return m ? `https://www.openstreetmap.org/${{ n: "node", w: "way", r: "relation" }[m[1]]}/${m[2]}` : null; };
 function linksHtml(p, noHours) {
   const h = noHours ? "" : p.hrs ?? hoursLine(p), w = webUrl(p.t), tel = telOf(p.t), osm = osmUrl(p.id), A = (u, x) => `<a href="${esc(u)}" target="_blank" rel="noopener">${x}</a>`;
-  return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(gmapsUrl(p), "Google Maps")}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
+  return `<div class="stx">${h ? `<span class="sth">${esc(h)}</span>` : ""}${A(p.g && p.g.url || gmapsUrl(p), "Google Maps")}${!p.g && SHOP_K.has(p.k) && gKey() ? `<button class="stgchk" data-gchk="${esc(p.id)}">vérifier sur Google</button>` : ""}${w ? A(w, "site") : ""}${tel ? `<a href="${esc(tel.href)}">${esc(tel.txt)}</a>` : ""}${osm && SHOP_K.has(p.k) ? A(osm, "corriger sur OSM") : ""}</div>`;
 }
 function statusTxt(p) {
-  const o = p.oh; if (!o) return p.k === "cemetery" ? (p.winter ? "eau souvent coupée l'hiver" : "robinet probable, non garanti") : p.t.seasonal && p.t.seasonal !== "no" ? "saisonnier" : "";
+  const o = p.oh; if (o && o.dead) return p.hrs;
+  if (!o) return p.k === "cemetery" ? (p.winter ? "eau souvent coupée l'hiver" : "robinet probable, non garanti") : p.t.seasonal && p.t.seasonal !== "no" ? "saisonnier" : "";
   if (o.open === true) return o.next && sameDay(o.next, p.t0) ? `ouvert jusqu'à ${hh(o.next)}` : "ouvert";
   if (o.open === false) return o.next && sameDay(o.next, p.t0) ? `fermé (ouvre à ${hh(o.next)})` : "fermé à ce moment-là";
   return "horaires à vérifier";
+}
+
+// ------------------------------------------------------------------ Vérification Google (Places API New), demande de Nathan du 29/10/2026
+// OSM ne sait pas qu'une boulangerie a fermé ou changé d'horaires. Avec une clé Google saisie sur l'appareil (localStorage, jamais dans
+// le dépôt ; limitée au site, à Places et à un quota quotidien dans Google Cloud), les commerces des arrêts conseillés sont vérifiés
+// d'office et les autres à la demande (« vérifier sur Google »). Rien n'est gardé au-delà de la page (conditions de Google).
+const K_GKEY = "gpKey", G_BOX = 250;
+const gKey = () => { const k = LS.get(K_GKEY, ""); return typeof k === "string" && /^[\w-]{20,80}$/.test(k) ? k : ""; };
+const G = new Map(), GV = new Map();  // requêtes de la page (en cours ou faites) et résultats, par id OSM
+const G_Q = { bakery: "boulangerie", shop: "épicerie", fuel: "station-service", cafe: "café", mcdo: "McDonald's", bikeshop: "magasin de vélo" };
+const G_STOP = new Set(["boulangerie", "patisserie", "epicerie", "cafe", "bar", "tabac", "presse", "brasserie", "station", "service", "magasin", "cycles", "velo", "chez", "les", "des", "aux"]);
+const normN = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+// le lieu Google qui correspond au point OSM : le plus proche à moins de G_BOX m ; si le point OSM a un nom, il doit ressembler
+// (un mot de plus de 3 lettres en commun, hors mots génériques) ou le lieu être à moins de 40 m
+function gMatch(places, p) {
+  const n = normN(p.t.name), words = n.split(" ").filter(w => w.length > 3 && !G_STOP.has(w));
+  const like = q => { const m = normN(q.displayName && q.displayName.text); return !!m && (m === n || words.some(w => m.split(" ").includes(w))); };
+  let best = null, bc = Infinity;
+  (places || []).forEach(q => { const l = q.location; if (!l) return;
+    const d = dist([p.lat, p.lon], [l.latitude, l.longitude]), ok = !n || like(q) || d < 40; if (d > G_BOX || !ok) return;
+    const c = d - (n && like(q) ? 300 : 0); if (c < bc) { bc = c; best = q; } });
+  return best;
+}
+// plages d'ouverture (minutes) du jour de t d'après les « periods » de Google (jour 0 = dimanche) ; null sans horaires
+function gDay(oh, t) {
+  const P = oh && oh.periods; if (!P || !P.length) return null;
+  if (P.length === 1 && P[0].open && !P[0].close) return [[0, 1440]];  // 24 h/24
+  const dow = t.getDay(), out = [], mn = x => (x.hour || 0) * 60 + (x.minute || 0);
+  P.forEach(({ open: o, close: c }) => { if (!o || !c) return;
+    let span = ((c.day - o.day + 7) % 7) * 1440 + mn(c) - mn(o); if (span <= 0) span += 7 * 1440;
+    const a = mn(o);
+    if (o.day === dow) out.push([a, Math.min(1440, a + span)]);
+    else if ((o.day + 1) % 7 === dow && a + span > 1440) out.push([0, Math.min(1440, a + span - 1440)]);  // ouvert depuis la veille
+  });
+  return out.sort((x, y) => x[0] - y[0]);
+}
+function gState(R, t) {
+  const now = t.getHours() * 60 + t.getMinutes(), at = m => { const d = new Date(t); d.setHours(0, m, 0, 0); return d; };
+  for (const [a, b] of R) if (now >= a && now < b) return { open: true, next: at(b) };
+  const nx = R.find(([a]) => a > now); return { open: false, next: nx ? at(nx[0]) : null };
+}
+// applique un résultat Google au point : statut, état au passage, ligne d'horaires ; Google sans horaires : on garde ceux d'OSM
+function gApply(p, g, now = new Date()) {
+  p.g = g; if (!g) return;
+  if (g.miss) { p.hrs = (p.hrs && !/^horaires inconnus/.test(p.hrs) ? p.hrs + " · " : "") + "absent de Google : peut-être fermé"; return; }
+  if (g.st === "CLOSED_PERMANENTLY" || g.st === "CLOSED_TEMPORARILY") { p.oh = { open: false, dead: true }; p.hrs = `fermé ${g.st === "CLOSED_PERMANENTLY" ? "définitivement" : "temporairement"} (Google)`; return; }
+  // horaires de la semaine qui vient (jours fériés, congés) si la sortie y est, sinon les horaires habituels
+  const cur = g.cur && g.cur.periods && g.cur.periods.length && p.t0 - now < 6 * 864e5 ? g.cur : null, R = gDay(cur || g.reg, p.t0);
+  if (!R) return;
+  p.oh = gState(R, p.t0);
+  const w = dayWord(p.t0, now);
+  p.hrs = (R.length === 1 && R[0][0] === 0 && R[0][1] >= 1440 ? `${w} ouvert 24 h/24` : R.length ? `${w} ${R.map(([a, b]) => `${hMin(a)}-${hMin(b)}`).join(", ")}`
+    : `fermé ${/^(aujourd|demain)/.test(w) ? w : "le " + w}`) + " (Google)";
+}
+function gFetch(p) {
+  if (G.has(p.id)) return G.get(p.id);
+  const dl = G_BOX / 110540, dn = G_BOX / (111320 * Math.cos(rad(p.lat)));
+  const pr = fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST",
+    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": gKey(), "X-Goog-FieldMask": "places.displayName,places.location,places.businessStatus,places.regularOpeningHours,places.currentOpeningHours,places.googleMapsUri" },
+    body: JSON.stringify({ textQuery: p.t.name || G_Q[p.k] || p.name, languageCode: "fr", regionCode: "FR", pageSize: 5,
+      locationRestriction: { rectangle: { low: { latitude: p.lat - dl, longitude: p.lon - dn }, high: { latitude: p.lat + dl, longitude: p.lon + dn } } } }) })
+    .then(async r => { const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error((j.error && j.error.message) || "Google " + r.status), { status: r.status });
+      const q = gMatch(j.places, p);
+      const g = q ? { st: q.businessStatus || "OPERATIONAL", url: /^https:\/\//.test(q.googleMapsUri || "") ? q.googleMapsUri : null, reg: q.regularOpeningHours || null, cur: q.currentOpeningHours || null } : { miss: true };
+      GV.set(p.id, g); return g; });
+  G.set(p.id, pr); pr.catch(() => G.delete(p.id));
+  return pr;
+}
+const gErrTxt = e => e.status === 429 ? "quota Google du jour atteint" : e.status === 403 ? "clé refusée (restriction au site ou Places API (New) non activée)"
+  : e.status === 400 ? "clé Google invalide" : "Google ne répond pas";
+// commerces des arrêts conseillés : vérifiés ; un conseillé fermé est remplacé (advise l'écarte), puis le nouveau est vérifié à son tour
+async function gCheck(seq) {
+  if (!gKey() || !ST.ctx) return;
+  let ran = false;
+  try {
+    for (let round = 0; round < 4; round++) {
+      const todo = ST.adv.map(a => a.p).filter(p => SHOP_K.has(p.k) && !p.g);
+      if (!todo.length) break;
+      ran = ST.gRun = true; render();
+      const res = await Promise.all(todo.map(gFetch));
+      if (seq !== ST.seq) return;
+      todo.forEach((p, i) => gApply(p, res[i]));
+      ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut);
+    }
+    ST.gErr = "";
+  } catch (e) { if (seq !== ST.seq) return; console.warn("Google Places", e); ST.gErr = gErrTxt(e); }
+  if (!ran) return;
+  ST.gRun = false; render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone();
+}
+async function gOne(id) {
+  const p = ST.stops.find(q => q.id === id), seq = ST.seq; if (!p || !gKey()) return;
+  try { const g = await gFetch(p); if (seq !== ST.seq) return; gApply(p, g); ST.gErr = ""; ST.adv = advise(ST.stops, ST.ctx.r, ST.ctx.nut); }
+  catch (e) { if (seq !== ST.seq) return; ST.gErr = gErrTxt(e); }
+  render(); drawMap(); ST.ctx.onDone && ST.ctx.onDone(); gCheck(seq);
 }
 
 // ------------------------------------------------------------------ Placement sur le parcours
@@ -324,8 +420,8 @@ function advise(L, r, nut) {
   const town = p => L.filter(q => q !== p && q.cat !== "voir" && dist([p.lat, p.lon], [q.lat, q.lon]) < 300).length >= 2 ? -8 : 0;
   const pick = (cands, target, cost) => { let best = null, bc = Infinity; cands.forEach(p => { if (used.has(p.id) || !inRange(p)) return; const c = Math.abs(atH(p) - target) * 40 + p.off / 15 + cost(p) + town(p); if (c < bc) { bc = c; best = p; } }); return best; };
   const cap = nut ? nut.cap : 1.2, drink = nut ? nut.drink : .6, rate = nut ? nut.rate : 0;
-  const shut = p => p.oh && p.oh.open === false, known = p => p.oh && p.oh.open === true;
-  const refill = p => p.k === "water" ? 0 : p.k === "cemetery" ? 25 + (p.winter ? 30 : 0) : p.cat === "ravito" ? (shut(p) ? Infinity : (known(p) ? 8 : 22) + (p.k === "fuel" ? 8 : 0)) : Infinity;
+  const shut = p => p.oh && p.oh.open === false, known = p => p.oh && p.oh.open === true, gone = p => p.g && p.g.miss ? 30 : 0;  // absent de Google
+  const refill = p => p.k === "water" ? 0 : p.k === "cemetery" ? 25 + (p.winter ? 30 : 0) : p.cat === "ravito" ? (shut(p) ? Infinity : (known(p) ? 8 : 22) + (p.k === "fuel" ? 8 : 0) + gone(p)) : Infinity;
   // eau : vers le milieu des longues sorties, plus tôt s'il fait chaud ou si les bidons sont vides avant
   if (h > MIN_H || (hot && h > MIN_H_HOT)) {
     const empty = cap / drink;
@@ -339,7 +435,7 @@ function advise(L, r, nut) {
   }
   // ravitaillement ouvert au-delà de 3 h
   if (h > 3 && adv.length < 3) {
-    const shop = p => p.cat !== "ravito" || shut(p) ? Infinity : (known(p) ? 0 : 20) + (p.k === "fuel" ? 8 : 0) + (p.k === "bakery" || p.k === "shop" || p.k === "mcdo" ? 0 : 4);
+    const shop = p => p.cat !== "ravito" || shut(p) ? Infinity : (known(p) ? 0 : 20) + gone(p) + (p.k === "fuel" ? 8 : 0) + (p.k === "bakery" || p.k === "shop" || p.k === "mcdo" ? 0 : 4);
     const same = adv.find(a => a.p.cat === "ravito" && Math.abs(atH(a.p) - h * .55) < .6);
     if (same) { same.role = "eau + ravito"; same.why += ` Profites-en pour acheter de quoi manger${rate ? ` (${rate} g de glucides par heure)` : ""}.`; }
     else { const f = pick(L, Math.max(early, h * .55), shop);
@@ -389,7 +485,9 @@ function render() {
   const on = catsOn(), L_ = ST.list, cnt = c => L_.filter(p => p.cat === c).length;
   if (info) info.textContent = ST.stops.length ? `${ST.stops.length} à moins de ${NEAR} m du tracé` : "";
   const shown = L_.filter(p => on[p.cat] && p.cat !== "voir"), lim = ST.showAll ? shown.length : 10, nut = ST.ctx.nut;
-  box.innerHTML = `${ST.adv.length ? `<div class="stadv">${ST.adv.map(a => `<div class="stac"><div class="stach"><span class="stbadge">Arrêt conseillé · ${esc(a.role)}</span></div>${row(a.p, true)}<p>${esc(a.why)}</p></div>`).join("")}</div>`
+  const dead = ST.stops.filter(p => p.oh && p.oh.dead);  // vérifiés fermés : écartés des arrêts conseillés
+  box.innerHTML = `${ST.gRun ? `<p class="note">Vérification des commerces sur Google…</p>` : ST.gErr ? `<p class="note">Vérification Google impossible : ${esc(ST.gErr)}. Horaires OpenStreetMap seulement.</p>` : ""}
+    ${dead.length ? `<p class="sosmall">Écarté${dead.length > 1 ? "s" : ""}, fermé${dead.length > 1 ? "s" : ""} selon Google : ${dead.map(p => `${esc(p.name)} (km ${fmt(p.km, 1)})`).join(", ")}.</p>` : ""}${ST.adv.length ? `<div class="stadv">${ST.adv.map(a => `<div class="stac"><div class="stach"><span class="stbadge">Arrêt conseillé · ${esc(a.role)}</span></div>${row(a.p, true)}<p>${esc(a.why)}</p></div>`).join("")}</div>`
       : `<p class="sosmall">${ST.ctx.r.secs <= MIN_H * 3600 ? "Sortie de moins de 2 h 15 : pas besoin de s'arrêter, 1 ou 2 bidons suffisent." : "Aucun point d'eau ni commerce ouvert trouvé au bon moment près du tracé : pars avec les bidons pleins et prévois un arrêt dans un bourg."}</p>`}
     ${nut && ST.ctx.r.secs >= 2 * 3600 ? `<p class="note stnut">Calé sur la carte Nutrition : ${fmt(nut.drink * 1000)} ml/h à boire${nut.rate ? `, ${nut.rate} g de glucides par heure` : ""}.</p>` : ""}
     <label class="stdec"><input type="checkbox" id="stDec" ${decouv() ? "checked" : ""}><span><b>Pause découverte</b><small>3 à 5 lieux à voir près du tracé (château, mégalithe, chapelle, point de vue…), avec une anecdote Wikipédia</small></span></label>
@@ -398,14 +496,16 @@ function render() {
     <div class="stchips" role="group" aria-label="Catégories affichées">${Object.entries(CATS).filter(([k]) => k !== "voir" || decouv()).map(([k, c]) => `<button class="stchip" data-cat="${k}" aria-pressed="${!!on[k]}" style="--c:${c.col}">${c.ic} ${c.l} <small>${cnt(k)}</small></button>`).join("")}</div>
     ${shown.length ? `<div class="stlist">${shown.slice(0, lim).map(p => row(p)).join("")}</div>${shown.length > lim ? `<button class="btn2 stmore" id="stMore">Afficher les ${shown.length} points</button>` : ""}` : `<p class="note">Rien dans ces catégories près du tracé.</p>`}
     </details>
-    <p class="note">Données OpenStreetMap, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
-    ${HELP}`;
+    <p class="note">Données OpenStreetMap${gKey() ? ", commerces conseillés vérifiés sur Google (« (Google) » sur les horaires)" : ""}, à vérifier sur place (horaires et robinets peuvent changer). Coche « GPS » pour l'ajouter à l'export ; les arrêts conseillés y sont déjà.</p>
+    ${gHtml()}${HELP}`;
   box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => { const k = b.dataset.cat, c = LS.get(K_CAT, {}); c[k] = !catsOn()[k]; LS.set(K_CAT, c); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); });
   box.querySelectorAll("[data-gps]").forEach(i => i.onchange = () => { setGps(i.dataset.gps, i.checked); box.querySelectorAll(`[data-gps="${i.dataset.gps}"]`).forEach(x => x.checked = i.checked); });
   box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const m = ST.mk && ST.mk[b.dataset.go], map = ST.ctx.map; if (!m || !map) return;
     map.setView(m.getLatLng(), Math.max(map.getZoom(), 14)); m.openTooltip();
     const rc = map.getContainer().getBoundingClientRect(); if (rc.bottom < 0 || rc.top > innerHeight) map.getContainer().scrollIntoView({ behavior: "smooth", block: "center" }); });
   $("stAll").ontoggle = e => { if (e.target.open === allOn()) return; LS.set(K_ALL, e.target.open); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); };
+  box.querySelectorAll("[data-gchk]").forEach(b => b.onclick = () => { b.disabled = true; b.textContent = "vérification…"; gOne(b.dataset.gchk); });
+  gBind(box);
   if ($("stMore")) $("stMore").onclick = () => { ST.showAll = true; render(); };
   $("stDec").onchange = e => { LS.set(K_DEC, e.target.checked); if (e.target.checked) update(ST.ctx); else { setList(); render(); drawMap(); ST.ctx.onIcons && ST.ctx.onIcons(); } };
 }
@@ -416,6 +516,28 @@ function voirHtml() {
   if (!V.length) return `<p class="note">Pas de lieu avec une fiche Wikipédia à moins de ${VOIR} m du tracé.</p>`;
   return `<div class="stvoir"><div class="stbadge">À voir en chemin</div>${V.map(p => `<div class="stvc">${row(p)}${p.wiki.x ? `<p>${esc(p.wiki.x)}</p>` : ""}<a href="${esc(p.wiki.url)}" target="_blank" rel="noopener">En savoir plus sur Wikipédia ↗</a></div>`).join("")}</div>`;
 }
+// réglage de la clé Google (cet appareil seulement)
+function gHtml() {
+  const k = gKey();
+  return `<details class="sthelp" id="stG"${ST.gOpen ? " open" : ""}><summary>${k ? "Vérification Google activée" : "Vérifier les commerces sur Google"}</summary>
+  <p class="sosmall">${k ? "Les commerces des arrêts conseillés sont vérifiés d'office (fermé définitivement, horaires du jour) ; touche « vérifier sur Google » pour les autres. Clé enregistrée sur cet appareil seulement."
+    : "OpenStreetMap ne sait pas toujours qu'un commerce a fermé ou changé d'horaires. Avec ta clé Google, les arrêts conseillés sont vérifiés (5 à 10 requêtes par sortie, 1 000 gratuites par mois)."}</p>
+  ${k ? `<button class="btn2" id="stGDel">Retirer la clé de cet appareil</button>` : `<ol>
+    <li>Sur <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> : crée un projet, puis active <b>Places API (New)</b> (Google demande une carte bancaire).</li>
+    <li>API et services → Identifiants → Créer une clé API. Restreins-la : sites web <b>https://nathanlr29.github.io/*</b>, API <b>Places API (New)</b> seulement.</li>
+    <li>Quotas de Places API (New) : « Text Search » à <b>50 requêtes par jour</b>. Tu restes ainsi dans la tranche gratuite.</li>
+    <li>Colle la clé ici (à refaire sur chaque appareil, elle n'est jamais publiée).</li></ol>
+  <div class="stgkey"><input id="stGKey" type="password" autocomplete="off" spellcheck="false" placeholder="Clé API Google (AIza…)"><button class="btn2" id="stGSet">Enregistrer</button></div>
+  <p class="note" id="stGMsg"></p>`}</details>`;
+}
+function gBind(box) {
+  const d = box.querySelector("#stG"); if (!d) return;
+  d.ontoggle = () => { ST.gOpen = d.open; };
+  const del = box.querySelector("#stGDel"); if (del) del.onclick = () => { try { localStorage.removeItem(K_GKEY); } catch (e) {} ST.gErr = ""; render(); };
+  const set = box.querySelector("#stGSet"); if (set) set.onclick = () => { const v = box.querySelector("#stGKey").value.trim();
+    if (!/^[\w-]{20,80}$/.test(v)) { box.querySelector("#stGMsg").textContent = "Ce n'est pas une clé API Google (elle commence en général par AIza)."; return; }
+    LS.set(K_GKEY, v); ST.gErr = ""; render(); gCheck(ST.seq); };
+}
 const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</summary><ol>
   <li><b>Exporte</b> avec « Exporter pour Garmin (.fit) » en haut de la page : les arrêts cochés deviennent des points de parcours typés (eau, nourriture, toilettes…). Le GPX marche aussi, mais il perd souvent les types.</li>
   <li><b>Importe</b> dans Garmin Connect sur ordinateur : Entraînement et planification → Parcours → Importer → choisis le fichier → Enregistrer. Vérifie que les points apparaissent le long du tracé.</li>
@@ -423,7 +545,7 @@ const HELP = `<details class="sthelp"><summary>Avoir les alertes sur ton Edge</s
 </ol><p class="note">Sans ordinateur : branche l'Edge en USB et copie le .fit dans le dossier Garmin/NewFiles.</p></details>`;
 function annotate() {
   const { P, r } = ST.ctx, all = place(ST.poi, P, r);
-  all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; p.hrs = hoursLine(p); });
+  all.forEach(p => { p.oh = p.t.opening_hours ? ohState(p.t.opening_hours, p.t0, p.lat, p.lon) : null; p.hrs = hoursLine(p); if (GV.has(p.id)) gApply(p, GV.get(p.id)); });
   ST.stops = all.filter(p => p.cat !== "voir"); ST.cands = all.filter(p => p.cat === "voir");
   ST.adv = advise(ST.stops, r, ST.ctx.nut);
   // lieux déjà choisis : on garde le choix, avec km et heure de passage à jour
@@ -510,6 +632,7 @@ async function update(ctx, retry) {
     annotate();
   } catch (e) { if (seq !== ST.seq) return; console.error(e); ST.err = "Points d'arrêt illisibles pour ce parcours."; ST.key = null; render(); return; }
   render(); drawMap(); ctx.onDone && ctx.onDone();
+  gCheck(seq);
   if (decouv()) findVoir(seq);
 }
 // icônes sur le profil : [{x (m), ic, adv}]
@@ -540,5 +663,5 @@ function gpsPoints() {
 }
 // pour la carte Nutrition : où remplir les bidons
 function advice() { return ST.ctx && ST.poi ? ST.adv : []; }
-window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf };
+window.Arrets = { update, icons, advice, gpsPoints, _shortName: shortName, _voirKind: voirKind, _anecdote: anecdote, _ohSimple: ohSimple, _hoursLine: hoursLine, _ohBrief: ohBrief, _gmapsUrl: gmapsUrl, _webUrl: webUrl, _telOf: telOf, _linksHtml: linksHtml, _osmUrl: osmUrl, _place: place, _advise: advise, _corridor: corridor, _overpass: overpass, _fetchPois: fetchPois, _kindOf: kindOf, _gMatch: gMatch, _gDay: gDay, _gApply: gApply };
 })();

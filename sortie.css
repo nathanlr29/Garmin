@@ -199,3 +199,8 @@
 #sortie .stall>summary{cursor:pointer;font-weight:700;font-size:14px;min-height:36px;display:flex;align-items:center;gap:6px}
 #sortie .stall>summary small{font-weight:600;color:var(--muted)}
 #sortie .stall[open]>summary{margin-bottom:6px}
+#sortie .stx .stgchk{background:none;border:0;padding:5px 0;font:inherit;font-weight:600;color:var(--accent-ink);cursor:pointer}
+#sortie .stx .stgchk:disabled{color:var(--muted);cursor:default}
+#sortie .stgkey{display:flex;gap:8px;margin-top:8px}
+#sortie .stgkey input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit}
+#sortie .sthelp > .sosmall{margin:8px 0}

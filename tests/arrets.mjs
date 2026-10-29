@@ -134,3 +134,38 @@ assert.equal(A._kindOf({ amenity: "fast_food", name: "Kebab du port" }), null);
   const a2 = A._advise(L2, r, { drink: .6, cap: 1.2, rate: 60, water: 2.4 }), rv = a2.find(a => a.role === "ravito");
   assert.equal(rv && rv.p.name, "McDonald's", "McDo préféré au bar"); assert.match(rv.why, /toilettes/); }
 console.log("arrets mcdo ok");
+
+// 7) vérification Google (Places API New) : correspondance, horaires, commerce fermé écarté des arrêts conseillés
+{ const p = { id: "n1", k: "bakery", lat: 48.1, lon: -1.68, t: { name: "Boulangerie Le Fournil de Bréal" }, t0: at("2026-10-31T10:30") };
+  const loc = (m, name, x = {}) => ({ displayName: { text: name }, location: { latitude: 48.1 + m / 110540, longitude: -1.68 }, ...x });
+  assert.equal(A._gMatch([loc(60, "Crêperie du Bourg"), loc(120, "Le Fournil de Bréal")], p).displayName.text, "Le Fournil de Bréal", "nom ressemblant préféré au plus proche");
+  assert.equal(A._gMatch([loc(60, "Boulangerie Martin")], p), null, "« boulangerie » seul ne suffit pas");
+  assert.equal(A._gMatch([loc(20, "Boulangerie Martin")], p).displayName.text, "Boulangerie Martin", "à moins de 40 m : même lieu");
+  assert.equal(A._gMatch([loc(400, "Le Fournil de Bréal")], p), null, "trop loin");
+  assert.equal(A._gMatch([loc(150, "Boulangerie Martin")], { ...p, t: {} }).displayName.text, "Boulangerie Martin", "point OSM sans nom : le plus proche");
+  // horaires Google : mardi-samedi 7h-13h et 15h-19h30, dimanche 7h-12h30 ; bar ouvert jusqu'à 1 h du matin le samedi
+  const per = (d, a, b, d2 = d) => ({ open: { day: d, hour: a[0], minute: a[1] }, close: { day: d2, hour: b[0], minute: b[1] } });
+  const reg = { periods: [2, 3, 4, 5, 6].flatMap(d => [per(d, [7, 0], [13, 0]), per(d, [15, 0], [19, 30])]).concat([per(0, [7, 0], [12, 30])]) };
+  assert.equal(JSON.stringify(A._gDay(reg, at("2026-10-31T10:00"))), JSON.stringify([[420, 780], [900, 1170]]), "samedi");
+  assert.equal(JSON.stringify(A._gDay(reg, at("2026-10-26T10:00"))), JSON.stringify([]), "lundi : fermé");
+  assert.equal(JSON.stringify(A._gDay({ periods: [per(6, [18, 0], [1, 0], 0)] }, at("2026-11-01T00:30"))), JSON.stringify([[0, 60]]), "ouvert depuis la veille");
+  assert.equal(JSON.stringify(A._gDay({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] }, at("2026-10-31T03:00"))), JSON.stringify([[0, 1440]]), "24 h/24");
+  const now = at("2026-10-29T12:00");
+  const q = { ...p }; A._gApply(q, { st: "OPERATIONAL", reg }, now);
+  assert.equal(q.oh.open, true); assert.equal(q.oh.next.getHours(), 13); assert.equal(q.hrs, "samedi 7h-13h, 15h-19h30 (Google)");
+  const c = { ...p, oh: { open: true } }; A._gApply(c, { st: "CLOSED_PERMANENTLY" }, now);
+  assert.equal(c.oh.open, false); assert.equal(c.hrs, "fermé définitivement (Google)");
+  const m = { ...p, hrs: "horaires inconnus, vois Google Maps" }; A._gApply(m, { miss: true }, now); assert.equal(m.hrs, "absent de Google : peut-être fermé");
+  const o = { ...p, hrs: "samedi 7h-19h", oh: { open: true } }; A._gApply(o, { st: "OPERATIONAL", reg: null }, now); assert.equal(o.hrs, "samedi 7h-19h", "Google sans horaires : OSM gardé");
+  // la boulangerie conseillée est fermée définitivement : l'autre prend sa place
+  const els3 = [node(.48, 30, { amenity: "drinking_water", name: "Fontaine" }), node(.57, 20, { shop: "bakery", name: "Fermée", opening_hours: "Mo-Su 07:00-19:00" }), node(.6, 60, { shop: "bakery", name: "Autre", opening_hours: "Mo-Su 07:00-19:00" })];
+  const L3 = A._place(els3, P, r); L3.forEach(p => { p.oh = p.t.opening_hours ? A._ohSimple(p.t.opening_hours, p.t0) : null; });
+  const nut = { drink: .6, cap: 1.2, rate: 60, water: 2.4 };
+  assert.equal(A._advise(L3, r, nut).find(a => a.role === "ravito").p.name, "Fermée", "avant vérification");
+  A._gApply(L3.find(p => p.name === "Fermée"), { st: "CLOSED_PERMANENTLY" }, now);
+  assert.equal(A._advise(L3, r, nut).find(a => a.role === "ravito").p.name, "Autre", "après vérification");
+  // sans clé : pas de bouton « vérifier sur Google » ; lien vers la fiche Google exacte quand elle est connue
+  assert.doesNotMatch(A._linksHtml({ ...p, k: "bakery" }), /data-gchk/);
+  assert.match(A._linksHtml({ ...p, g: { url: "https://maps.google.com/?cid=123" } }), /cid=123/);
+}
+console.log("arrets google ok");
