@@ -68,6 +68,19 @@
 #sortie .nuttab td{white-space:normal;text-align:left}#sortie .nuttab td:nth-child(-n+2){white-space:nowrap;color:var(--muted);width:1%;padding-right:12px}
 #sortie .nuttab td small{display:inline;color:var(--muted)}
 #sortie .nuttab tr.w td{color:var(--info)}
+#sortie .nutans{font-weight:600;color:var(--ink)}
+#sortie .nutmenu{margin-bottom:6px}#sortie .nutmenu td{text-align:left;white-space:normal;vertical-align:middle}
+#sortie .nutmenu td small{display:block;color:var(--muted);font-size:12px}
+#sortie .nutmenu td:nth-child(2){white-space:nowrap;width:1%}#sortie .nutmenu td:nth-child(3){white-space:nowrap;width:1%;text-align:right;color:var(--muted)}
+#sortie .nutmenu tr.ng td{color:var(--muted);font-size:13px;padding-top:12px}
+#sortie .nutmenu .nq b{display:inline-block;min-width:44px;text-align:center;font-family:"Barlow Condensed",sans-serif;font-size:17px}
+#sortie .nutmenu .nb{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font-size:17px;line-height:1;cursor:pointer;padding:0}
+#sortie .nutmenu .nb:disabled{opacity:.35;cursor:default}
+#sortie .nutbar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin-top:6px}
+#sortie .nutbar i{display:block;height:100%;background:var(--warn)}#sortie .nutbar.ok i{background:var(--good)}
+#sortie .nutgrid p.note{margin-top:6px}
+#sortie .nwarn{color:var(--bad)}
+#sortie .nreset{border:0;background:none;padding:0;color:var(--accent-ink);font:inherit;cursor:pointer;text-decoration:underline}
 /* Générateur de boucle */
 #sortie .sogen{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
 #sortie .sogen[hidden]{display:none}
