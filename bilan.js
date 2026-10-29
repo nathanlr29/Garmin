@@ -198,7 +198,8 @@ async function openRun(a, body) {
   const st = await stream(a.id), thr = Charge.params().runPace, an = st ? analyzeRun(st, thr) : null;
   body.innerHTML = headerRun(a) + tilesRun(a, an) + verdictRun(a, an) + (st ? `<section class="bm-sec"><h4>Déroulé <small>allure${st.h ? ", cardio" : ""}${st.a ? " et altitude" : ""}</small></h4><div id="bmChart"></div></section>` : "")
     + zonesRunHtml(a, an) + enduRunHtml(an) + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
-    + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
+    + aiHtml(a) + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
+  aiBind(a, body);
   if (st) chartRun(document.getElementById("bmChart"), st, thr);
 }
 
@@ -300,9 +301,50 @@ async function open(id) {
   body.innerHTML = header(a) + tiles(a, an) + verdict(a, an, co, plan) + (st ? `<section class="bm-sec"><h4>Déroulé <small>${st.p ? "puissance" : "vitesse"}${st.h ? " et cardio" : ""}${co ? " · en pointillés : le prévu" : ""}</small></h4><div id="bmChart"></div></section>` : "")
     + (co ? planTable(co) : "") + zonesHtml(a, an) + enduHtml(an) + (!isIndoor(a) && st && st.g ? `<section class="bm-sec" id="bmWind"><h4>Vent subi</h4><p class="note">Récupération de la météo du jour…</p></section>` : "")
     + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
-    + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
+    + aiHtml(a) + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
+  aiBind(a, body);
   if (st) chart(document.getElementById("bmChart"), st, co ? { plan, shift: co.shift } : null);
   if (!isIndoor(a) && st && st.g) { const w = await windFor(st).catch(() => null), box = document.getElementById("bmWind"); if (box) box.innerHTML = windHtml(a, w); }
+}
+// ------------------------------------------------------------------ Commentaire de l'entraîneur (IA, Gemini par l'Apps Script de synchro)
+// Demande de Nathan du 29/10/2026. À la demande seulement (bouton), jamais automatique. Le texte envoyé = ce que le bilan affiche
+// déjà (tuiles, constat, zones, prévu/réalisé), sans le nom de la sortie (il peut contenir un lieu), plus les objectifs du Plan.
+// La phrase calculée du bilan reste en premier ; le commentaire est étiqueté IA et rejeté s'il cite un chiffre absent du bilan.
+// Gardé sur l'appareil (aiNote:<id>, 40 au plus) pour ne pas redemander.
+const K_AI = "aiNote:";
+const numsOf = t => (String(t).replace(/(\d)[\s\u00a0\u202f](?=\d{3}\b)/g, "$1").match(/\d+(?:[.,]\d+)?/g) || []).map(x => x.replace(",", "."));
+// chiffres du commentaire absents du bilan (les petits entiers, « 3 séries », « 2e moitié », sont tolérés)
+function aiCheck(text, ctx) { const have = new Set(numsOf(ctx).map(x => String(+x))); return numsOf(text).filter(x => (+x >= 10 || /\./.test(x)) && !have.has(String(+x))); }
+function aiHtml(a) {
+  if (!window.Sync || !Sync.configured || !Sync.configured()) return "";
+  const c = LS.get(K_AI + a.id, null);
+  return `<section class="bm-sec" id="bmAi"><h4>Commentaire de l'entraîneur <small>IA (Gemini), à partir des chiffres ci-dessus</small></h4>
+    ${c && c.t ? `<p class="bm-p">${esc(c.t)}</p><button class="btn2" data-ai="1">Redemander</button>` : `<button class="btn2" data-ai="1">Demander un commentaire</button>`}<p class="note" id="bmAiMsg"></p></section>`;
+}
+function aiCtx(a, body) {
+  const box = body.cloneNode(true);
+  box.querySelectorAll("h3, #bmChart, .bm-foot, #bmAi, .bm-x, svg").forEach(e => e.remove());
+  const P = window.Plan, goal = P && P._cfg && P._cfg().goal, ftp = P && P.ftp ? P.ftp() : null;
+  const extra = [`Sport : ${isRun(a) ? "course à pied" : "vélo"}.`, ftp ? `FTP de travail : ${Math.round(ftp)} W.` : "",
+    goal && goal.ftp ? `Objectif : FTP ${goal.ftp} W${goal.vo2 ? `, VO2max ${goal.vo2}` : ""}${goal.date ? ` pour le ${goal.date}` : ""}.` : ""].filter(Boolean).join(" ");
+  // le clone n'est pas affiché : textContent sans retours à la ligne, on sépare nous-mêmes libellés, valeurs et paragraphes
+  box.querySelectorAll(".tile .l, .tile .v").forEach(e => e.append(" : "));
+  box.querySelectorAll(".tile, p, h4, li, tr, .bm-sub, [title]").forEach(e => { if (e.title) e.append(` (${e.title})`); e.append("\n"); });
+  return (extra + "\n" + box.textContent.replace(/[ \t]+/g, " ").replace(/ *\n[\s]*/g, "\n")).trim().slice(0, 5500);
+}
+function aiBind(a, body) {
+  const sec = body.querySelector("#bmAi"); if (!sec) return;
+  sec.querySelector("[data-ai]").onclick = async e => {
+    const btn = e.currentTarget, msg = sec.querySelector("#bmAiMsg"), ctx = aiCtx(a, body);
+    btn.disabled = true; msg.textContent = "L'entraîneur lit ton bilan…";
+    try {
+      const j = await Sync.ai({ kind: "seance", ctx }), bad = aiCheck(j.text, ctx);
+      if (bad.length) { msg.textContent = `Commentaire écarté : il cite des chiffres absents du bilan (${bad.slice(0, 3).join(", ")}). Redemande.`; btn.disabled = false; return; }
+      try { localStorage.setItem(K_AI + a.id, JSON.stringify({ t: j.text, at: Date.now(), m: j.model }));
+        const ks = Object.keys(localStorage).filter(k => k.startsWith(K_AI)).sort((x, y) => (LS.get(x, {}).at || 0) - (LS.get(y, {}).at || 0)); ks.slice(0, Math.max(0, ks.length - 40)).forEach(k => localStorage.removeItem(k)); } catch (err) {}
+      sec.outerHTML = aiHtml(a); aiBind(a, body);
+    } catch (err) { msg.textContent = "Commentaire indisponible : " + err.message + "."; btn.disabled = false; }
+  };
 }
 function noStreamWhy(a) {
   const days = (Date.now() - a.dt) / 864e5;
@@ -576,5 +618,5 @@ document.addEventListener("click", e => {
   e.preventDefault(); open(id);
 }, true);
 document.addEventListener("velo:loaded", () => { B.idx = null; B.cache = {}; });
-window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor, _prog: { ftpPts, efPts, bestAt, bestSteps, ftpAnswer, efTrend, efAnswer, decAnswer, profileType, profileHtml, spreadLabels, PG }, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
+window.Bilan = { open, close, progress, _aiCheck: aiCheck, _analyze: analyze, _compliance: compliance, _wind: windFor, _prog: { ftpPts, efPts, bestAt, bestSteps, ftpAnswer, efTrend, efAnswer, decAnswer, profileType, profileHtml, spreadLabels, PG }, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
 })();

@@ -38,8 +38,15 @@ async function call(c, body) {
   const r = await fetch(c.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ k: c.key, ...body }), credentials: "omit", redirect: "follow" });
   if (!r.ok) throw Object.assign(new Error(`le serveur répond ${r.status}`), { hard: true });
   let j; try { j = await r.json(); } catch (e) { throw Object.assign(new Error("réponse illisible (URL de déploiement ?)"), { hard: true }); }
-  if (!j.ok) throw Object.assign(new Error({ cle: "clé refusée", config: "clé absente du script (SYNC_KEY)", occupe: "serveur occupé" }[j.err] || j.err || "refus"), { hard: j.err !== "occupe" });
+  if (!j.ok) throw Object.assign(new Error(({ cle: "clé refusée", config: "clé absente du script (SYNC_KEY)", occupe: "serveur occupé",
+    op: "script de synchro à mettre à jour (nouvelle version de sync.gs)", config_ia: "clé Gemini absente du script (GEMINI_KEY)", quota_ia: "quota Gemini du jour atteint, réessaie demain",
+    vide: "rien à commenter" }[j.err] || j.err || "refus") + (j.msg ? ` : ${j.msg}` : "")), { hard: j.err !== "occupe", code: j.err });
   return j;
+}
+// commentaire IA par l'Apps Script (clé Gemini côté script) : { kind, ctx } → { text, model }
+async function ai(body) {
+  const c = cfg(); if (!c) throw new Error("synchronisation non configurée sur cet appareil");
+  return call(c, { op: "ai", ...body });
 }
 
 async function syncAll() {
@@ -149,7 +156,7 @@ css.textContent = `.syncdot{display:inline-grid;place-items:center;width:18px;he
 .syncbox .syncout{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}.syncbox .syncout:empty{display:none}`;
 document.head.appendChild(css);
 
-window.Sync = { register, push, sync: syncAll, configured: () => !!cfg(), dot, settingsHtml, bindSettings, state: () => st.s };
+window.Sync = { register, push, sync: syncAll, configured: () => !!cfg(), ai, dot, settingsHtml, bindSettings, state: () => st.s };
 if (cfg()) st.s = "sync";
 addEventListener("load", () => { if (location.hash.startsWith("#sync=")) importLink(); else if (cfg()) syncAll(); });  // après le chargement : toutes les collections sont déclarées
 addEventListener("hashchange", importLink);  // lien collé dans un onglet déjà ouvert
