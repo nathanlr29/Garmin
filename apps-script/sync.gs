@@ -32,7 +32,11 @@ function doPost(e) {
   if (!req || typeof req.k !== "string" || !same_(req.k, key)) return out_({ ok: false, err: "cle" });
 
   if (req.op === "ping") return out_({ ok: true });
-  if (req.op === "ai") return out_(ai_(req));
+  if (req.op === "ai") {
+    // une erreur Apps Script (autorisation manquante, service indisponible) renverrait une page HTML illisible
+    // pour le site (« Failed to fetch ») : on répond toujours en JSON, avec la raison
+    try { return out_(ai_(req)); } catch (err) { return out_({ ok: false, err: "ia", msg: String(err && err.message || err).slice(0, 200) }); }
+  }
   if (req.op !== "sync") return out_({ ok: false, err: "op" });
   if (typeof req.c !== "string" || !NAME_RE.test(req.c)) return out_({ ok: false, err: "collection" });
   var items = Array.isArray(req.items) ? req.items : [];
@@ -151,4 +155,13 @@ function model_(key, props) {
   m = m || "gemini-flash-lite-latest";
   cache.put("gemini_model", m, 21600);
   return m;
+}
+
+// À lancer UNE FOIS depuis l'éditeur (menu des fonctions → testIA → Exécuter) : Google demande alors l'autorisation
+// « se connecter à un service externe » (Gemini), qu'un appel depuis le site ne peut pas déclencher. Le résultat s'affiche
+// dans le journal d'exécution.
+function testIA() {
+  var r = ai_({ kind: "seance", ctx: "Sport : vélo. Durée : 1 h 30. Puissance : 182 W, normalisée 196 W. Cardio : 142 bpm. Dérive cardiaque 4,2 %. Surtout en zone 2." });
+  Logger.log(JSON.stringify(r));
+  return r;
 }

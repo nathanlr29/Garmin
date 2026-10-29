@@ -47,4 +47,8 @@ assert.equal(r.err, "ia"); assert.match(r.msg, /not found/); assert.equal(cache.
 props.GEMINI_MODEL = "gemini-perso"; gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "ok" }] } }] } });
 calls.length = 0; assert.equal(post({ op: "ai", kind: "seance", ctx: CTX }).model, "gemini-perso", "GEMINI_MODEL impose le modèle");
 assert.equal(post({ op: "ping" }).ok, true, "la synchro marche toujours");
+// une exception Apps Script (autorisation « service externe » pas encore donnée) répond en JSON, pas en page d'erreur
+const fetch0 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = () => { throw new Error("You do not have permission to call UrlFetchApp.fetch"); };
+r = post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(r.err, "ia"); assert.match(r.msg, /permission/);
+c2.UrlFetchApp.fetch = fetch0; assert.equal(c2.testIA().ok, true, "testIA, à lancer depuis l'éditeur");
 console.log("OK : commentaire IA (contrôle des chiffres, op ai de sync.gs : clés, usages, choix du modèle, quota, erreurs).");
