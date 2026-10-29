@@ -495,6 +495,13 @@ function blkWx() {
 }
 // prévisions Open-Meteo (gardées 1 h sur l'appareil), au point de départ des boucles s'il est réglé, sinon au centre de la ville de config.json ;
 // coordonnées arrondies à 0,01° (≈ 1 km) : le point de départ n'est jamais envoyé exactement. En cas d'échec, la carte reste cachée.
+// AROME HD de Météo-France (1,3 km, ~2 jours) heure par heure, le modèle par défaut au-delà et pour le risque de pluie (comme sortie.js)
+function arome(h) {
+  if (!h) return h; const out = { time: h.time };
+  for (const k in h) { const m = /^(.+)_best_match$/.exec(k); if (!m) continue; const x = h[m[1] + "_meteofrance_arome_france_hd"];
+    out[m[1]] = h[k].map((v, i) => x && x[i] != null ? x[i] : v); }
+  return Object.keys(out).length > 1 ? out : h;
+}
 async function loadWx() {
   const box = document.getElementById("syWx"); if (!box) return;
   let st = null; try { st = JSON.parse(localStorage.getItem("soStart")); } catch (e) {}
@@ -502,8 +509,8 @@ async function loadWx() {
   const days = weekendDays(Date.now()), a = ymd(days[0]), b = ymd(days[days.length - 1]), key = `${lat.toFixed(2)},${lon.toFixed(2)}|${a}|${b}`;
   let j = null; try { const c = JSON.parse(localStorage.getItem(K_WX)); if (c && c.key === key && Date.now() - c.at < WX.ttl) j = c.j; } catch (e) {}
   if (!j) {
-    try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m&start_date=${a}&end_date=${b}&timezone=Europe%2FParis`);
-      if (!r.ok) return; j = (await r.json()).hourly; if (!j) return; lsSet(K_WX, JSON.stringify({ key, at: Date.now(), j })); } catch (e) { return; }
+    try { const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m&start_date=${a}&end_date=${b}&timezone=Europe%2FParis&models=meteofrance_arome_france_hd,best_match`);
+      if (!r.ok) return; j = arome((await r.json()).hourly); if (!j) return; lsSet(K_WX, JSON.stringify({ key, at: Date.now(), j })); } catch (e) { return; }
   }
   const el = document.getElementById("syWx"); if (!el) return;
   const L = weekendWx(j, days); if (!L.some(d => d.ok)) return;
