@@ -56,26 +56,50 @@ function spreadEl(pts, idx, el) {
 // Altitude IGN (RGE ALTI de la Géoplateforme, sans clé ; demande de Nathan du 29/10/2026) : précise au mètre en France, là où
 // BRouter (SRTM) et Open-Meteo (Copernicus 90 m) lissent les côtes bretonnes. Un point tous les 25 m (le pas du profil), 2 500 par
 // requête, l'une après l'autre. En mer ou hors de France l'IGN répond -99999 : au-delà de 10 % de tels points, on n'utilise pas l'IGN.
-const IGN_ALTI = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json", IGN_STEP = 25, IGN_MAX = 2500;
+const IGN_ALTI = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json", IGN_STEP = 25, IGN_MAX = 2500, IGN_PAR = 2;
+// segments plus longs que `step` recoupés (parcours Garmin : un point tous les 300 à 400 m) : sinon l'IGN n'est lu qu'aux sommets
+// de la trace et le profil coupe les bosses (D+ sous-estimé d'environ 12 %, mesuré le 29/10/2026 sur 14 sorties)
+function densePts(pts, step) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], k = Math.ceil(dist(a, b) / step);
+    for (let j = 1; j < k; j++) out.push([Math.round((a[0] + (b[0] - a[0]) * j / k) * 1e5) / 1e5, Math.round((a[1] + (b[1] - a[1]) * j / k) * 1e5) / 1e5, null]);
+    out.push(b);
+  }
+  return out;
+}
+// paquets égaux (3 201 points → 2 × 1 601), 2 requêtes à la fois : une boucle de 80 km passe de 5-6 s à 2,5-3 s (mesuré le 29/10/2026)
 async function ignElevation(pts) {
-  const { total } = evenIdx(pts, 2), n = clamp(Math.round(total / IGN_STEP) + 1, 2, 16000), I = evenIdx(pts, n).idx, el = [];
-  for (let s = 0; s < I.length; s += IGN_MAX) {
-    const part = I.slice(s, s + IGN_MAX);
+  pts = densePts(pts, IGN_STEP);
+  const { total } = evenIdx(pts, 2), n = clamp(Math.round(total / IGN_STEP) + 1, 2, 16000), I = evenIdx(pts, n).idx;
+  const k = Math.ceil(I.length / IGN_MAX), sz = Math.ceil(I.length / k), parts = [];
+  for (let s = 0; s < I.length; s += sz) parts.push(I.slice(s, s + sz));
+  const one = async part => {
     const r = await fetch(IGN_ALTI, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lon: part.map(i => pts[i][1].toFixed(5)).join("|"), lat: part.map(i => pts[i][0].toFixed(5)).join("|"), resource: "ign_rge_alti_wld", zonly: "true" }) });
     if (!r.ok) throw new Error("IGN " + r.status);
     const e = (await r.json()).elevations; if (!Array.isArray(e) || e.length !== part.length) throw new Error("IGN : réponse illisible");
-    el.push(...e);
-  }
+    return e;
+  };
+  const out = []; let next = 0;
+  await Promise.all(Array.from({ length: Math.min(IGN_PAR, parts.length) }, async () => { while (next < parts.length) { const j = next++; out[j] = await one(parts[j]); } }));
+  const el = out.flat();
   const ok = v => typeof v === "number" && v > -500;
   if (el.filter(v => !ok(v)).length > el.length * .1) throw new Error("hors de la zone IGN");
   // quelques points sans valeur (bord de mer, pont) : la valeur valable la plus proche
   for (let i = 0; i < el.length; i++) if (!ok(el[i])) { let a = i - 1, b = i + 1; while (a >= 0 && !ok(el[a])) a--; while (b < el.length && !ok(el[b])) b++; el[i] = a >= 0 ? el[a] : el[b]; }
   return spreadEl(pts, I, el);
 }
+// altitude IGN déjà lue pour la page (boucle revue, sens inversé) : aucun nouvel appel
+const IGN_C = new Map();
+const ignSig = (pts, rev) => { const n = pts.length, at = i => pts[rev ? n - 1 - i : i]; return [n, at(0), at(n >> 1), at(n - 1)].map(p => Array.isArray(p) ? p[0] + "," + p[1] : p).join("|"); };
 // altitude d'une trace : IGN d'abord ; sinon celle de la trace (GPX, BRouter) ; sinon Open-Meteo. Rend { pts, src }.
 async function fillElevation(pts) {
-  try { return { pts: await ignElevation(pts), src: "ign" }; } catch (e) { console.warn("Altitude IGN", e); }
+  const key = ignSig(pts), rk = ignSig(pts, true);
+  if (IGN_C.has(key)) return { pts: IGN_C.get(key), src: "ign" };
+  if (IGN_C.has(rk)) return { pts: IGN_C.get(rk).slice().reverse(), src: "ign" };
+  try { const p = await ignElevation(pts); IGN_C.set(key, p); if (IGN_C.size > 12) IGN_C.delete(IGN_C.keys().next().value); return { pts: p, src: "ign" }; }
+  catch (e) { console.warn("Altitude IGN", e); }
   const have = pts.filter(p => p[2] != null).length;
   if (have > pts.length * .8) return { pts, src: "" };
   const { total } = evenIdx(pts, 2), n = clamp(Math.min(pts.length, Math.round(total / 100)), 2, 200);  // l'API compte chaque point : on reste sobre
@@ -145,6 +169,9 @@ function baseLayers(map) {
 // (déjà Météo-France en France, maille de 2,5 km, puis d'autres modèles au-delà de 4 jours) ; le risque de pluie et l'UV n'existent
 // que dans le modèle par défaut. Demande de Nathan du 29/10/2026. Même fusion dans synthese.js.
 const AROME = "&models=meteofrance_arome_france_hd,best_match";
+// heures d'Open-Meteo : un seul décalage pour toute la réponse, celui du moment de la demande (utc_offset_seconds) ; lire les
+// étiquettes comme heure locale du jour prévu décalait d'une heure les prévisions de l'autre côté d'un changement d'heure
+const omTime = (j, s) => j && j.utc_offset_seconds != null ? Date.parse(s + "Z") - j.utc_offset_seconds * 1000 : parseLocal(s.length === 16 ? s + ":00" : s).getTime();
 function arome(j) {
   for (const s of ["hourly", "daily"]) { const h = j[s]; if (!h) continue; const out = { time: h.time };
     for (const k in h) { const m = /^(.+)_best_match$/.exec(k); if (!m) continue; const a = h[m[1] + "_meteofrance_arome_france_hd"];
@@ -167,7 +194,7 @@ async function loadWx(P, day) {  // uniquement le jour choisi (et le lendemain),
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
   let j = await r.json(); if (!Array.isArray(j)) j = [j]; j = j.map(arome);
-  const t0 = parseLocal(j[0].hourly.time[0]).getTime();
+  const t0 = omTime(j[0], j[0].hourly.time[0]);
   SO.wx = { S: S_, loc: j, t0, nH: j[0].hourly.time.length, step: P[P.length - 1].d / Math.max(1, S_.length - 1) };
   SO.wxKey = key;
   return SO.wx;
@@ -178,13 +205,13 @@ function wxAt(wx, d, t) {  // valeurs météo interpolées au point (distance d)
   const i = Math.floor(x), f = x - i, i2 = Math.min(wx.nH - 1, i + 1), L = k => h[k][i] + ((h[k][i2] ?? h[k][i]) - h[k][i]) * f;
   const u = k => h.wind_speed_10m[k] * Math.sin(rad(h.wind_direction_10m[k])), v = k => h.wind_speed_10m[k] * Math.cos(rad(h.wind_direction_10m[k]));
   const U = u(i) + (u(i2) - u(i)) * f, V = v(i) + (v(i2) - v(i)) * f;
-  const near = f < .5 ? i : i2;
+  const near = f < .5 ? i : i2, nxt = f > 0 ? i2 : i;  // pluie, risque et code météo : cumul de l'heure qui précède l'étiquette
   return { ws: L("wind_speed_10m"), wd: (deg(Math.atan2(U, V)) + 360) % 360, gust: L("wind_gusts_10m"), temp: L("temperature_2m"), app: L("apparent_temperature"),
-    pp: h.precipitation_probability[near] ?? 0, mm: h.precipitation[near] ?? 0, code: h.weather_code[near], cloud: h.cloud_cover[near], uv: h.uv_index[near] ?? 0, day: h.is_day[near], li };
+    pp: h.precipitation_probability[nxt] ?? 0, mm: h.precipitation[nxt] ?? 0, code: h.weather_code[nxt], cloud: h.cloud_cover[near], uv: h.uv_index[near] ?? 0, day: h.is_day[near], li };
 }
 function sun(wx, date) {
   const d = wx.loc[0].daily, k = d.time.indexOf(ymd(date));
-  return k < 0 ? null : { rise: parseLocal(d.sunrise[k] + ":00"), set: parseLocal(d.sunset[k] + ":00") };
+  return k < 0 ? null : { rise: new Date(omTime(wx.loc[0], d.sunrise[k])), set: new Date(omTime(wx.loc[0], d.sunset[k])) };
 }
 
 // ------------------------------------------------------------------ Simulation de la sortie
@@ -360,7 +387,10 @@ async function renderPick() {
   list();
 }
 function showErr(m) { const e = $("soErr"); if (e) e.textContent = m; }
-function gain(P) { let g = 0; for (let i = 1; i < P.length; i++) g += Math.max(0, P[i].e - P[i - 1].e); return g; }
+// D+ avec un seuil de 1 m (comme un GPS) : le RGE ALTI au mètre voit talus, fossés et ponts, chaque petit écart s'ajoutait
+// (+9 % contre le baromètre de la montre ; avec le seuil, écart médian 3 %, 14 sorties, 29/10/2026)
+const GAIN_H = 1;
+function gain(P) { let g = 0, ref = P[0].e; for (const p of P) { if (p.e > ref + GAIN_H) { g += p.e - ref; ref = p.e; } else if (p.e < ref - GAIN_H) ref = p.e; } return g; }
 
 // Changer de parcours plusieurs fois de suite : seul le dernier choix s'affiche (les calculs plus anciens sont abandonnés en route)
 async function setRoute(r) {
@@ -659,14 +689,14 @@ function renderTimeline(r, wx) {
 // ------------------------------------------------------------------ Générateur de boucle face au vent
 // Itinéraires : BRouter (open source, sans clé) avec un profil « routes ouvertes » : pas de pistes cyclables,
 // voies vertes, chemins, ni grands axes si on peut l'éviter. Le point de départ reste sur cet appareil.
-const BR = "https://brouter.de/brouter", BRF_V = 1;
+const BR = "https://brouter.de/brouter", BRF_V = 2;  // v2 (29/10/2026) : moins de grands axes rapides, BRouter retire les allers-retours des points de passage
 const BRF = `---context:global
 assign validForBikes = true
 assign allow_steps = false
 assign allow_ferries = false
 assign allow_motorways = false
 assign use_proposed_cycleroutes = false
-assign consider_traffic = 0.3
+assign consider_traffic = 0.6
 assign consider_noise = false
 assign consider_river = false
 assign consider_forest = false
@@ -687,8 +717,8 @@ assign turnInstructionMode = 0
 assign turnInstructionCatchingRange = 40
 assign turnInstructionRoundabouts = true
 assign considerTurnRestrictions = true
-assign correctMisplacedViaPoints = false
-assign correctMisplacedViaPointsDistance = 400
+assign correctMisplacedViaPoints = true
+assign correctMisplacedViaPointsDistance = 0
 assign processUnusedTags = false
 ---context:way
 assign any_cycleroute
@@ -697,7 +727,15 @@ assign any_cycleroute
  or route_bicycle_icn=yes|proposed or route_bicycle_ncn=yes|proposed or route_bicycle_rcn=yes|proposed route_bicycle_lcn=yes|proposed
 assign nodeaccessgranted or any_cycleroute lcn=yes
 assign ispaved or surface=paved or surface=asphalt or surface=concrete or surface=paving_stones or surface=sett or smoothness=excellent smoothness=good
-assign isunpaved not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel or surface=cobblestone smoothness=intermediate
+assign isunpaved or surface=unpaved|gravel|fine_gravel|compacted|dirt|earth|ground|grass|sand|mud|pebblestone|clay|grass_paver
+ or tracktype=grade2|grade3|grade4|grade5 smoothness=bad|very_bad|horrible|very_horrible|impassable
+assign roughpenalty
+ add switch surface=sett|cobblestone 2 switch surface=paving_stones 0.3 0
+ switch smoothness=bad 1.5 switch smoothness=very_bad|horrible|very_horrible|impassable 10 0
+assign maxspeedpenalty
+ switch highway=primary|primary_link|secondary|secondary_link|tertiary|tertiary_link
+ switch maxspeed=90|100|110|120|130 1.0 switch maxspeed=80|rural 0.2 0
+ 0
 assign turncost = if junction=roundabout then 0
  else 90
 assign initialclassifier =
@@ -823,13 +861,15 @@ assign costfactor
  min 9999
  add max onewaypenalty accesspenalty
  add trafficpenalty
+ add roughpenalty
+ add maxspeedpenalty
  add town_penalty
  add no_forest_penalty
  add no_river_penalty
  add noise_penalty
  switch or highway=motorway highway=motorway_link switch allow_motorways 1.5 10000
- switch or highway=trunk highway=trunk_link switch allow_motorways 1.5 10
- switch or highway=primary highway=primary_link 2.0
+ switch or highway=trunk highway=trunk_link switch allow_motorways 1.5 30
+ switch or highway=primary highway=primary_link 2.5
  switch or highway=secondary highway=secondary_link 1.2
  switch or highway=tertiary highway=tertiary_link 1.0
  switch highway=unclassified switch isunpaved 40 1.0
@@ -837,7 +877,7 @@ assign costfactor
  switch highway=steps switch allow_steps 120 10000
  switch route=ferry switch allow_ferries 5.67 10000
  switch highway=bridleway 40
- switch highway=cycleway 6
+ switch highway=cycleway switch isunpaved 40 6
  switch isresidentialorliving switch isunpaved 40 1.3
  switch highway=service switch isunpaved 40 1.6
  switch or highway=track or highway=road or highway=path highway=footway
@@ -950,10 +990,10 @@ async function windHere(st, day) {  // prévisions à un seul point (départ) po
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
   const j = arome(await r.json());
-  return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: parseLocal(j.hourly.time[0]).getTime(), nH: j.hourly.time.length, step: 1e12 };
+  return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: omTime(j, j.hourly.time[0]), nH: j.hourly.time.length, step: 1e12 };
 }
 // --- Allers-retours (éperons) : un point de passage tombé dans une impasse fait faire à BRouter un aller-retour sur la même route.
-const SP = { step: 10, near: 25, gap: 100, ang: 30, min: 150, home: 2000 };
+const SP = { step: 10, near: 25, gap: 100, ang: 30, min: 150, home: 2000, far: 15000 };  // far : au-delà, ce n'est plus un aller-retour mais la boucle qui recroise sa route
 function resample(pts, step) {  // un point tous les `step` m, avec l'indice du segment d'origine
   const R = []; let cum = 0;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -980,7 +1020,7 @@ function dblScan(pts) {  // points déjà parcourus (à moins de 25 m, plus de 1
       if (q.c < SP.home && tot - p.c < SP.home) continue;  // même route à l'aller et au retour près du départ : toléré
       const d = dist([p.lat, p.lon], [q.lat, q.lon]); if (d > SP.near) continue;
       any = true; const da = Math.abs(((p.b - q.b + 540) % 360) - 180);  // écart de cap : 180° = sens inverse
-      if (da > 180 - SP.ang && d < bd) { bd = d; bj = j; }
+      if (da > 180 - SP.ang && d < bd && p.c - q.c < SP.far) { bd = d; bj = j; }
     }
     if (any) dbl += p.c - R[k - 1].c;
     opp[k] = bj;
@@ -1267,11 +1307,11 @@ async function genAnswer(st, s) {
   const k = `${st.lat.toFixed(3)},${st.lon.toFixed(3)},${s.date}`;
   try {
     if (!GA.has(k)) GA.set(k, windHere(st, new Date(s.date + "T00:00:00")).catch(e => { GA.delete(k); throw e; }));
-    const w = await GA.get(k), h = w.loc[0].hourly, i = h.time.findIndex(t => +t.slice(11, 13) === s.hour), el = $("gAns");
+    const w = await GA.get(k), h = w.loc[0].hourly, i = h.time.findIndex(t => { const d = new Date(omTime(w.loc[0], t)); return ymd(d) === s.date && d.getHours() === s.hour; }), el = $("gAns");
     if (!el || i < 0) return;
     const v = Math.round(h.wind_speed_10m[i]), g = Math.round(h.wind_gusts_10m[i]), d = h.wind_direction_10m[i], t = Math.round(h.temperature_2m[i]), pp = h.precipitation_probability[i];
     const day = new Date(s.date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
-    el.innerHTML = `${day.charAt(0).toUpperCase() + day.slice(1)} à ${s.hour} h : <b>${t} °C</b>, vent de ${vers(d)} à <b>${v} km/h</b> (rafales ${g})${pp >= 30 ? `, risque de pluie ${pp} %` : ""}. `
+    el.innerHTML = `${day.charAt(0).toUpperCase() + day.slice(1)} à ${s.hour} h : <b>${t} °C</b>, vent ${vers(d).replace(/^le /, "du ").replace(/^l'/, "de l'")} à <b>${v} km/h</b> (rafales ${g})${pp >= 30 ? `, risque de pluie ${pp} %` : ""}. `
       + (v < 10 ? "Vent faible : la direction compte peu, choisis la boucle qui te plaît." : `Pars vers ${vers(d)}, face au vent, pour rentrer vent dans le dos.`);
   } catch (e) { const el = $("gAns"); if (el) el.textContent = ""; }
 }

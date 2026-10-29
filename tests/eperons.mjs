@@ -49,3 +49,8 @@ const noisy = spur.map((p, i) => i > 525 + 30 && i < 525 + 60 ? [...move(p, 90, 
 assert.equal(spurs(noisy).length, 1, "éperon détecté malgré le décalage");
 assert.equal(spurs(cutSpurs(noisy).pts).length, 0, "et supprimé");
 console.log("OK : éperon détecté puis supprimé, départ toléré, boucle propre intacte.");
+// 5) la boucle revient sur sa route de départ un peu au-delà des 2 km tolérés : ce n'est pas un éperon, rien n'est coupé
+const late = (() => { const P = [[48.1173, -1.6778, 50]]; leg(P, 0, 2400); leg(P, 0, 5000); leg(P, 90, 7000); leg(P, 180, 5000); leg(P, 270, 7000); leg(P, 180, 300); leg(P, 270, 25 / 1); leg(P, 180, 2100); return P; })();
+assert.equal(spurs(late).length, 0, "retour sur la route de départ à 2,1 km de l'arrivée : pas d'éperon");
+assert.equal(cutSpurs(late).pts.length, late.length, "et la boucle n'est pas coupée");
+console.log("OK : retour tardif sur la route de départ non coupé.");
