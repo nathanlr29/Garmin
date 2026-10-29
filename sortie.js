@@ -154,14 +154,15 @@ function climbs(P) {
 }
 
 // Fond de carte : OpenStreetMap par défaut (ses couleurs : bois en vert, eau en bleu ; Nathan les préfère, 29/10/2026),
-// Plan IGN (Géoplateforme, sans clé) au choix ; le choix est gardé sur l'appareil (soBase).
+// Plan IGN (Géoplateforme, sans clé) au choix ; le choix est gardé sur l'appareil (soBase2).
 const IGN_PLAN = "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
 function baseLayers(map) {
   const B = { "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }),
     "Plan IGN": L.tileLayer(IGN_PLAN, { maxZoom: 19, attribution: "© IGN-F / Géoplateforme" }) };
-  const pick = LS.get("soBase", "OpenStreetMap"); (B[pick] || B.OpenStreetMap).addTo(map);
+  // soBase2 : un « Plan IGN » mémorisé quand il était le fond par défaut (29/10/2026) repasse sur OpenStreetMap
+  const pick = LS.get("soBase2", "OpenStreetMap"); (B[pick] || B.OpenStreetMap).addTo(map);
   L.control.layers(B, null, { position: "topleft" }).addTo(map);
-  map.on("baselayerchange", e => LS.set("soBase", e.name));
+  map.on("baselayerchange", e => LS.set("soBase2", e.name));
 }
 
 // ------------------------------------------------------------------ Météo (Open-Meteo, sans clé)
