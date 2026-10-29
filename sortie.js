@@ -1065,7 +1065,9 @@ function saveRes() {
   for (const th of [1, 2, 4]) if (LS.set(K_GEN, pack(th))) break;  // localStorage plein : on allège les traces enregistrées
   LS.set(K_SEL, R.sel);
 }
-function dropRes() { GEN.res = null; try { localStorage.removeItem(K_GEN); localStorage.removeItem(K_SEL); } catch (e) {} }
+function dropRes() { GEN.res = null; try { localStorage.removeItem(K_GEN); localStorage.removeItem(K_SEL); } catch (e) {}
+  // les numéros repartent de 1 : la boucle affichée ne doit pas passer pour la « Boucle 1 » de la prochaine génération
+  if (SO.route && SO.route.gid != null) { delete SO.route.gid; LS.set("sortieRoute", SO.route); } }
 function loadRes() {
   if (GEN.res) return;
   const R = LS.get(K_GEN, null), st = startPt();
@@ -1216,7 +1218,9 @@ function renderGen() {
   $("gGo").onclick = async () => { if (GEN.busy) return; dropRes(); GEN.busy = "new"; GEN.msg = "Préparation…"; renderGen();
     try { GEN.res = await makeLoops(genOpts()); GEN.fit = true; saveRes(); GEN.msg = ""; }
     catch (e) { GEN.msg = e.message || "Création impossible pour l'instant."; }
-    GEN.busy = false; if (SO.route) renderLoad(); else renderGen(); };
+    GEN.busy = false;
+    if (SO.route) renderLoad(); else renderGen();
+    if (GEN.res && SO.route) chooseLoop(GEN.res.list[0], true); };  // une analyse était affichée : elle passe sur la nouvelle Boucle 1
   const newStart = v => { LS.set("soStart", v); GEN.msg = ""; dropRes(); renderGen(); };
   $("gHere").onclick = () => { if (!navigator.geolocation) { GEN.msg = "Géolocalisation indisponible sur cet appareil."; return renderGen(); }
     setMsg("Localisation…");
