@@ -217,3 +217,8 @@
 #sortie .stgkey{display:flex;gap:8px;margin-top:8px}
 #sortie .stgkey input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit}
 #sortie .sthelp > .sosmall{margin:8px 0}
+/* indice de confiance du vent (Météo-France contre les modèles européen et américain) */
+#sortie .soconf{font-weight:600}
+#sortie .soconf.ok{color:var(--good)}
+#sortie .soconf.mid{color:var(--warn)}
+#sortie .soconf.low{color:var(--bad)}

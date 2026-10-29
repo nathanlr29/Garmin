@@ -179,6 +179,52 @@ function arome(j) {
     if (Object.keys(out).length > 1) j[s] = out; }
   return j;
 }
+// ---- Indice de confiance du vent (demande de Nathan du 29/10/2026 : « le vent est le facteur principal »)
+// Une 2e requête, légère (vent seul), au modèle européen ECMWF et au modèle américain GFS : s'ils disent la même chose que
+// Météo-France, la prévision est sûre ; s'ils divergent, le site le dit et donne la fourchette. Trois modèles plutôt que deux :
+// au-delà de ~4 jours le modèle par défaut d'Open-Meteo n'est plus Météo-France et peut être l'un des deux, la 3e voix reste indépendante.
+const ALT_M = [["ecmwf_ifs025", "le modèle européen"], ["gfs_seamless", "le modèle américain"]];
+const WC = { ok: { ws: 5, dir: 30 }, mid: { ws: 10, dir: 60 }, calm: 10 };  // écarts tolérés (km/h, degrés) ; sous 10 km/h la direction compte peu
+async function loadAlt(lats, lons, day, d2) {
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&hourly=wind_speed_10m,wind_direction_10m&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis&models=${ALT_M.map(m => m[0]).join(",")}`);
+    if (!r.ok) return null;
+    let j = await r.json(); if (!Array.isArray(j)) j = [j];
+    return j.map(x => ({ t0: omTime(x, x.hourly.time[0]), nH: x.hourly.time.length, m: ALT_M.map(([k]) => ({ ws: x.hourly["wind_speed_10m_" + k], wd: x.hourly["wind_direction_10m_" + k] })) }));
+  } catch (e) { return null; }
+}
+// vent d'un modèle à l'heure t (interpolation vectorielle, comme wxAt) ; null hors de ses échéances
+function altAt(a, m, t) {
+  const x = (t - a.t0) / 3600e3; if (x < 0 || x > a.nH - 1) return null;
+  const i = Math.floor(x), f = x - i, i2 = Math.min(a.nH - 1, i + 1), S = a.m[m].ws, D = a.m[m].wd;
+  if (S[i] == null || S[i2] == null || D[i] == null || D[i2] == null) return null;
+  const u = k => S[k] * Math.sin(rad(D[k])), v = k => S[k] * Math.cos(rad(D[k])), U = u(i) + (u(i2) - u(i)) * f, V = v(i) + (v(i2) - v(i)) * f;
+  return { ws: S[i] + (S[i2] - S[i]) * f, U, V };
+}
+const angGap = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+// L = [{ name, ws, wd }] (vent moyen de la sortie selon chaque modèle, le premier = celui affiché) → niveau et phrase
+function windAgree(L) {
+  L = L.filter(x => x && isFinite(x.ws)); if (L.length < 2) return null;
+  const lo = Math.min(...L.map(x => x.ws)), hi = Math.max(...L.map(x => x.ws)), strong = L.filter(x => x.ws >= WC.calm);
+  const dir = strong.length < 2 ? 0 : Math.max(...strong.flatMap(a => strong.map(b => angGap(a.wd, b.wd)))), sp = hi - lo;
+  const lvl = hi < WC.calm ? "ok" : sp <= WC.ok.ws && dir <= WC.ok.dir ? "ok" : sp <= WC.mid.ws && dir <= WC.mid.dir ? "mid" : "low";
+  const rng = Math.round(lo) === Math.round(hi) ? `${fmt(lo)} km/h` : `${fmt(lo)} à ${fmt(hi)} km/h`;
+  const dirs = [...new Set(strong.map(x => vers(x.wd)))], others = L.slice(1).map(x => x.name).join(" et ");
+  const txt = hi < WC.calm ? `Vent faible selon les trois modèles (${rng}) : sa direction compte peu.`
+    : lvl === "ok" ? `Prévision de vent fiable : Météo-France, ${others} sont d'accord (vent venant de ${vers(L[0].wd)}, ${rng}).`
+    : `${lvl === "mid" ? "Prévision de vent à confirmer" : "Prévision de vent incertaine"} : les modèles annoncent ${rng}${dirs.length > 1 ? `, et hésitent entre ${dirs.slice(0, -1).join(", ")} et ${dirs[dirs.length - 1]}` : ""}. Revérifie la veille ou le matin${lvl === "low" ? ", le choix du sens peut changer" : ""}.`;
+  return { lvl, txt, lo, hi, dir };
+}
+// vent moyen de la sortie selon chaque modèle (vitesse moyenne, direction de la moyenne vectorielle), tous les ~1 km
+function rideWinds(P, r, wx) {
+  if (!wx || !wx.alt || !r.ok) return null;
+  const acc = [{ s: 0, U: 0, V: 0, n: 0 }, ...ALT_M.map(() => ({ s: 0, U: 0, V: 0, n: 0 }))], stp = Math.max(1, Math.round(1000 / STEP));
+  for (let k = 0; k < P.length; k += stp) { const w = r.W[k]; if (!w) continue; const li = clamp(Math.round(P[k].d / wx.step), 0, wx.alt.length - 1), t = r.T[k];
+    acc[0].s += w.ws; acc[0].U += w.ws * Math.sin(rad(w.wd)); acc[0].V += w.ws * Math.cos(rad(w.wd)); acc[0].n++;
+    ALT_M.forEach((_, m) => { const a = altAt(wx.alt[li], m, t); if (!a) return; const o = acc[m + 1]; o.s += a.ws; o.U += a.U; o.V += a.V; o.n++; }); }
+  const names = ["Météo-France", ...ALT_M.map(m => m[1])];
+  return acc.map((o, m) => o.n ? { name: names[m], ws: o.s / o.n, wd: (deg(Math.atan2(o.U, o.V)) + 360) % 360 } : null);
+}
 function samples(P) {  // points météo tous les ~12 km
   const total = P[P.length - 1].d, n = clamp(Math.round(total / 12000) + 1, 2, 16), out = [];
   for (let k = 0; k < n; k++) { const d = total * k / (n - 1); out.push(P[Math.min(P.length - 1, Math.round(d / STEP))]); }
@@ -190,12 +236,14 @@ async function loadWx(P, day) {  // uniquement le jour choisi (et le lendemain),
   if (SO.wxKey === key && SO.wx) return SO.wx;
   const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${S_.map(p => p.lat.toFixed(3)).join(",")}&longitude=${S_.map(p => p.lon.toFixed(3)).join(",")}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis${AROME}`;
+  const altP = loadAlt(S_.map(p => p.lat.toFixed(3)).join(","), S_.map(p => p.lon.toFixed(3)).join(","), day, d2);
   const r = await fetch(url);
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
   let j = await r.json(); if (!Array.isArray(j)) j = [j]; j = j.map(arome);
+  const alt = await altP;
   const t0 = omTime(j[0], j[0].hourly.time[0]);
-  SO.wx = { S: S_, loc: j, t0, nH: j[0].hourly.time.length, step: P[P.length - 1].d / Math.max(1, S_.length - 1) };
+  SO.wx = { S: S_, loc: j, t0, nH: j[0].hourly.time.length, step: P[P.length - 1].d / Math.max(1, S_.length - 1), alt: alt && alt.length === j.length ? alt : null };
   SO.wxKey = key;
   return SO.wx;
 }
@@ -420,6 +468,7 @@ async function compute() {
   // créneaux de départ de la journée
   const best = [];
   if (wx) for (let h = 6; h <= 19; h++) { const st = new Date(start); st.setHours(h, 0, 0, 0); if (st < Date.now() - 36e5) continue; const r = simulate(P, wx, st, s.speed, false); if (r.ok) best.push({ h, r, p: penalty(r) }); }
+  res.conf = windAgree(rideWinds(P, res, wx) || []);
   renderTiles(res, err); renderVerdict(res, rev, best, err, s); renderBest(best, s);
   await renderMap(res, wx); if (seq !== SO.seq) return;
   renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
@@ -434,12 +483,13 @@ function renderTiles(r, err) {
   $("soTiles").innerHTML = [
     tile("Distance", `${fmt(r.total, 1)}<small> km</small>`, `${fmt(gain(SO.P))} m D+ · ${fmt(r.total ? gain(SO.P) / r.total : 0)} m/km`),
     tile("Durée estimée", dur(r.secs), `arrivée vers ${hm(r.end)}${late ? " · après le coucher du soleil" : ""}`, late ? "var(--bad)" : null),
-    r.ok ? tile("Vent", `${fmt(r.ws)}<small> km/h</small>`, `${vdu(r.wd)} · rafales ${fmt(r.gust)} km/h`) : tile("Vent", "–", err || "prévisions indisponibles"),
+    r.ok ? tile("Vent", `${fmt(r.ws)}<small> km/h</small>`, `${vdu(r.wd)} · rafales ${fmt(r.gust)} km/h${r.conf ? ` · <span class="soconf ${r.conf.lvl}">${CONF_L[r.conf.lvl]}</span>` : ""}`) : tile("Vent", "–", err || "prévisions indisponibles"),
     r.ok ? tile("Vent de face", `${fmt(r.face / r.total * 100)}<small> %</small>`, `de dos ${fmt(r.dos / r.total * 100)} % · côté ${fmt(r.trav / r.total * 100)} %`, r.face / r.total > .4 ? "var(--bad)" : r.dos > r.face ? "var(--good)" : null) : "",
     r.ok ? tile("Températures", `${fmt(r.tmin)}–${fmt(r.tmax)}<small> °C</small>`, `ressenti mini ${fmt(r.amin)} °C`) : "",
     r.ok ? tile("Pluie", r.rain >= .2 ? `${fmt(r.rain, 1)}<small> mm</small>` : `${fmt(r.ppMax)}<small> %</small>`, r.rain >= .2 ? `risque max ${fmt(r.ppMax)} % · ${WMO(r.codeMax).toLowerCase()}` : `risque max · ${WMO(r.codeMax).toLowerCase()}`, r.rain >= 1 ? "#1e88e5" : null) : "",
   ].join("");
 }
+const CONF_L = { ok: "prévision fiable", mid: "à confirmer", low: "incertaine" };
 function renderVerdict(r, rev, best, err, s) {
   const box = $("soVerdict");
   if (!r.ok) { box.innerHTML = `<p>${err || "Prévisions indisponibles."} Je peux quand même t'afficher le profil et les montées.</p>`; return; }
@@ -448,6 +498,7 @@ function renderVerdict(r, rev, best, err, s) {
   const n = SO.P.length, parts = [0, 1, 2].map(k => { let s_ = 0, c = 0; for (let i = Math.floor(n * k / 3); i < Math.floor(n * (k + 1) / 3); i++) { s_ += r.Hd[i]; c++; } return s_ / Math.max(1, c); });
   const worst = parts.indexOf(Math.max(...parts)), names = ["le premier tiers", "le milieu", "le dernier tiers"];
   L.push(`Vent ${vdu(r.wd)} autour de ${fmt(r.ws)} km/h (rafales ${fmt(r.gust)}).` + (parts[worst] > 5 ? ` C'est dans ${names[worst]} de la sortie que tu l'auras le plus de face.` : " Peu gênant sur ce parcours."));
+  if (r.conf) L.push(r.conf.txt);
   if (parts[2] > 6 && parts[0] < 0) L.push("Attention : retour vent de face, garde des forces.");
   else if (parts[0] > 6 && parts[2] < 0) L.push("Bonne configuration : vent de face à l'aller, retour poussé par le vent.");
   if (rev) { const a = r.face / r.total, b = rev.face / rev.total; if (b < a - .1 || (parts[2] > 6 && rev.head < r.head - 2)) L.push(`Dans l'autre sens, tu aurais ${fmt(b * 100)} % de vent de face au lieu de ${fmt(a * 100)} % : ça vaut le coup d'y penser.`); }
@@ -986,11 +1037,13 @@ async function brRoute(wps, prof) {
 async function windHere(st, day) {  // prévisions à un seul point (départ) pour noter les boucles
   const d2 = new Date(day); d2.setDate(d2.getDate() + 1);
   const H = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day";
+  const altP = loadAlt(st.lat.toFixed(3), st.lon.toFixed(3), day, d2);
   const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${st.lat.toFixed(3)}&longitude=${st.lon.toFixed(3)}&hourly=${H}&daily=sunrise,sunset&start_date=${ymd(day)}&end_date=${ymd(d2)}&timezone=Europe%2FParis${AROME}`);
   if (r.status === 400) throw new Error("Pas encore de prévisions pour cette date (16 jours maximum).");
   if (!r.ok) throw new Error(r.status === 429 ? "Trop de demandes météo, réessaie dans une minute." : "Prévisions météo indisponibles pour l'instant.");
   const j = arome(await r.json());
-  return { S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: omTime(j, j.hourly.time[0]), nH: j.hourly.time.length, step: 1e12 };
+  const alt = await altP;
+  return { alt, S: [{ d: 0, lat: st.lat, lon: st.lon }], loc: [j], t0: omTime(j, j.hourly.time[0]), nH: j.hourly.time.length, step: 1e12 };
 }
 // --- Allers-retours (éperons) : un point de passage tombé dans une impasse fait faire à BRouter un aller-retour sur la même route.
 const SP = { step: 10, near: 25, gap: 100, ang: 30, min: 150, home: 2000, far: 15000 };  // far : au-delà, ce n'est plus un aller-retour mais la boucle qui recroise sa route
@@ -1312,7 +1365,9 @@ async function genAnswer(st, s) {
     const v = Math.round(h.wind_speed_10m[i]), g = Math.round(h.wind_gusts_10m[i]), d = h.wind_direction_10m[i], t = Math.round(h.temperature_2m[i]), pp = h.precipitation_probability[i];
     const day = new Date(s.date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
     el.innerHTML = `${day.charAt(0).toUpperCase() + day.slice(1)} à ${s.hour} h : <b>${t} °C</b>, vent ${vers(d).replace(/^le /, "du ").replace(/^l'/, "de l'")} à <b>${v} km/h</b> (rafales ${g})${pp >= 30 ? `, risque de pluie ${pp} %` : ""}. `
-      + (v < 10 ? "Vent faible : la direction compte peu, choisis la boucle qui te plaît." : `Pars vers ${vers(d)}, face au vent, pour rentrer vent dans le dos.`);
+      + (v < 10 ? "Vent faible : la direction compte peu, choisis la boucle qui te plaît." : `Pars vers ${vers(d)}, face au vent, pour rentrer vent dans le dos.`)
+      + (() => { const tt = omTime(w.loc[0], h.time[i]), A = w.alt && w.alt[0] ? ALT_M.map((m, k) => { const a = altAt(w.alt[0], k, tt); return a && { name: m[1], ws: a.ws, wd: (deg(Math.atan2(a.U, a.V)) + 360) % 360 }; }) : [];
+        const c = windAgree([{ name: "Météo-France", ws: h.wind_speed_10m[i], wd: d }, ...A]); return c ? ` <span class="soconf ${c.lvl}">${esc(c.txt)}</span>` : ""; })();
   } catch (e) { const el = $("gAns"); if (el) el.textContent = ""; }
 }
 function renderGen() {
@@ -1415,7 +1470,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Nav?.curTab() === "sortie") open(); });
 })();
