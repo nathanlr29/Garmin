@@ -16,7 +16,8 @@ const calls = [], props = { SYNC_KEY: "0123456789abcdef0123" }, cache = {};
 let gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "Séance solide." }] } }] } });
 const res = (code, body) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(body) });
 const c2 = {
-  PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
+  Utilities: { formatDate: () => "2026-10-30" },
   CacheService: { getScriptCache: () => ({ get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; } }) },
   UrlFetchApp: { fetch: (url, o = {}) => { calls.push({ url, o });
     if (/\/models\?/.test(url)) return res(200, { models: [
@@ -34,6 +35,7 @@ assert.equal(post({ op: "ai", kind: "seance", ctx: CTX }).err, "config_ia", "san
 props.GEMINI_KEY = "AIzaFAUSSE";
 assert.equal(c2.doPost({ postData: { contents: JSON.stringify({ k: "mauvaise-cle-xxxxxx", op: "ai", kind: "seance", ctx: CTX }) } }).err, "cle", "clé de synchro exigée");
 assert.equal(post({ op: "ai", kind: "poeme", ctx: CTX }).err, "op", "seulement les usages prévus (pas de prompt libre)");
+assert.equal(post({ op: "ai", kind: "question", ctx: CTX }).err, "vide", "question vide refusée");
 assert.equal(post({ op: "ai", kind: "seance", ctx: "x" }).err, "vide");
 let r = post({ op: "ai", kind: "seance", ctx: CTX });
 assert.equal(r.ok, true); assert.equal(r.text, "Séance solide."); assert.equal(r.model, "gemini-3.5-flash-lite", "Flash-Lite stable le plus récent");
@@ -51,4 +53,19 @@ assert.equal(post({ op: "ping" }).ok, true, "la synchro marche toujours");
 const fetch0 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = () => { throw new Error("You do not have permission to call UrlFetchApp.fetch"); };
 r = post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(r.err, "ia"); assert.match(r.msg, /permission/);
 c2.UrlFetchApp.fetch = fetch0; assert.equal(c2.testIA().ok, true, "testIA, à lancer depuis l'éditeur");
+// usages de l'encart IA : consigne propre à chaque usage, question ajoutée au contexte (300 caractères au plus), plafond du jour
+calls.length = 0; delete props.GEMINI_MODEL; props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 0 });
+for (const kind of ["question", "semaine", "recup", "sortie", "objectifs"]) {
+  r = post({ op: "ai", kind, ctx: CTX, q: kind === "question" ? "Suis-je prêt pour 250 km ?" + " x".repeat(400) : undefined }); assert.equal(r.ok, true, kind);
+  const body = JSON.parse(calls.filter(x => /generateContent/.test(x.url)).pop().o.payload);
+  assert.match(body.systemInstruction.parts[0].text, /n'utilise que les chiffres fournis/, kind);
+  if (kind === "question") { assert.match(body.contents[0].parts[0].text, /Question de Nathan : Suis-je prêt pour 250 km \?/); assert.ok(body.contents[0].parts[0].text.length < CTX.length + 340, "question tronquée"); assert.match(body.systemInstruction.parts[0].text, /ne traites que ces sujets/); }
+}
+assert.equal(r.left, 55, "5 demandes faites sur 60");
+props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 60 }); assert.equal(post({ op: "ai", kind: "recup", ctx: CTX }).err, "quota_ia", "plafond du jour");
+props.AI_COUNT = JSON.stringify({ d: "2026-10-29", n: 60 }); assert.equal(post({ op: "ai", kind: "recup", ctx: CTX }).ok, true, "nouveau jour : compteur remis à zéro");
+
+// 3) ia.js : même contrôle des chiffres
+const c3 = { window: {} }; vm.createContext(c3); vm.runInContext(readFileSync(new URL("../ia.js", import.meta.url), "utf8"), c3);
+assert.equal(c3.window.IA._check("Ta plus longue sortie fait 180 km, il en manque 70.", "plus longue sortie 180 km, objectif 250 km").length, 1, "70 n'est pas dans la page");
 console.log("OK : commentaire IA (contrôle des chiffres, op ai de sync.gs : clés, usages, choix du modèle, quota, erreurs).");
