@@ -9,7 +9,8 @@
 // Requête : POST text/plain (pas de preflight CORS), corps JSON :
 //   { k: "<clé>", op: "ping" }
 //   { k: "<clé>", op: "sync", c: "<collection>", items: [{ id, ts, v }, …] }
-//   { k: "<clé>", op: "ai", kind: "seance|question|semaine|recup|sortie|objectifs", ctx: "<chiffres en texte>", q?: "<question>" }
+//   { k: "<clé>", op: "ai", kind: "seance|question|semaine|recup|sortie|objectifs", ctx: "<données en texte>", q?: "<question>" }
+//   { k: "<clé>", op: "ai", kind: "chat", ctx: "<données>", msgs: [{ r: "u"|"m", t }, …] }   (conversation, dernier message de Nathan en dernier)
 //     → { ok: true, text, model, left }   (left = demandes restantes aujourd'hui, plafond AI_DAY)
 // Réponse : { ok: true, items: [...] } ou { ok: false, err: "...", msg? }.
 //
@@ -103,26 +104,42 @@ function out_(o) {
 }
 
 // ------------------------------------------------------------------ Commentaire IA (Gemini)
-var AI_MAX_CTX = 6000, AI_MAX_Q = 300;
-var AI_DAY = 60;  // demandes par jour au plus (le palier gratuit de Flash-Lite en permet bien plus) ; jour du Pacifique, comme les quotas Google
-var AI_RULES = " Règles strictes : n'utilise que les chiffres fournis, n'en calcule et n'en invente aucun ; pas de sigles (CTL, ATL, TSB, TSS) ; "
-  + "aucun conseil médical (si quelque chose paraît anormal, dis d'en parler à un médecin) ; pas de titre, pas de liste, pas de mise en forme, pas de formule de politesse ; "
-  + "en français, en le tutoyant.";
-var AI_WHO = "Tu es l'entraîneur de Nathan, cycliste sur route en Bretagne (il court aussi). Les données viennent de son tableau de bord, déjà calculées. ";
+var AI_MAX_CTX = 14000, AI_MAX_Q = 600, AI_MAX_MSGS = 10;
+var AI_DAY = 60;  // demandes par jour au plus (palier gratuit) ; jour du Pacifique, comme les quotas Google
+// Demande de Nathan du 30/10/2026 : un vrai assistant, pas une paraphrase de la page. Il reçoit les données brutes (profil, forme,
+// nuits, séances, Plan) et doit analyser, expliquer les causes et proposer des séances précises.
+var AI_WHO = "Tu es l'entraîneur personnel et l'assistant de Nathan, cycliste sur route en Bretagne (il court aussi et fait de la musculation), "
+  + "qui veut augmenter sa FTP et sa VO2max et préparer un ultra de 250 km. Tu reçois ses données (profil et zones, forme, nuits récentes, "
+  + "séances des derniers jours, Plan des prochains jours) et ce qu'affiche la page qu'il regarde. ";
+var AI_RULES = " Règles : appuie-toi sur ses données ; une mesure (VFC, sommeil, watts réalisés…) doit venir des données, n'en invente aucune, "
+  + "mais calcule à partir d'elles (watts depuis la FTP de travail, bpm depuis ses zones, durées) et propose des séances précises. "
+  + "Ne répète pas les phrases déjà affichées : analyse, explique les causes, tranche et propose. Sépare ce qui est sûr de ce qui est une hypothèse. "
+  + "Pas de diagnostic médical : si un signe peut annoncer une maladie, dis-le comme hypothèse et conseille de consulter si ça dure. "
+  + "En français, en le tutoyant, ton direct d'entraîneur, sans formule de politesse ni titre ; des tirets pour une liste si utile ; 170 mots au plus sauf s'il demande plus. "
+  + "Sujets : entraînement, vélo, course, musculation, récupération, sommeil, alimentation du sportif ; pour tout autre sujet, dis seulement que tu ne traites que ceux-là.";
+var AI_SESSION = "Quand tu proposes une séance, donne : échauffement, blocs (durée, watts et % de FTP ou bpm), récupérations, retour au calme, durée totale, "
+  + "et une variante plus douce si sa récup est moyenne.";
+var AI_CHAT = "Réponds à ses messages comme son entraîneur. S'il demande quoi faire, propose la séance du jour adaptée à sa récup, sa fatigue et son Plan. "
+  + "S'il demande si une sortie est raisonnable (par exemple 150 km aujourd'hui), réponds d'abord oui, non ou oui à condition, explique avec ses données "
+  + "(nuit, VFC, fatigue, séances récentes, ce qui est prévu ensuite), puis donne les conditions : intensité maxi en watts ou bpm, durée, alimentation, "
+  + "et ce que ça change pour les jours suivants. " + AI_SESSION;
 var AI_SYS = {
-  seance: AI_WHO + "On te donne le bilan d'une séance. Commente-le en 3 ou 4 phrases : ce qui est bien, ce qui l'est moins, une chose concrète pour la prochaine séance." + AI_RULES,
-  question: AI_WHO + "On te donne son état de forme, ses objectifs et sa semaine prévue, puis sa question. Réponds en 5 phrases au plus, seulement à partir de ces données ; "
-    + "si elles ne suffisent pas pour répondre, dis-le et dis ce qu'il faudrait savoir. Si la question ne porte pas sur l'entraînement, le vélo, la course, la récupération ou l'alimentation du sportif, "
-    + "réponds seulement que tu ne traites que ces sujets." + AI_RULES,
-  semaine: AI_WHO + "On te donne sa semaine (et le relevé de la semaine dernière s'il existe), sa progression et ses alertes. Fais-en le bilan en 4 phrases : "
-    + "ce qui a marché, ce qui a coincé, une priorité pour les jours qui viennent." + AI_RULES,
-  recup: AI_WHO + "On te donne sa nuit et ses indicateurs de récupération comparés à sa normale. Explique en 3 ou 4 phrases ce qu'ils disent ensemble, "
-    + "en reliant les signaux (charge des jours précédents, heure de coucher, durée et qualité du sommeil, VFC, cœur au repos), puis ce que ça implique pour sa journée. Aucun diagnostic." + AI_RULES,
-  sortie: AI_WHO + "On te donne l'analyse d'une sortie à venir : vent et sa fiabilité, profil et montées, arrêts conseillés, alimentation, tenue. Fais-lui un briefing d'avant-départ "
-    + "en 4 ou 5 phrases : les moments clés du parcours, où il aura le vent, où s'arrêter, quoi manger et emporter." + AI_RULES,
-  objectifs: AI_WHO + "On te donne ses objectifs, où il en est, sa progression et ses paliers d'entraînement. Fais le point en 4 phrases : ce qui progresse, ce qui bloque, "
-    + "et un ajustement concret à proposer (c'est lui qui décidera dans son Plan)." + AI_RULES
+  chat: AI_WHO + AI_CHAT + AI_RULES,
+  question: AI_WHO + AI_CHAT + AI_RULES,
+  seance: AI_WHO + "On te donne le bilan d'une séance. Analyse ce qu'elle a vraiment travaillé, si elle colle au prévu et à son état du jour (nuit, fatigue), "
+    + "pourquoi elle a été dure ou facile, puis la séance précise à faire la prochaine fois. " + AI_SESSION + AI_RULES,
+  recup: AI_WHO + "Explique pourquoi sa récupération est ce qu'elle est ce jour-là : confronte la nuit (durée, phases, heure de coucher, réveils) à sa VFC "
+    + "et à son cœur au repos comparés à sa normale, à la charge et à l'intensité des 3 ou 4 jours précédents, au stress et à la température. "
+    + "Classe les causes les plus probables (par exemple une longue nuit avec une VFC basse : fatigue des grosses séances des jours d'avant, début d'infection, "
+    + "alcool ou repas tardif, chaleur), dis ce qui confirmerait chacune, puis ce qu'il doit faire aujourd'hui (séance précise ou repos). " + AI_SESSION + AI_RULES,
+  semaine: AI_WHO + "Fais le bilan de sa semaine : volume et intensité réels contre le Plan, effet sur sa récup, ce qui a marché, ce qui coince, "
+    + "et 2 ou 3 ajustements concrets pour la semaine qui vient." + AI_RULES,
+  sortie: AI_WHO + "On te donne l'analyse d'une sortie à venir. Fais le briefing : stratégie de rythme (watts ou cardio par portion, où appuyer, "
+    + "où s'économiser selon le vent et les montées), ravitaillement et hydratation minutés, tenue, et ce qu'il faut adapter à sa forme du jour." + AI_RULES,
+  objectifs: AI_WHO + "Fais le point sur ses objectifs : vitesse de progression réelle, ce qui freine (volume, intensité, récup, régularité), "
+    + "et un plan d'action concret pour les semaines qui viennent (séances clés, volume) qu'il pourra reporter dans son Plan." + AI_RULES
 };
+var AI_TIER = { chat: "flash", question: "flash" };  // conversation : le modèle Flash (meilleur), repli sur Flash-Lite si son quota est atteint
 
 // compteur du jour (propriétés du script, sous verrou) : faux si le plafond est atteint ; sinon le nombre restant après celle-ci
 function aiCount_() {
@@ -145,46 +162,63 @@ function ai_(req) {
   if (!sys) return { ok: false, err: "op" };
   var ctx = String(req.ctx || "").slice(0, AI_MAX_CTX), q = String(req.q || "").replace(/\s+/g, " ").trim().slice(0, AI_MAX_Q);
   if (ctx.length < 20) return { ok: false, err: "vide" };
-  if (req.kind === "question" && q.length < 3) return { ok: false, err: "vide" };
+  // conversation : messages alternés, le premier de Nathan reçoit les données
+  var contents;
+  if (req.kind === "chat") {
+    var M = (Array.isArray(req.msgs) ? req.msgs : []).slice(-AI_MAX_MSGS).filter(function (m) { return m && typeof m.t === "string" && m.t.trim(); })
+      .map(function (m) { return { role: m.r === "m" ? "model" : "user", parts: [{ text: m.t.slice(0, AI_MAX_Q * 3) }] }; });
+    while (M.length && M[0].role !== "user") M.shift();
+    if (!M.length || M[M.length - 1].role !== "user") return { ok: false, err: "vide" };
+    M[0].parts[0].text = "Contexte (données de Nathan) :\n" + ctx + "\n\n" + M[0].parts[0].text;
+    contents = M;
+  } else {
+    if (req.kind === "question" && q.length < 3) return { ok: false, err: "vide" };
+    contents = [{ role: "user", parts: [{ text: ctx + (q ? "\n\nQuestion de Nathan : " + q : "") }] }];
+  }
   var left = aiCount_();
   if (left === false) return { ok: false, err: "quota_ia" };
-  if (q) ctx += "\n\nQuestion de Nathan : " + q;
-  var model = model_(key, props), body = {
-    systemInstruction: { parts: [{ text: sys }] },
-    contents: [{ role: "user", parts: [{ text: ctx }] }],
-    generationConfig: { temperature: 0.4, maxOutputTokens: 800 }
-  };
-  var r = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
-    method: "post", contentType: "application/json", headers: { "x-goog-api-key": key }, payload: JSON.stringify(body), muteHttpExceptions: true });
-  var code = r.getResponseCode(), j = {};
-  try { j = JSON.parse(r.getContentText()); } catch (e) {}
-  if (code === 429) return { ok: false, err: "quota_ia" };
-  if (code !== 200) {
-    if (code === 404) CacheService.getScriptCache().remove("gemini_model");  // modèle retiré : on en recherchera un autre
-    return { ok: false, err: "ia", msg: String((j.error && j.error.message) || ("Gemini " + code)).slice(0, 200) };
+  var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.5, maxOutputTokens: 4096 } };
+  var tiers = AI_TIER[req.kind] === "flash" ? ["flash", "lite"] : ["lite"], r = null;
+  for (var i = 0; i < tiers.length; i++) {
+    r = gemini_(key, props, tiers[i], body);
+    if (!(r.code === 429 || r.code === 404) || i === tiers.length - 1) break;  // Flash saturé ou retiré : Flash-Lite
   }
-  var c = j.candidates && j.candidates[0], parts = c && c.content && c.content.parts || [];
-  var text = parts.map(function (p) { return p.text || ""; }).join("").trim();
+  if (r.code === 429) return { ok: false, err: "quota_ia" };
+  if (r.code !== 200) return { ok: false, err: "ia", msg: String((r.j.error && r.j.error.message) || ("Gemini " + r.code)).slice(0, 200) };
+  var c = r.j.candidates && r.j.candidates[0], parts = c && c.content && c.content.parts || [];
+  var text = parts.filter(function (p) { return !p.thought; }).map(function (p) { return p.text || ""; }).join("").trim();
   if (!text) return { ok: false, err: "ia", msg: "réponse vide" + (c && c.finishReason ? " (" + c.finishReason + ")" : "") };
-  return { ok: true, text: text.slice(0, 2000), model: model, left: left };
+  return { ok: true, text: text.slice(0, 4000), model: r.model, left: left };
+}
+function gemini_(key, props, tier, body) {
+  var model = model_(key, props, tier);
+  var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+    method: "post", contentType: "application/json", headers: { "x-goog-api-key": key }, payload: JSON.stringify(body), muteHttpExceptions: true });
+  var code = res.getResponseCode(), j = {};
+  try { j = JSON.parse(res.getContentText()); } catch (e) {}
+  if (code === 404) CacheService.getScriptCache().remove("gemini_model_" + tier);  // modèle retiré : on en recherchera un autre
+  return { code: code, j: j, model: model };
 }
 
-// le Gemini Flash-Lite stable le plus récent (liste des modèles de la clé), gardé 6 h ; repli sur l'alias « latest »
-function model_(key, props) {
-  var fixed = props.getProperty("GEMINI_MODEL");
+// le Gemini stable le plus récent du niveau demandé (« lite » = Flash-Lite, « flash » = Flash), d'après la liste des modèles de la clé,
+// gardé 6 h ; repli sur les alias « latest ». GEMINI_MODEL impose le modèle de Flash-Lite, GEMINI_MODEL_FLASH celui de Flash.
+function model_(key, props, tier) {
+  tier = tier || "lite";
+  var fixed = props.getProperty(tier === "flash" ? "GEMINI_MODEL_FLASH" : "GEMINI_MODEL");
   if (fixed) return fixed;
-  var cache = CacheService.getScriptCache(), m = cache.get("gemini_model");
+  var cache = CacheService.getScriptCache(), ck = "gemini_model_" + tier, m = cache.get(ck);
   if (m) return m;
+  var re = tier === "flash" ? /^models\/gemini-\d+(\.\d+)?-flash$/ : /^models\/gemini-\d+(\.\d+)?-flash-lite$/;
   try {
     var r = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key }, muteHttpExceptions: true });
     var L = (JSON.parse(r.getContentText()).models || []).filter(function (x) {
-      return (x.supportedGenerationMethods || []).indexOf("generateContent") >= 0 && /^models\/gemini-\d+(\.\d+)?-flash-lite$/.test(x.name);
+      return (x.supportedGenerationMethods || []).indexOf("generateContent") >= 0 && re.test(x.name);
     }).map(function (x) { return { n: x.name.replace("models/", ""), v: parseFloat(x.name.replace(/^models\/gemini-/, "")) }; });
     L.sort(function (a, b) { return b.v - a.v; });
     if (L.length) m = L[0].n;
   } catch (e) {}
-  m = m || "gemini-flash-lite-latest";
-  cache.put("gemini_model", m, 21600);
+  m = m || (tier === "flash" ? "gemini-flash-latest" : "gemini-flash-lite-latest");
+  cache.put(ck, m, 21600);
   return m;
 }
 

@@ -758,24 +758,16 @@ function render() {
   loadWx();
   mountIA();
 }
-// l'entraîneur (IA, à la demande) : une ligne dans 3 cartes existantes, pas de nouvelle carte (la Synthèse reste une synthèse)
-function weekPlan() {  // les 7 prochains jours du Plan, en texte (titres et durées, rien d'autre)
-  if (!(window.Plan && Plan.plannedFor)) return "";
-  const L = [], d0 = new Date(new Date().toDateString());
-  for (let i = 0; i < 7; i++) { const d = new Date(d0); d.setDate(d.getDate() + i); const p = Plan.plannedFor(ymd(d)); if (!p) continue;
-    const one = x => x ? `${(x.w && x.w.title) || x.label}${x.dur ? ` (${x.dur} min)` : ""}${x.st === "done" ? " faite" : ""}` : "";
-    L.push(`${i ? dayName(d) : "aujourd'hui"} : ${[one(p), p.run ? "course " + one(p.run) : ""].filter(Boolean).join(" + ")}`); }
-  return L.length ? "Semaine prévue dans le Plan :\n" + L.join("\n") : "";
-}
+// l'entraîneur (IA, à la demande) : une ligne dans 3 cartes existantes, pas de nouvelle carte (la Synthèse reste une synthèse).
+// Il reçoit aussi toutes ses données (IA.data : profil, nuits, séances, Plan des 7 jours) ; la question ouvre la conversation.
 function mountIA() {
   if (!window.IA) return;
   const T = sels => IA.textOf(sels);
-  IA.mount(document.getElementById("syToday"), { kind: "question", title: "Demande à l'entraîneur", ask: true, placeholder: "Ex. : suis-je prêt pour 250 km ?",
-    ctx: () => [T(["#syProg", "#syToday", "#syGoals", "#syDet", "#syWeek"]), weekPlan()].filter(Boolean).join("\n") });
+  IA.mount(document.getElementById("syToday"), { kind: "question", title: "Demande à ton entraîneur", ask: true, placeholder: "Ex. : je peux faire 150 km aujourd'hui ?" });
   IA.mount(document.getElementById("syGoals"), { kind: "objectifs", title: "Point de l'entraîneur sur tes objectifs", button: "Faire le point",
     ctx: () => T(["#syGoals", "#syProg"]) });
   IA.mount(document.getElementById("syWeek"), { kind: "semaine", title: "Bilan de l'entraîneur", button: "Bilan de la semaine",
-    ctx: () => [T(["#syReleve", "#syWeek", "#syProg .syans", "#syDet"]), weekPlan()].filter(Boolean).join("\n") });
+    ctx: () => T(["#syReleve", "#syWeek", "#syProg .syans", "#syDet"]) });
 }
 function bind(box) {
   box.querySelectorAll("[data-per]").forEach(b => b.onclick = () => { lsSet(K_PERIOD, b.dataset.per); S_.period = +b.dataset.per; box.querySelectorAll("[data-per]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); plotCurve(S_.D); });
