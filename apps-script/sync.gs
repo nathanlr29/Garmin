@@ -201,7 +201,7 @@ function think_(model) {
   return null;
 }
 function gemini_(key, props, tier, body) {
-  var model = model_(key, props, tier), tc = think_(model), res, code, j;
+  var model = model_(key, props, tier), tc = tier === "flash" ? think_(model) : null, res, code, j;  // Flash-Lite : réglage par défaut (celui qui marchait)
   for (var k = 0; k < 2; k++) {
     var b = JSON.parse(JSON.stringify(body));
     if (tc && k === 0) b.generationConfig.thinkingConfig = tc;
@@ -253,4 +253,23 @@ function testChat() {
     msgs: [{ r: "u", t: "Quelle séance je fais aujourd'hui ?" }] });
   Logger.log((Date.now() - t0) / 1000 + " s · " + JSON.stringify(r).slice(0, 600));
   return r;
+}
+
+// Diagnostic pas à pas (menu des fonctions → testEtapes → Exécuter) : chaque étape s'affiche dans le journal avec sa durée ;
+// la dernière ligne affichée montre où ça bloque.
+function testEtapes() {
+  var t0 = Date.now(), log = function (m) { console.log(((Date.now() - t0) / 1000).toFixed(1) + " s · " + m); };
+  var props = PropertiesService.getScriptProperties(), key = props.getProperty("GEMINI_KEY");
+  log("1. clé Gemini : " + (key ? "présente" : "ABSENTE"));
+  if (!key) return;
+  log("2. compteur du jour : " + props.getProperty("AI_COUNT"));
+  var lock = LockService.getScriptLock(); lock.waitLock(5000); lock.releaseLock(); log("3. verrou : ok");
+  log("4. modèle en cache : " + CacheService.getScriptCache().get("gemini_model_lite"));
+  var m = model_(key, props, "lite"); log("5. modèle choisi : " + m);
+  var r = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(m) + ":generateContent", {
+    method: "post", contentType: "application/json", headers: { "x-goog-api-key": key }, muteHttpExceptions: true,
+    payload: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Réponds juste : bonjour." }] }], generationConfig: { maxOutputTokens: 50 } }) });
+  log("6. Gemini répond " + r.getResponseCode() + " : " + r.getContentText().slice(0, 300));
+  var c = ai_({ kind: "chat", ctx: "Profil : FTP de travail 230 W. Nuit : 9 h 40, VFC 36 ms (zone normale 45-60).", msgs: [{ r: "u", t: "Quelle séance je fais aujourd'hui ?" }] });
+  log("7. conversation : " + JSON.stringify(c).slice(0, 400));
 }
