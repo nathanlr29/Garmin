@@ -180,8 +180,9 @@ function ai_(req) {
   var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.5, maxOutputTokens: 4096 } };
   var tiers = AI_TIER[req.kind] === "flash" ? ["flash", "lite"] : ["lite"], r = null;
   for (var i = 0; i < tiers.length; i++) {
-    r = gemini_(key, props, tiers[i], body);
-    if (!(r.code === 429 || r.code === 404) || i === tiers.length - 1) break;  // Flash saturé ou retiré : Flash-Lite
+    try { r = gemini_(key, props, tiers[i], body); }
+    catch (e) { if (i === tiers.length - 1) throw e; r = { code: 0 }; continue; }  // Flash trop lent (délai de 60 s d'UrlFetch) : Flash-Lite
+    if (!(r.code === 429 || r.code === 404 || r.code >= 500) || i === tiers.length - 1) break;  // Flash saturé, retiré ou en panne : Flash-Lite
   }
   if (r.code === 429) return { ok: false, err: "quota_ia" };
   if (r.code !== 200) return { ok: false, err: "ia", msg: String((r.j.error && r.j.error.message) || ("Gemini " + r.code)).slice(0, 200) };
@@ -190,12 +191,25 @@ function ai_(req) {
   if (!text) return { ok: false, err: "ia", msg: "réponse vide" + (c && c.finishReason ? " (" + c.finishReason + ")" : "") };
   return { ok: true, text: text.slice(0, 4000), model: r.model, left: left };
 }
+// réflexion limitée : sans cela, un Flash récent peut « penser » plus d'une minute avant de répondre (Gemini 3 et plus : thinkingLevel,
+// Gemini 2.5 : thinkingBudget) ; si le modèle refuse ce réglage (400), on redemande sans.
+function think_(model) {
+  var v = parseFloat(String(model).replace(/^gemini-/, ""));
+  if (v >= 3) return { thinkingLevel: "low" };
+  if (v >= 2.5) return { thinkingBudget: 512 };
+  return null;
+}
 function gemini_(key, props, tier, body) {
-  var model = model_(key, props, tier);
-  var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
-    method: "post", contentType: "application/json", headers: { "x-goog-api-key": key }, payload: JSON.stringify(body), muteHttpExceptions: true });
-  var code = res.getResponseCode(), j = {};
-  try { j = JSON.parse(res.getContentText()); } catch (e) {}
+  var model = model_(key, props, tier), tc = think_(model), res, code, j;
+  for (var k = 0; k < 2; k++) {
+    var b = JSON.parse(JSON.stringify(body));
+    if (tc && k === 0) b.generationConfig.thinkingConfig = tc;
+    res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+      method: "post", contentType: "application/json", headers: { "x-goog-api-key": key }, payload: JSON.stringify(b), muteHttpExceptions: true });
+    code = res.getResponseCode(); j = {};
+    try { j = JSON.parse(res.getContentText()); } catch (e) {}
+    if (!(code === 400 && tc && k === 0 && /think/i.test(JSON.stringify(j)))) break;
+  }
   if (code === 404) CacheService.getScriptCache().remove("gemini_model_" + tier);  // modèle retiré : on en recherchera un autre
   return { code: code, j: j, model: model };
 }
@@ -228,5 +242,14 @@ function model_(key, props, tier) {
 function testIA() {
   var r = ai_({ kind: "seance", ctx: "Sport : vélo. Durée : 1 h 30. Puissance : 182 W, normalisée 196 W. Cardio : 142 bpm. Dérive cardiaque 4,2 %. Surtout en zone 2." });
   Logger.log(JSON.stringify(r));
+  return r;
+}
+
+// Diagnostic de la conversation (menu des fonctions → testChat → Exécuter) : durée, modèle et début de la réponse dans le journal.
+function testChat() {
+  var t0 = Date.now();
+  var r = ai_({ kind: "chat", ctx: "Maintenant : test. Profil : FTP de travail 230 W, FC max 199. Nuit : 9 h 40 de sommeil, VFC 36 ms (zone normale 45-60). Hier : sortie de 3 h, charge 180.",
+    msgs: [{ r: "u", t: "Quelle séance je fais aujourd'hui ?" }] });
+  Logger.log((Date.now() - t0) / 1000 + " s · " + JSON.stringify(r).slice(0, 600));
   return r;
 }

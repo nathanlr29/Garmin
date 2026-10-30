@@ -74,6 +74,17 @@ calls.length = 0; r = post({ op: "ai", kind: "chat", ctx: CTX, msgs });
 assert.equal(r.text, "Oui, à condition…", "pensées retirées"); assert.equal(r.model, "gemini-3.5-flash-lite", "repli sur Flash-Lite");
 assert.equal(calls.filter(x => /generateContent/.test(x.url)).length, 2);
 
+// réflexion limitée (Gemini 3 et plus), redemandée sans si le modèle la refuse ; Flash qui plante (délai) → Flash-Lite
+calls.length = 0; gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "ok" }] } }] } }); post({ op: "ai", kind: "chat", ctx: CTX, msgs });
+assert.deepEqual(JSON.parse(calls.filter(x => /generateContent/.test(x.url)).pop().o.payload).generationConfig.thinkingConfig, { thinkingLevel: "low" });
+n = 0; gen = () => (++n === 1 ? { code: 400, body: { error: { message: "thinking_level is not supported" } } } : { code: 200, body: { candidates: [{ content: { parts: [{ text: "ok2" }] } }] } });
+calls.length = 0; r = post({ op: "ai", kind: "chat", ctx: CTX, msgs }); assert.equal(r.text, "ok2");
+const G = calls.filter(x => /generateContent/.test(x.url)); assert.equal(G.length, 2); assert.equal(JSON.parse(G[1].o.payload).generationConfig.thinkingConfig, undefined, "redemandé sans réglage");
+const f1 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = (url, o) => { if (/3\.8-flash:/.test(url)) throw new Error("Timeout: 60 s"); return f1(url, o); };
+gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "lite" }] } }] } });
+r = post({ op: "ai", kind: "chat", ctx: CTX, msgs }); assert.equal(r.text, "lite"); assert.equal(r.model, "gemini-3.5-flash-lite", "Flash trop lent : Flash-Lite");
+c2.UrlFetchApp.fetch = f1; assert.equal(c2.testChat().ok, true, "testChat, diagnostic depuis l'éditeur");
+
 // 2) ia.js : données envoyées (sans nom de sortie), page puis données, coupées à 13 000 caractères
 const ls = { bwWeight: "74", bwAge: "31" }, day = (d, o) => ({ d, bed: d + "T22:40", wake: d + "T08:30", sl: 35000, deep: 4000, light: 23000, rem: 7000, awake: 600, score: 85, hrv: 38, hrvLo: 45, hrvUp: 60, hrv7: 47, rhr: 46, rx: 11.5, ...o });
 const now = new Date(2026, 9, 30, 9, 0);

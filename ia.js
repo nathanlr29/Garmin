@@ -147,13 +147,16 @@ function chatModal() {
   m.querySelector("#iaNew").onclick = () => { lsSet(K_CHAT, { d: ymd(new Date()), m: [] }); drawChat(); };
   return m;
 }
+let tick = 0;
 function drawChat(busy, err) {
+  clearInterval(tick);
   const m = chatModal(), C = chatState(), box = m.querySelector("#iaMsgs");
   box.innerHTML = (C.m.length ? "" : `<p class="note">Pose une question ou choisis une suggestion. Il répond avec tes données du jour.</p>`)
     + C.m.map(x => `<div class="iamsg ${x.r === "u" ? "me" : "ia"}">${esc_(x.t)}</div>`).join("")
-    + (busy ? `<div class="iamsg ia busy">L'entraîneur analyse tes données…</div>` : "") + (err ? `<p class="note iaerr">${esc_(err)}</p>` : "");
+    + (busy ? `<div class="iamsg ia busy">L'entraîneur analyse tes données… <span class="iasec"></span></div>` : "") + (err ? `<p class="note iaerr">${esc_(err)}</p>` : "");
   m.querySelector("#iaSugg").hidden = C.m.length > 0;
   m.querySelectorAll("#iaForm button, #iaSugg .chip").forEach(b => b.disabled = !!busy);
+  if (busy) { const t0 = Date.now(); tick = setInterval(() => { const e = m.querySelector(".iasec"); if (e) e.textContent = Math.round((Date.now() - t0) / 1000) + " s"; else clearInterval(tick); }, 1000); }
   box.scrollTop = box.scrollHeight; const last_ = box.lastElementChild; if (last_ && last_.scrollIntoView) last_.scrollIntoView({ block: "nearest" });
 }
 let page0 = "";  // page ouverte au moment d'ouvrir la conversation
