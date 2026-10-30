@@ -270,3 +270,12 @@ tr.cur td{font-weight:700}
 .empty b{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
 footer{margin-top:28px;font-size:12.5px;color:var(--muted);text-align:center}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* encart « l'entraîneur (IA) » (ia.js) : une ligne dans une carte existante, filet au-dessus, pas de carte dans la carte */
+.iabox{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:grid;gap:8px}
+.iabox .iah{margin:0;font-size:14px}
+.iabox .iah small{color:var(--muted);font-weight:400}
+.iabox .iaq{display:flex;gap:8px}
+.iabox .iaq input{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--raised);color:var(--ink);font:inherit}
+.iabox > .btn{justify-self:start}
+.iabox .iat{margin:0;white-space:pre-line;line-height:1.5;padding-left:10px;border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 10px;border-radius:0 var(--r-md) var(--r-md) 0}
+.iabox .iam{margin:0}

@@ -9,7 +9,8 @@
 // Requête : POST text/plain (pas de preflight CORS), corps JSON :
 //   { k: "<clé>", op: "ping" }
 //   { k: "<clé>", op: "sync", c: "<collection>", items: [{ id, ts, v }, …] }
-//   { k: "<clé>", op: "ai", kind: "seance", ctx: "<bilan en texte>" }   → { ok: true, text, model }
+//   { k: "<clé>", op: "ai", kind: "seance|question|semaine|recup|sortie|objectifs", ctx: "<chiffres en texte>", q?: "<question>" }
+//     → { ok: true, text, model, left }   (left = demandes restantes aujourd'hui, plafond AI_DAY)
 // Réponse : { ok: true, items: [...] } ou { ok: false, err: "...", msg? }.
 //
 // Commentaire IA (Google Gemini, palier gratuit) : la clé Gemini est dans les propriétés du script (GEMINI_KEY),
@@ -102,22 +103,52 @@ function out_(o) {
 }
 
 // ------------------------------------------------------------------ Commentaire IA (Gemini)
-var AI_MAX_CTX = 6000;
+var AI_MAX_CTX = 6000, AI_MAX_Q = 300;
+var AI_DAY = 60;  // demandes par jour au plus (le palier gratuit de Flash-Lite en permet bien plus) ; jour du Pacifique, comme les quotas Google
+var AI_RULES = " Règles strictes : n'utilise que les chiffres fournis, n'en calcule et n'en invente aucun ; pas de sigles (CTL, ATL, TSB, TSS) ; "
+  + "aucun conseil médical (si quelque chose paraît anormal, dis d'en parler à un médecin) ; pas de titre, pas de liste, pas de mise en forme, pas de formule de politesse ; "
+  + "en français, en le tutoyant.";
+var AI_WHO = "Tu es l'entraîneur de Nathan, cycliste sur route en Bretagne (il court aussi). Les données viennent de son tableau de bord, déjà calculées. ";
 var AI_SYS = {
-  seance: "Tu es l'entraîneur de Nathan, cycliste sur route (il court aussi). On te donne le bilan d'une de ses séances, déjà calculé par son tableau de bord, "
-    + "avec parfois ses objectifs et sa forme du moment. Commente-le en 3 ou 4 phrases, en français, en le tutoyant : ce qui est bien, ce qui l'est moins, "
-    + "et une chose concrète pour la prochaine séance. Règles strictes : n'utilise que les chiffres fournis, n'en calcule et n'en invente aucun ; "
-    + "pas de sigles (CTL, ATL, TSB, TSS) ; aucun conseil médical (si quelque chose paraît anormal, dis d'en parler à un médecin) ; "
-    + "pas de titre, pas de liste, pas de mise en forme, pas de formule de politesse."
+  seance: AI_WHO + "On te donne le bilan d'une séance. Commente-le en 3 ou 4 phrases : ce qui est bien, ce qui l'est moins, une chose concrète pour la prochaine séance." + AI_RULES,
+  question: AI_WHO + "On te donne son état de forme, ses objectifs et sa semaine prévue, puis sa question. Réponds en 5 phrases au plus, seulement à partir de ces données ; "
+    + "si elles ne suffisent pas pour répondre, dis-le et dis ce qu'il faudrait savoir. Si la question ne porte pas sur l'entraînement, le vélo, la course, la récupération ou l'alimentation du sportif, "
+    + "réponds seulement que tu ne traites que ces sujets." + AI_RULES,
+  semaine: AI_WHO + "On te donne sa semaine (et le relevé de la semaine dernière s'il existe), sa progression et ses alertes. Fais-en le bilan en 4 phrases : "
+    + "ce qui a marché, ce qui a coincé, une priorité pour les jours qui viennent." + AI_RULES,
+  recup: AI_WHO + "On te donne sa nuit et ses indicateurs de récupération comparés à sa normale. Explique en 3 ou 4 phrases ce qu'ils disent ensemble, "
+    + "en reliant les signaux (charge des jours précédents, heure de coucher, durée et qualité du sommeil, VFC, cœur au repos), puis ce que ça implique pour sa journée. Aucun diagnostic." + AI_RULES,
+  sortie: AI_WHO + "On te donne l'analyse d'une sortie à venir : vent et sa fiabilité, profil et montées, arrêts conseillés, alimentation, tenue. Fais-lui un briefing d'avant-départ "
+    + "en 4 ou 5 phrases : les moments clés du parcours, où il aura le vent, où s'arrêter, quoi manger et emporter." + AI_RULES,
+  objectifs: AI_WHO + "On te donne ses objectifs, où il en est, sa progression et ses paliers d'entraînement. Fais le point en 4 phrases : ce qui progresse, ce qui bloque, "
+    + "et un ajustement concret à proposer (c'est lui qui décidera dans son Plan)." + AI_RULES
 };
+
+// compteur du jour (propriétés du script, sous verrou) : faux si le plafond est atteint ; sinon le nombre restant après celle-ci
+function aiCount_() {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(5000); } catch (e) { return 0; }
+  try {
+    var p = PropertiesService.getScriptProperties(), day = Utilities.formatDate(new Date(), "America/Los_Angeles", "yyyy-MM-dd"), c = {};
+    try { c = JSON.parse(p.getProperty("AI_COUNT") || "{}"); } catch (e) {}
+    var n = c.d === day ? c.n || 0 : 0;
+    if (n >= AI_DAY) return false;
+    p.setProperty("AI_COUNT", JSON.stringify({ d: day, n: n + 1 }));
+    return AI_DAY - n - 1;
+  } finally { lock.releaseLock(); }
+}
 
 function ai_(req) {
   var props = PropertiesService.getScriptProperties(), key = props.getProperty("GEMINI_KEY");
   if (!key) return { ok: false, err: "config_ia" };
   var sys = AI_SYS[req.kind];
   if (!sys) return { ok: false, err: "op" };
-  var ctx = String(req.ctx || "").slice(0, AI_MAX_CTX);
+  var ctx = String(req.ctx || "").slice(0, AI_MAX_CTX), q = String(req.q || "").replace(/\s+/g, " ").trim().slice(0, AI_MAX_Q);
   if (ctx.length < 20) return { ok: false, err: "vide" };
+  if (req.kind === "question" && q.length < 3) return { ok: false, err: "vide" };
+  var left = aiCount_();
+  if (left === false) return { ok: false, err: "quota_ia" };
+  if (q) ctx += "\n\nQuestion de Nathan : " + q;
   var model = model_(key, props), body = {
     systemInstruction: { parts: [{ text: sys }] },
     contents: [{ role: "user", parts: [{ text: ctx }] }],
@@ -135,7 +166,7 @@ function ai_(req) {
   var c = j.candidates && j.candidates[0], parts = c && c.content && c.content.parts || [];
   var text = parts.map(function (p) { return p.text || ""; }).join("").trim();
   if (!text) return { ok: false, err: "ia", msg: "réponse vide" + (c && c.finishReason ? " (" + c.finishReason + ")" : "") };
-  return { ok: true, text: text.slice(0, 2000), model: model };
+  return { ok: true, text: text.slice(0, 2000), model: model, left: left };
 }
 
 // le Gemini Flash-Lite stable le plus récent (liste des modèles de la clé), gardé 6 h ; repli sur l'alias « latest »

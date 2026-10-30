@@ -84,6 +84,9 @@ function renderRecup() {
   const P = inPeriod();
   selectDay(RC.sel);
   renderSleep(P); renderReg(P); renderRhr(P); renderHrvTrend(P); renderResp(P); renderCmp(); renderFacts();
+  // l'entraîneur (IA, à la demande) lit la nuit choisie et les tendances affichées
+  if (window.IA) IA.mount($("rMorning").parentElement, { kind: "recup", title: "Lecture de l'entraîneur", button: "Que disent ma nuit et ma récup ?",
+    ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rHrvTAns", "#rRespAns", "#rCmpAns"]) });
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
