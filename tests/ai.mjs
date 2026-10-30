@@ -1,17 +1,10 @@
-// Test du commentaire IA : node tests/ai.mjs
-// 1) contrôle des chiffres côté site (bilan.js) ; 2) opération « ai » de apps-script/sync.gs avec un faux Google (Gemini simulé)
+// Test de l'entraîneur IA : node tests/ai.mjs
+// 1) opération « ai » de apps-script/sync.gs avec un faux Google (Gemini simulé) ; 2) données envoyées par ia.js (IA.data)
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
 
-// 1) aiCheck : un chiffre absent du bilan fait rejeter le commentaire ; les petits entiers et les milliers « 1 026 » passent
-const win = { addEventListener() {} }, c1 = { window: win, document: { addEventListener() {} }, localStorage: { getItem: () => null, setItem() {} }, nf: (v, d = 0) => (+v).toFixed(d), addEventListener() {} };
-vm.createContext(c1); vm.runInContext(readFileSync(new URL("../bilan.js", import.meta.url), "utf8"), c1);
-const check = win.Bilan._aiCheck, ctx = "Durée 2:15:30 · Puissance 182 W normalisée 196 W · Cardio 142 bpm · Dérive cardiaque 4,2 % · 1 026 m D+";
-assert.equal(check("Belle séance : 196 W normalisés et une dérive de 4,2 %, 1026 m de dénivelé. Fais 3 séries la prochaine fois.", ctx).length, 0);
-assert.equal(JSON.stringify(check("Tu as tenu 210 W et 5,1 % de dérive.", ctx)), JSON.stringify(["210", "5.1"]));
-
-// 2) sync.gs, op « ai »
+// 1) sync.gs, op « ai »
 const calls = [], props = { SYNC_KEY: "0123456789abcdef0123" }, cache = {};
 let gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "Séance solide." }] } }] } });
 const res = (code, body) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(body) });
@@ -38,14 +31,14 @@ assert.equal(post({ op: "ai", kind: "poeme", ctx: CTX }).err, "op", "seulement l
 assert.equal(post({ op: "ai", kind: "question", ctx: CTX }).err, "vide", "question vide refusée");
 assert.equal(post({ op: "ai", kind: "seance", ctx: "x" }).err, "vide");
 let r = post({ op: "ai", kind: "seance", ctx: CTX });
-assert.equal(r.ok, true); assert.equal(r.text, "Séance solide."); assert.equal(r.model, "gemini-3.5-flash-lite", "Flash-Lite stable le plus récent");
+assert.equal(r.ok, true); assert.equal(r.text, "Séance solide."); assert.equal(r.model, "gemini-3.5-flash-lite", "Flash-Lite stable le plus récent (pas la préversion)");
 const g1 = calls.find(x => /generateContent/.test(x.url)), sent = JSON.parse(g1.o.payload);
 assert.match(g1.url, /models\/gemini-3\.5-flash-lite:generateContent$/); assert.equal(g1.o.headers["x-goog-api-key"], "AIzaFAUSSE", "clé dans l'en-tête, pas dans l'URL");
-assert.match(sent.systemInstruction.parts[0].text, /n'utilise que les chiffres fournis/); assert.equal(sent.contents[0].parts[0].text, CTX);
+assert.match(sent.systemInstruction.parts[0].text, /n'en invente aucune/); assert.match(sent.systemInstruction.parts[0].text, /échauffement/); assert.equal(sent.contents[0].parts[0].text, CTX);
 calls.length = 0; post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(calls.filter(x => /\/models\?/.test(x.url)).length, 0, "modèle gardé en cache");
 gen = () => ({ code: 429, body: { error: { message: "quota" } } }); assert.equal(post({ op: "ai", kind: "seance", ctx: CTX }).err, "quota_ia");
 gen = () => ({ code: 404, body: { error: { message: "model not found" } } }); r = post({ op: "ai", kind: "seance", ctx: CTX });
-assert.equal(r.err, "ia"); assert.match(r.msg, /not found/); assert.equal(cache.gemini_model, undefined, "modèle retiré : recherché à nouveau");
+assert.equal(r.err, "ia"); assert.match(r.msg, /not found/); assert.equal(cache.gemini_model_lite, undefined, "modèle retiré : recherché à nouveau");
 props.GEMINI_MODEL = "gemini-perso"; gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "ok" }] } }] } });
 calls.length = 0; assert.equal(post({ op: "ai", kind: "seance", ctx: CTX }).model, "gemini-perso", "GEMINI_MODEL impose le modèle");
 assert.equal(post({ op: "ping" }).ok, true, "la synchro marche toujours");
@@ -58,14 +51,46 @@ calls.length = 0; delete props.GEMINI_MODEL; props.AI_COUNT = JSON.stringify({ d
 for (const kind of ["question", "semaine", "recup", "sortie", "objectifs"]) {
   r = post({ op: "ai", kind, ctx: CTX, q: kind === "question" ? "Suis-je prêt pour 250 km ?" + " x".repeat(400) : undefined }); assert.equal(r.ok, true, kind);
   const body = JSON.parse(calls.filter(x => /generateContent/.test(x.url)).pop().o.payload);
-  assert.match(body.systemInstruction.parts[0].text, /n'utilise que les chiffres fournis/, kind);
-  if (kind === "question") { assert.match(body.contents[0].parts[0].text, /Question de Nathan : Suis-je prêt pour 250 km \?/); assert.ok(body.contents[0].parts[0].text.length < CTX.length + 340, "question tronquée"); assert.match(body.systemInstruction.parts[0].text, /ne traites que ces sujets/); }
+  assert.match(body.systemInstruction.parts[0].text, /n'en invente aucune/, kind);
+  if (kind === "question") { assert.match(body.contents[0].parts[0].text, /Question de Nathan : Suis-je prêt pour 250 km \?/); assert.ok(body.contents[0].parts[0].text.length < CTX.length + 640, "question tronquée"); assert.match(body.systemInstruction.parts[0].text, /ne traites que ceux-là/);
+    assert.match(calls.filter(x => /generateContent/.test(x.url)).pop().url, /gemini-3\.8-flash:/, "question : modèle Flash"); }
+  if (kind === "recup") assert.match(body.systemInstruction.parts[0].text, /Classe les causes/);
 }
 assert.equal(r.left, 55, "5 demandes faites sur 60");
 props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 60 }); assert.equal(post({ op: "ai", kind: "recup", ctx: CTX }).err, "quota_ia", "plafond du jour");
 props.AI_COUNT = JSON.stringify({ d: "2026-10-29", n: 60 }); assert.equal(post({ op: "ai", kind: "recup", ctx: CTX }).ok, true, "nouveau jour : compteur remis à zéro");
 
-// 3) ia.js : même contrôle des chiffres
-const c3 = { window: {} }; vm.createContext(c3); vm.runInContext(readFileSync(new URL("../ia.js", import.meta.url), "utf8"), c3);
-assert.equal(c3.window.IA._check("Ta plus longue sortie fait 180 km, il en manque 70.", "plus longue sortie 180 km, objectif 250 km").length, 1, "70 n'est pas dans la page");
-console.log("OK : commentaire IA (contrôle des chiffres, op ai de sync.gs : clés, usages, choix du modèle, quota, erreurs).");
+// conversation : messages alternés, données dans le premier message de Nathan, Flash puis Flash-Lite si Flash est saturé
+calls.length = 0; props.AI_COUNT = "{}";
+const msgs = [{ r: "m", t: "bonjour" }, { r: "u", t: "Quelle séance ce soir ?" }, { r: "m", t: "Sweet spot 3 × 10 min à 200 W." }, { r: "u", t: "Et 150 km demain ?" }];
+r = post({ op: "ai", kind: "chat", ctx: CTX, msgs }); assert.equal(r.ok, true);
+let body = JSON.parse(calls.filter(x => /generateContent/.test(x.url)).pop().o.payload);
+assert.deepEqual(body.contents.map(c => c.role), ["user", "model", "user"], "commence par Nathan, alterné");
+assert.match(body.contents[0].parts[0].text, /^Contexte \(données de Nathan\) :\nSport : vélo[\s\S]*Quelle séance ce soir \?$/);
+assert.match(body.systemInstruction.parts[0].text, /150 km/);
+assert.equal(post({ op: "ai", kind: "chat", ctx: CTX, msgs: msgs.slice(0, 3) }).err, "vide", "le dernier message doit être de Nathan");
+let n = 0; gen = () => (++n === 1 ? { code: 429, body: { error: { message: "quota" } } } : { code: 200, body: { candidates: [{ content: { parts: [{ text: "pensée", thought: true }, { text: "Oui, à condition…" }] } }] } });
+calls.length = 0; r = post({ op: "ai", kind: "chat", ctx: CTX, msgs });
+assert.equal(r.text, "Oui, à condition…", "pensées retirées"); assert.equal(r.model, "gemini-3.5-flash-lite", "repli sur Flash-Lite");
+assert.equal(calls.filter(x => /generateContent/.test(x.url)).length, 2);
+
+// 2) ia.js : données envoyées (sans nom de sortie), page puis données, coupées à 13 000 caractères
+const ls = { bwWeight: "74", bwAge: "31" }, day = (d, o) => ({ d, bed: d + "T22:40", wake: d + "T08:30", sl: 35000, deep: 4000, light: 23000, rem: 7000, awake: 600, score: 85, hrv: 38, hrvLo: 45, hrvUp: 60, hrv7: 47, rhr: 46, rx: 11.5, ...o });
+const now = new Date(2026, 9, 30, 9, 0);
+const c3 = { window: {}, document: { readyState: "complete", querySelector: () => null, getElementById: () => null }, localStorage: { getItem: k => ls[k] ?? null, setItem() {} },
+  S: { all: [{ id: 1, n: "Tour de Saint-Malo", t: "Ride", tk: "road_biking", d: "2026-10-29T15:37:21", dt: new Date(2026, 9, 29, 15, 37), m: 30465, km: 30.5, mt: 3956, el: 278, hr: 143, w: 0, np: 0, te: 3.2, hz: [58, 1150, 2031, 718, 0] }] } };
+c3.window.Charge = { ymd: d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, fitness: () => ({ ctl: 67.2, atl: 80.4, tsb: -13.2 }), tssOf: () => 64 };
+c3.window.Plan = { ftp: () => 230, _cfg: () => ({ goal: { ftp: 300, vo2: 65, date: "2026-12-31" } }), plannedFor: d => d === "2026-10-30" ? { label: "Seuil", w: { title: "Seuil #2", goal: "3 × 8 min à 95 %" }, dur: 75, place: "mw" } : null };
+c3.window.Recup = { data: { profile: { ftp: 262, vo2: [["2026-10-01", 58]], hrZones: { floors: [100, 119, 139, 159, 179], max: 199, lthr: 168, rest: 45 } } }, days: [day("2026-10-29", {}), day("2026-10-30", { hrv: 36 })], recoScore: () => ({ score: 52 }) };
+Object.assign(c3, { Charge: c3.window.Charge, Recup: c3.window.Recup, Plan: c3.window.Plan });
+vm.createContext(c3); vm.runInContext(readFileSync(new URL("../ia.js", import.meta.url), "utf8"), c3);
+const D = c3.window.IA.data(now);
+for (const re of [/FTP de travail 230 W/, /Garmin 262 W/, /74 kg/, /Z2 119-138/, /VO2max 58/, /niveau d'entraînement 67/, /fraîcheur −?-?13/,
+  /2026-10-30 \| 22:40 → 08:30 \| 9 h 43/, /36 ms \(45-60, 7 nuits 47\)/, /11,5 \/min/, /\| 52$/m, /2026-10-29 15:37 \| road_biking \| 1 h 06 \| 30,5 km \| 278 m/, /\| 3,2 \| 1 % 29 % 51 % 18 % 0 %/,
+  /aujourd'hui : Seuil #2 75 min home trainer : 3 × 8 min à 95 %/, /ultra de 250 km/])
+  assert.match(D, re);
+assert.ok(!/Saint-Malo/.test(D), "jamais le nom de la sortie");
+assert.ok(D.indexOf("2026-10-30 |") < D.indexOf("2026-10-29 |"), "la nuit la plus récente d'abord");
+const F = c3.window.IA.full("x".repeat(20000)); assert.equal(F.length, 13000); assert.match(F, /^Ce qu'affiche la page ouverte/);
+assert.match(c3.window.IA.full("Bilan."), /^Ce qu'affiche la page ouverte :\nBilan\.\n\nTes données :\nMaintenant/);
+console.log("OK : entraîneur IA (op ai de sync.gs : clés, usages, conversation, Flash puis Flash-Lite, quota, erreurs ; données envoyées par ia.js).");
