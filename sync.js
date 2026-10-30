@@ -33,9 +33,13 @@ function stateText() {
     err: `Erreur : ${st.msg || "inconnue"}.` }[st.s];
 }
 
-async function call(c, body) {
-  // text/plain = requête « simple » : pas de preflight, qu'Apps Script ne sait pas gérer.
-  const r = await fetch(c.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ k: c.key, ...body }), credentials: "omit", redirect: "follow" });
+async function call(c, body, ms) {
+  // text/plain = requête « simple » : pas de preflight, qu'Apps Script ne sait pas gérer. ms = délai maximum (IA : jamais d'attente sans fin)
+  const ab = ms && window.AbortController ? new AbortController() : null, to = ab ? setTimeout(() => ab.abort(), ms) : 0;
+  let r;
+  try { r = await fetch(c.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ k: c.key, ...body }), credentials: "omit", redirect: "follow", signal: ab ? ab.signal : undefined }); }
+  catch (e) { if (ab && ab.signal.aborted) throw Object.assign(new Error(`pas de réponse en ${Math.round(ms / 1000)} s, réessaie`), { code: "lent" }); throw e; }
+  finally { clearTimeout(to); }
   if (!r.ok) throw Object.assign(new Error(`le serveur répond ${r.status}`), { hard: true });
   let j; try { j = await r.json(); } catch (e) { throw Object.assign(new Error("réponse illisible (URL de déploiement ?)"), { hard: true }); }
   if (!j.ok) throw Object.assign(new Error(({ cle: "clé refusée", config: "clé absente du script (SYNC_KEY)", occupe: "serveur occupé",
@@ -43,10 +47,11 @@ async function call(c, body) {
     vide: "rien à commenter" }[j.err] || j.err || "refus") + (j.msg ? ` : ${j.msg}` : "")), { hard: j.err !== "occupe", code: j.err });
   return j;
 }
+const AI_WAIT = 150000;  // le script coupe lui-même Gemini avant (2 × 60 s au plus)
 // commentaire IA par l'Apps Script (clé Gemini côté script) : { kind, ctx } → { text, model }
 async function ai(body) {
   const c = cfg(); if (!c) throw new Error("synchronisation non configurée sur cet appareil");
-  return call(c, { op: "ai", ...body });
+  return call(c, { op: "ai", ...body }, AI_WAIT);
 }
 
 async function syncAll() {
