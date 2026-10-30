@@ -139,7 +139,8 @@ var AI_SYS = {
   objectifs: AI_WHO + "Fais le point sur ses objectifs : vitesse de progression réelle, ce qui freine (volume, intensité, récup, régularité), "
     + "et un plan d'action concret pour les semaines qui viennent (séances clés, volume) qu'il pourra reporter dans son Plan." + AI_RULES
 };
-var AI_TIER = { chat: "flash", question: "flash" };  // conversation : le modèle Flash (meilleur), repli sur Flash-Lite si son quota est atteint
+// Flash seulement si la propriété GEMINI_MODEL_FLASH le nomme : le 30/10/2026 il ne répondait pas (testChat tournait sans fin), Flash-Lite si.
+var AI_TIER = { chat: "flash", question: "flash" };
 
 // compteur du jour (propriétés du script, sous verrou) : faux si le plafond est atteint ; sinon le nombre restant après celle-ci
 function aiCount_() {
@@ -177,8 +178,8 @@ function ai_(req) {
   }
   var left = aiCount_();
   if (left === false) return { ok: false, err: "quota_ia" };
-  var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.5, maxOutputTokens: 4096 } };
-  var tiers = AI_TIER[req.kind] === "flash" ? ["flash", "lite"] : ["lite"], r = null;
+  var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.5, maxOutputTokens: 2048 } };
+  var tiers = AI_TIER[req.kind] === "flash" && props.getProperty("GEMINI_MODEL_FLASH") ? ["flash", "lite"] : ["lite"], r = null;
   for (var i = 0; i < tiers.length; i++) {
     try { r = gemini_(key, props, tiers[i], body); }
     catch (e) { if (i === tiers.length - 1) throw e; r = { code: 0 }; continue; }  // Flash trop lent (délai de 60 s d'UrlFetch) : Flash-Lite

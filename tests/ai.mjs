@@ -47,7 +47,7 @@ const fetch0 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = () => { throw new Er
 r = post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(r.err, "ia"); assert.match(r.msg, /permission/);
 c2.UrlFetchApp.fetch = fetch0; assert.equal(c2.testIA().ok, true, "testIA, à lancer depuis l'éditeur");
 // usages de l'encart IA : consigne propre à chaque usage, question ajoutée au contexte (300 caractères au plus), plafond du jour
-calls.length = 0; delete props.GEMINI_MODEL; props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 0 });
+calls.length = 0; delete props.GEMINI_MODEL; props.GEMINI_MODEL_FLASH = "gemini-3.8-flash"; props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 0 });
 for (const kind of ["question", "semaine", "recup", "sortie", "objectifs"]) {
   r = post({ op: "ai", kind, ctx: CTX, q: kind === "question" ? "Suis-je prêt pour 250 km ?" + " x".repeat(400) : undefined }); assert.equal(r.ok, true, kind);
   const body = JSON.parse(calls.filter(x => /generateContent/.test(x.url)).pop().o.payload);
@@ -84,6 +84,10 @@ const f1 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = (url, o) => { if (/3\.8-
 gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "lite" }] } }] } });
 r = post({ op: "ai", kind: "chat", ctx: CTX, msgs }); assert.equal(r.text, "lite"); assert.equal(r.model, "gemini-3.5-flash-lite", "Flash trop lent : Flash-Lite");
 c2.UrlFetchApp.fetch = f1; assert.equal(c2.testChat().ok, true, "testChat, diagnostic depuis l'éditeur");
+
+// sans GEMINI_MODEL_FLASH, la conversation reste sur Flash-Lite (Flash ne répondait pas)
+delete props.GEMINI_MODEL_FLASH; calls.length = 0; r = post({ op: "ai", kind: "chat", ctx: CTX, msgs });
+assert.equal(r.model, "gemini-3.5-flash-lite"); assert.equal(calls.filter(x => /flash:generate/.test(x.url)).length, 0);
 
 // 2) ia.js : données envoyées (sans nom de sortie), page puis données, coupées à 13 000 caractères
 const ls = { bwWeight: "74", bwAge: "31" }, day = (d, o) => ({ d, bed: d + "T22:40", wake: d + "T08:30", sl: 35000, deep: 4000, light: 23000, rem: 7000, awake: 600, score: 85, hrv: 38, hrvLo: 45, hrvUp: 60, hrv7: 47, rhr: 46, rx: 11.5, ...o });
