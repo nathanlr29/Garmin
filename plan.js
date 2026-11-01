@@ -309,7 +309,6 @@ const RUN_V = { foot: 1 / RUN_EASY, warm: .74, trot: .7, long: .76, strides: 1.0
 const RUN_IF = { rfoot: .65, rstrides: .68, rlong: .7, rtempo: .88, rthr: .97, rvo2: 1.08 };   // intensité par type : charge = h × IF² × 100
 const RUN_MIN = 20, RUN_GROW = 1.1, RUN_DELOAD = .7, RUN_LONG = 1.25;   // durée mini d'une course (min) ; +10 % sur la semaine d'avant ; semaine allégée ; sortie longue = 1,25 footing
 const RUN_COOL = 30;         // jour coché mais dur (clé, longue, jambes) : footing court et très facile, en plus de la séance du jour
-const RUN_STRIDES_FROM = 3;  // lignes droites à partir de la 3e semaine de reprise
 const RUN_HARDMIN = { rthr: 40, rvo2: 35 };                           // durée minimale d'une séance dure (échauffement + efforts + retour au calme)
 const RUN_ALT_ONLY = new Set(["rlong", "rtempo", "rthr", "rvo2"]);    // jamais sur un jour « en plus » (footing seulement)
 const RUN_MODES = ["auto", "reprise", "entretien", "progression"], RUN_SLOTS = ["none", "alt", "add"], RUN_DURS = [20, 30, 40, 45, 50, 60, 75, 90, 105, 120];
@@ -341,24 +340,44 @@ function runCtx(mon) {
   const prevMin = acts.filter(isRunA).reduce((s, a) => { const k = dayIndex(a.dt, pm); return k >= 0 && k <= 6 ? s + (a.mt || 0) / 60 : s; }, 0);
   let G = null; try { G = window.Course && Course._ && Course._.gauge ? Course._.gauge(acts, Date.now()) : null; } catch (e) {}
   const lim = G && window.Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
-  let under = 0; if (G) { const W = G.weeks.filter(w => w.t < mon.getTime()); for (let i = W.length - 1; i >= 0 && W[i].km < lim; i--) under++; }
-  return { pace: Charge.params().runPace || RUN_PACE0, prevMin, resume: !!(G && G.resume), chronic: G ? G.chronic : null, advice: G ? G.advice : null, under, ratio: G ? G.ratio : null, zone: G ? G.zone : null };
+  return { pace: Charge.params().runPace || RUN_PACE0, prevMin, resume: !!(G && G.resume), chronic: G ? G.chronic : null, advice: G ? G.advice : null, ratio: G ? G.ratio : null, zone: G ? G.zone : null, ladder: ladderFor(acts, mon) };
 }
-// séances de la semaine selon le mode : reprise = footings (+ lignes droites), entretien = footings + 1 sortie longue, progression = + au plus 1 séance dure
-function runKinds(mode, n, hard, strides) {
+// Palier du programme de reprise (reprise.js) pour la semaine du lundi `mon` : null avant son début, une fois fini ou sans reprise.js.
+// Même lecture que la carte « Ta reprise course » : palier rejoué depuis les courses Garmin, plus longue sortie plafonnée (longCap).
+function ladderFor(acts, mon) {
+  const X = window.Reprise && window.Reprise._; if (!X) return null;
+  try {
+    if (ymd(mon) < X.START) return null;
+    const P = X.progress(acts, mon), last = X.LADDER.length - 1;
+    if (P.hist.some(h => h.k === last && h.res === "up")) return null;   // dernier palier réussi : programme fini, retour au mode normal
+    const cap = X.longCap(acts, Math.min(Date.now(), mon.getTime()));
+    return { k: P.k, of: X.LADDER.length, light: X.LIGHT.has(P.k), split: P.k < X.SPLIT_FROM, durs: X.LADDER[P.k].map(m => Math.min(m, cap)).sort((a, b) => b - a) };
+  } catch (e) { return null; }
+}
+// séances de la semaine selon le mode : reprise = footings seulement (jamais de lignes droites : retour de périostite), entretien = footings + 1 sortie longue, progression = + au plus 1 séance dure
+function runKinds(mode, n, hard) {
   const K = Array(n).fill("rfoot");
   if (mode !== "reprise" && n >= 2) K[0] = "rlong";
   if (mode === "progression" && hard && n >= 2) K[n - 1] = hard;
-  if (mode === "reprise" && strides) K[0] = "rstrides";
   return K;
 }
 function placeRuns(items, rc, ph, ctx, mon, upto) {
-  const R = ctx.run || {}, pace = R.pace || RUN_PACE0, mode = rc.mode === "auto" ? (R.resume ? "reprise" : "entretien") : rc.mode;
+  const R = ctx.run || {};
+  // programme de reprise en cours (reprise.js) : en « auto » ou « reprise », c'est lui qui fixe le nombre et la durée des sorties
+  const L = (rc.mode === "auto" || rc.mode === "reprise") && R.ladder ? R.ladder : null;
+  const pace = R.pace || RUN_PACE0, mode = L ? "reprise" : rc.mode === "auto" ? (R.resume ? "reprise" : "entretien") : rc.mode;
   const info = { mode, auto: rc.mode === "auto", notes: [] };
-  // volume cible : +10 % sur la semaine d'avant, plafonné par le haut de la fourchette de la jauge, jamais sous le minimum
-  const cap = R.advice ? R.advice[1] * RUN_EASY * pace / 60 : Infinity;
-  let T = Math.max(runMinTotal(rc.n), Math.min(RUN_GROW * (R.prevMin || 0), cap));
-  if (ph.deload) { T *= RUN_DELOAD; info.notes.push("Semaine allégée : volume de course × 0,7, pas de séance dure."); }
+  const nTgt = L ? L.durs.length : rc.n;
+  let T;
+  if (L) { T = L.durs.reduce((a, x) => a + x, 0);
+    info.ladder = { k: L.k, of: L.of };
+    info.notes.push(`Palier ${L.k + 1} sur ${L.of} de ta reprise${L.light ? " (semaine allégée)" : ""} : ${L.durs.length} footings de ${L.durs.slice().reverse().join(", ")} min${L.split ? ", jamais deux jours de suite" : ""}.`); }
+  else {
+    // volume cible : +10 % sur la semaine d'avant, plafonné par le haut de la fourchette de la jauge, jamais sous le minimum
+    const cap = R.advice ? R.advice[1] * RUN_EASY * pace / 60 : Infinity;
+    T = Math.max(runMinTotal(rc.n), Math.min(RUN_GROW * (R.prevMin || 0), cap));
+    if (ph.deload) { T *= RUN_DELOAD; info.notes.push("Semaine allégée : volume de course × 0,7, pas de séance dure."); }
+  }
   info.T = Math.round(T);
   const hardAt = d => d >= 0 && d <= 6 && !!(items[d].muscu === "legs" || (items[d].bike && (TYPES[items[d].bike.t].hard || isLong(items[d].bike.t))) || (items[d].run && TYPES[items[d].run.t].hard));
   const have = items.filter(it => it.run), haveHard = have.some(it => TYPES[it.run.t].hard), E = [];
@@ -367,9 +386,8 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
     // tu as demandé une course ce jour-là : on la garde, mais courte et très facile (jamais le jour d'un test FTP : il fausserait la mesure)
     if (it.muscu === "legs" || (b && (TYPES[b.t].hard || isLong(b.t)))) { if (!(b && b.t.startsWith("test"))) E.push({ d, alt: false, max: Math.min(x.dur, RUN_COOL), rep: null, cool: true }); continue; }
     E.push({ d, alt: x.r === "alt", max: x.dur, rep: x.r === "alt" && b ? b : null }); }
-  const nVol = Math.max(1, Math.floor(T / RUN_MIN)), want = Math.max(0, rc.n - have.length), nWant = Math.min(want, nVol, E.length);
+  const nVol = L ? nTgt : Math.max(1, Math.floor(T / RUN_MIN)), want = Math.max(0, nTgt - have.length), nWant = Math.min(want, nVol, E.length);
   const hardType = Math.round(mon.getTime() / (7 * 864e5)) % 2 ? "rvo2" : "rthr", wantHard = mode === "progression" && !ph.deload && !haveHard;
-  const strides = mode === "reprise" && (R.under || 0) + 1 >= RUN_STRIDES_FROM;
   // meilleure affectation des séances aux jours possibles (recherche exhaustive : 4 courses au plus sur 7 jours)
   const fit = kinds => { let best = null;
     combos(E, kinds.length).forEach(ds => perms(kinds).forEach(p => { let sc = 0, ok = true;
@@ -380,12 +398,12 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
         if (t === "rlong") sc += (e.d >= 5 ? 6 : 0) + e.max / 30;                    // sortie longue : le week-end, sur le jour le plus long
         if (e.rep) sc -= 3; else if (!e.alt && items[e.d].bike) sc -= 1;             // on évite de remplacer du vélo, ou de faire deux séances dans la journée
         if (hardAt(e.d + 1)) sc -= 2;                                                // la veille d'un jour dur
-        if (i && e.d - ds[i - 1].d === 1) sc -= 4; });                               // deux jours de suite
+        if (i && e.d - ds[i - 1].d === 1) { sc -= 4; if (L && L.split) ok = false; } });   // début de reprise : jamais deux jours de suite                               // deux jours de suite
       if (ok && (!best || sc > best.sc + 1e-9)) best = { sc, p, ds }; }));
     return best; };
   let got = null, full = null;
   for (let n = nWant; n >= 1 && !got; n--) {
-    full = runKinds(mode, n, wantHard ? hardType : null, strides);
+    full = runKinds(mode, n, wantHard ? hardType : null);
     const noHard = full.map(t => t === hardType ? "rfoot" : t), noLong = full.map(t => t === "rlong" ? "rfoot" : t), none = noHard.map(t => t === "rlong" ? "rfoot" : t);
     const plain = full.map(() => "rfoot");   // en dernier recours, que des footings (un jour dur coché ne prend ni lignes droites ni sortie longue)
     for (const kinds of [full, noHard, noLong, none, plain]) { const a = fit(kinds); if (a) { got = { a, kinds }; break; } }
@@ -393,8 +411,13 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   const S0 = got ? got.a.ds.map((e, i) => ({ d: e.d, t: got.a.p[i], e, dur: 0 })) : [];
   const floor = x => Math.max(RUN_MIN, RUN_HARDMIN[x.t] || 0), wt = x => x.t === "rlong" ? RUN_LONG : 1, tot = () => S0.reduce((a, x) => a + x.dur, 0);
   if (S0.length) {
-    const f = T / S0.reduce((a, x) => a + wt(x), 0);
-    S0.forEach(x => { x.dur = Math.min(Math.max(W5(wt(x) * f), floor(x)), x.e.max); });
+    if (L) {   // durées du palier : les plus longues sur les jours qui en permettent le plus (une sortie qui manque = une des plus courtes)
+      const D = L.durs.slice(0, Math.max(0, L.durs.length - have.length));
+      S0.slice().sort((a, b) => b.e.max - a.e.max || a.d - b.d).forEach((x, i) => { x.dur = Math.min(D[i] || RUN_MIN, x.e.max); });
+    } else {
+      const f = T / S0.reduce((a, x) => a + wt(x), 0);
+      S0.forEach(x => { x.dur = Math.min(Math.max(W5(wt(x) * f), floor(x)), x.e.max); });
+    }
     // le total dépasse la cible : on rogne d'abord la sortie longue, puis la plus longue
     for (let g = 0; g < 200 && tot() > T + 1e-9; g++) { const c = S0.filter(x => x.dur > floor(x)).sort((a, b) => (b.t === "rlong") - (a.t === "rlong") || b.dur - a.dur)[0]; if (!c) break; c.dur = Math.max(floor(c), c.dur - 5); }
     // vélo + course dans la fourchette de charge du Plan (7 jours de la fourchette quotidienne) : sinon on réduit d'abord la course
@@ -409,7 +432,7 @@ function placeRuns(items, rc, ph, ctx, mon, upto) {
   if (wantHard && !(got && got.kinds.includes(hardType)) && nWant >= 2) info.notes.push("Pas de séance dure de course cette semaine : aucun jour possible n'a un jour de repos de chaque côté (séance clé ou sortie longue du vélo, jambes) ou une durée assez longue.");
   if (full && full.includes("rlong") && got && !got.kinds.includes("rlong")) info.notes.push("Pas de sortie longue en course : elle ne va que sur un jour « à la place du vélo » libre.");
   if (!E.length && want) info.notes.push("Aucune course cette semaine : aucun jour de course n'est possible (jamais le jour d'un test FTP).");
-  else if (S0.length < want && E.length) info.notes.push(`${S0.length} course${S0.length > 1 ? "s" : ""} au lieu de ${rc.n} : ${E.length < Math.min(want, nVol) ? `seulement ${E.length} jour${E.length > 1 ? "s" : ""} possible${E.length > 1 ? "s" : ""}` : nVol < want ? `volume trop bas pour des séances de ${RUN_MIN} min minimum` : "les règles de placement le demandent"}.`);
+  else if (S0.length < want && E.length) info.notes.push(`${S0.length} course${S0.length > 1 ? "s" : ""} au lieu de ${nTgt} : ${E.length < Math.min(want, nVol) ? `seulement ${E.length} jour${E.length > 1 ? "s" : ""} de course coché${E.length > 1 ? "s" : ""} possible${E.length > 1 ? "s" : ""}${L ? " : coche d'autres jours dans Mes disponibilités" : ""}` : nVol < want ? `volume trop bas pour des séances de ${RUN_MIN} min minimum` : L && L.split ? "pas deux jours de suite en début de reprise" : "les règles de placement le demandent"}.`);
   S0.forEach(x => { if (x.e.rep) items[x.d].bike = null; items[x.d].run = { t: x.t, dur: x.dur, slot: x.e.alt ? "alt" : "add", ...(x.e.rep ? { rep: { t: x.e.rep.t, dur: x.e.rep.dur } } : {}), ...(x.e.cool ? { cool: 1 } : {}) };
     if (x.e.cool) { const it = items[x.d], why = it.muscu === "legs" ? "la muscu jambes" : isLong(it.bike.t) ? "la sortie longue vélo" : "la séance clé vélo";
       info.notes.push(`${DAYN[x.d]} : footing de ${x.dur} min très facile, en plus de ${why} (allure où tu parles sans effort).`); } });
@@ -953,8 +976,10 @@ function renderWeek(W, prof) {
 // une phrase qui dit ce qu'« auto » a choisi, avec le chiffre de la jauge de reprise (km courus par semaine sur les 4 semaines d'avant)
 function runAutoText(c) {
   const R = runCtx(mondayOf(new Date())), G = R.chronic, lim = window.Course && Course._ && Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
-  const says = G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
-  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Un jour coché qui tombe sur une séance clé, la sortie longue vélo ou les jambes garde sa course, mais en footing court et très facile (30 min au plus), en plus de la séance du jour ; jamais le jour d'un test FTP. Une séance dure n'est jamais collée à un jour dur.`;
+  const Lc = runCtx(addDays(mondayOf(new Date()), 7)).ladder || R.ladder;
+  const says = Lc ? `ta reprise par paliers (palier ${Lc.k + 1} sur ${Lc.of} : ${Lc.durs.length} footings de ${Lc.durs.slice().reverse().join(", ")} min), qui fixe le nombre et la durée des sorties ; coche au moins ${Lc.durs.length} jours de course`
+    : G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
+  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings seulement, sans lignes droites (pendant le programme de reprise : ses paliers, pas le nombre de courses réglé) ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Un jour coché qui tombe sur une séance clé, la sortie longue vélo ou les jambes garde sa course, mais en footing court et très facile (30 min au plus), en plus de la séance du jour ; jamais le jour d'un test FTP. Une séance dure n'est jamais collée à un jour dur.`;
 }
 function renderAvail(c) {
   const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;

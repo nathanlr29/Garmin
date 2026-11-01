@@ -2,7 +2,7 @@
 /* Carte « Ta reprise course » de l'onglet Plan : programme de reprise progressive par paliers d'une semaine (demande du 23/10/2026,
    après une périostite tibiale), en complément du vélo. Footing facile seulement, pas de fractionné.
    La course est un bouche-trou : pas de jours fixes ni de questionnaire. La progression se lit dans les courses Garmin de chaque semaine
-   (voir progress) et la carte propose les jours libres du Plan où caser les sorties qui restent.
+   (voir progress). Le Plan place les sorties du palier sur les jours de course cochés (plan.js, ladderFor) ; sans jour coché, la carte propose des jours libres.
    API : Reprise.html({ acts, items, now }) → chaîne de la section ; Reprise._ = fonctions pures (node tests/reprise.mjs). */
 (() => {
   const DAY = 864e5;
@@ -106,7 +106,11 @@
     const today = dayIdx(new Date(now), mon), from = new Date(now).getHours() >= 20 ? today + 1 : today;
     const S = P.started ? slots(o.items, from, done.map(r => r.d), W.left.length, k, hard) : [];
     const longest = Math.max(...W.left, 0), wkd = S.filter(s => s.d >= 5).pop();
-    const slotTxt = !P.started || !W.left.length ? "" : S.length
+    // le Plan place les sorties du palier sur tes jours de course cochés (plan.js, ladderFor) : on les montre au lieu de chercher des jours libres
+    const inPlan = (o.items || []).filter(it => it && it.run && it.run.st === "plan" && it.day >= from);
+    const slotTxt = !P.started || !W.left.length ? "" : inPlan.length
+      ? `<p class="note">Dans ta semaine du Plan : ${list(inPlan.map(it => `${DAYN[it.day]} (${it.run.dur} min)`))}${inPlan.length < W.left.length ? `. Il en manque ${W.left.length - inPlan.length} : coche d'autres jours de course dans Mes disponibilités` : ""}.</p>`
+      : S.length
       ? `<p class="note">Où les caser cette semaine : ${list(S.map(s => `${DAYN[s.d]} (${s.what})`))}${wkd && longest > 40 ? `. La plus longue plutôt ${DAYN[wkd.d]}` : ""}${S.length < W.left.length ? `. Pas d'autre jour libre sans coller deux courses ou tomber sur une séance clé : si une sortie saute, le palier sera simplement refait` : ""}. Ce ne sont que des idées : cours quand le vélo te laisse de la place, le matin pour aller au boulot ou le midi.</p>`
       : `<p class="note">Plus de jour libre cette semaine sans coller deux courses ou tomber sur une séance clé : ce n'est pas grave, le palier sera simplement refait.</p>`;
     const cells = LADDER.map((L, i) => `<span class="${P.started && i < k ? "ok" : i === k ? "cur" : ""}" title="${list(L.map(String))} min">${P.started && i < k ? "✓ " : ""}#${i + 1}<small>${km(sum(L))} km${LIGHT.has(i) ? " · allégée" : ""}</small></span>`).join("");
