@@ -194,7 +194,7 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
 // ======================================================================= 3. course (étape 5a)
 const P = planA, RUN = P._run, TY = P.TYPES;
 const COURSE = { _: { GAUGE: { resumeKm: 15 } } };
-const runCtx = (o = {}) => ({ pace: 232, prevMin: 0, resume: false, advice: null, under: 0, ...o });
+const runCtx = (o = {}) => ({ pace: 232, prevMin: 0, resume: false, advice: null, ladder: null, ...o });
 const FORM = SIT.frais.form;
 const cfgRun = (base, runs, runN = 2, runMode = "auto") => ({ ...base, days: base.days.map((d, i) => runs[i] ? { ...d, run: runs[i][0], runDur: runs[i][1] ?? 60 } : { ...d }), runN, runMode });
 const it0 = (bike, muscu = null) => ({ bike: bike ? { ...bike } : null, muscu });
@@ -301,8 +301,21 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   items = free(); info = place(items, rc4("auto"), { run: { resume: false, prevMin: 100 } });
   assert.equal(info.mode, "entretien"); assert.deepEqual(items.filter(i => i.run).map(i => i.run.t).sort(), ["rfoot", "rfoot", "rlong"]);
   items = free(); info = place(items, rc4("entretien"), { run: { resume: true } }); assert.equal(info.mode, "entretien", "un mode choisi bat « auto »"); assert.equal(info.auto, false);
-  // lignes droites : au plus 1 par semaine, à partir de la 3e semaine de reprise
-  for (const [under, n] of [[0, 0], [1, 0], [2, 1], [5, 1]]) { items = free(); place(items, rc4("reprise"), { run: { under, prevMin: 100 } }); assert.equal(items.filter(i => i.run && i.run.t === "rstrides").length, n, `reprise, ${under} semaine(s) sous le seuil avant`); }
+  // reprise : jamais de lignes droites (retour de périostite), même après plusieurs semaines sous le seuil
+  for (const under of [0, 2, 5]) { items = free(); place(items, rc4("reprise"), { run: { under, prevMin: 100 } }); assert.equal(items.filter(i => i.run && i.run.t === "rstrides").length, 0, `reprise, ${under} semaine(s) sous le seuil avant`); }
+  // programme de reprise (reprise.js) : le palier fixe le nombre et la durée des footings, en « auto » comme en « reprise »
+  const LAD = { k: 0, of: 17, light: false, split: true, durs: [30, 25, 25] }, rc7 = m => rcOf({ 0: ["add"], 1: ["add"], 2: ["alt"], 3: ["alt"], 4: ["add"], 5: ["alt"], 6: ["alt"] }, 1, m);
+  for (const m of ["auto", "reprise"]) { items = free(); info = place(items, rc7(m), { run: { ladder: LAD, prevMin: 300, resume: false } });
+    const R = items.filter(i => i.run); assert.equal(info.mode, "reprise", m); assert.equal(R.length, 3, `${m} : 3 sorties du palier malgré runN = 1`);
+    same(R.map(i => i.run.dur).sort((a, b) => a - b), [25, 25, 30], `${m} : durées du palier`); assert.ok(R.every(i => i.run.t === "rfoot"));
+    assert.ok(R.every((x, i) => !i || x.day - R[i - 1].day > 1), `${m} : jamais deux jours de suite avant le palier 9`); assert.equal(info.T, 80); assert.equal(info.ladder.k, 0); }
+  items = free(); info = place(items, rc7("entretien"), { run: { ladder: LAD, prevMin: 100 } }); assert.equal(info.mode, "entretien", "un mode choisi (hors reprise) ignore le palier");
+  // un seul jour coché : 1 sortie, la plus longue du palier, et une ligne demande d'en cocher d'autres
+  items = free(); info = place(items, rcOf({ 0: ["add", 40] }, 2), { run: { ladder: LAD } });
+  same(items.filter(i => i.run).map(i => i.run.dur), [30]); assert.ok(info.notes.some(n => /1 course au lieu de 3 .*coche d'autres jours/.test(n)), info.notes.join(" | "));
+  // jours de suite permis à partir du palier 9 ; durée plafonnée par le réglage du jour
+  items = free(); place(items, rcOf({ 0: ["alt", 40], 1: ["alt"], 2: ["alt"], 3: ["alt"], 4: ["alt"] }, 2), { run: { ladder: { ...LAD, k: 9, split: false, durs: [60, 35, 30, 30, 25] } } });
+  same(items.map(i => i.run ? i.run.dur : 0), [25, 60, 35, 30, 30, 0, 0], "la plus courte sur le jour réglé à 40 min");
   // progression : au plus 1 séance dure, en alternance d'une semaine à l'autre
   const kinds = [];
   for (let w = 0; w < 4; w++) { items = free(); place(items, rc4("progression"), { mon: monday(w), run: { prevMin: 100 } });
@@ -446,8 +459,11 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   const gauge = () => ({ resume: true, chronic: 8, advice: [6.4, 10.4], weeks: [{ t: mon(9, 12), km: 3 }, { t: mon(9, 19), km: 5 }, { t: mon(9, 26), km: 20 }, { t: mon(10, 2), km: 4 }, { t: mon(10, 9), km: 6 }] });
   const h = load({ acts: [], course: { _: { GAUGE: { resumeKm: 15 }, gauge } } });
   const rc = RUN_(h).ctx(new Date(2026, 10, 16));
-  assert.equal(rc.resume, true); assert.deepEqual(rc.advice, [6.4, 10.4]); assert.equal(rc.under, 2, "semaines consécutives sous 15 km avant la semaine visée (la semaine à 20 km coupe)");
-  assert.equal(RUN_(h).ctx(new Date(2026, 9, 26)).under, 2, "deux semaines sous le seuil avant le 26/10");
+  assert.equal(rc.resume, true); assert.deepEqual(rc.advice, [6.4, 10.4]); assert.equal(rc.ladder, null, "sans reprise.js, pas de palier");
+  // palier de reprise.js : null avant le 2 novembre, palier 1 ensuite, plus longue sortie plafonnée (aucune course : 25 min)
+  vm.runInContext(read("../reprise.js"), h.ctx);
+  assert.equal(RUN_(h).ctx(new Date(2026, 9, 26)).ladder, null, "avant le début de la reprise");
+  const lad = RUN_(h).ctx(new Date(2026, 10, 2)).ladder; assert.equal(lad.k, 0); same(lad.durs, [25, 25, 25]); assert.equal(lad.split, true);
   const r2 = RUN_(load({ acts: [] })).ctx(new Date(2026, 10, 2)); assert.equal(r2.resume, false); assert.equal(r2.advice, null); assert.equal(r2.pace, 300, "allure seuil de repli");
   function RUN_(x) { return x.Plan._run; }
   // plannedFor : course seule, vélo seul, les deux
@@ -569,7 +585,7 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
     const Wp = h.Plan._eff(MON, C5, { form: FORM5, ready: { today: 30, last: 30, avg3: 30 }, prev: PREV[0], rc: h.Plan._run.cfg(C5), run: runCtx({ prevMin: 120, zone: 3, ratio: 2 }) });
     assert.ok(!Wp.changes.some(x => ["rgauge", "rrest-2026-11-12"].includes(x.id)));
   }
-  // correction : en reprise avec lignes droites, des jours cochés tous durs gardaient 0 course (les lignes droites n'y vont pas) ; ils prennent des footings
+  // des jours cochés tous durs gardent des footings très faciles en reprise (avant le 13/10/2026, avec les lignes droites, ils en gardaient 0)
   {
     const items = week([[KEY], [LONG], [E60, "legs"], [null], [null], [null], [null]]);
     const info = place(items, rcOf({ 0: ["add"], 1: ["alt"], 2: ["add"] }, 3, "reprise"), { run: { prevMin: 0, under: 4 } });
