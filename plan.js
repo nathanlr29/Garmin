@@ -251,8 +251,9 @@ function genWeek(mon, c, ctx, fixed) {
   const fixedKeys = slots.filter(s => (s.fixed || s.grp) && isKey(s.t)), Krem = Math.max(0, K - fixedKeys.length);
   const cands = slots.filter(s => !s.fixed && !s.grp && s !== longS && s.dur >= 45);
   // muscu : séances des jours passés gardées, les autres réparties sur les matins restants
+  // séance choisie à la main pour un matin à venir (ctx.mfix, planOv[jour].m) : gardée telle quelle, le reste de la semaine se recalcule autour
   const fixedMus = []; for (let d = 0; d < upto; d++) { const m = fixed.items[d] && fixed.items[d].muscu; if (m && MUSCU[m]) fixedMus.push({ day: d, s: m }); }
-  const mDays = []; for (let d = upto; d < 7; d++) if (c.days[d].muscu && !(longS && longS.day === d)) mDays.push(d);
+  const mDays = [], mfix = ctx.mfix || {}; for (let d = upto; d < 7; d++) if (c.days[d].muscu && !(longS && longS.day === d)) { if (MUSCU[mfix[d]]) fixedMus.push({ day: d, s: mfix[d] }); else mDays.push(d); }
   const total = Math.min(4, fixedMus.length + mDays.length);
   const sess = MORDER.slice(0, total).filter(s => !fixedMus.some(f => f.s === s)).slice(0, mDays.length);
   const kOpts = [];
@@ -270,6 +271,7 @@ function genWeek(mon, c, ctx, fixed) {
   if (longS && !longS.fixed) { const L = items[longS.day].bike; L.t = "long";
     if (ph.deload) L.dur = DURS.reduce((a, x) => Math.abs(x - L.dur * .7) < Math.abs(a - L.dur * .7) ? x : a, 150); }  // semaine allégée : sortie longue raccourcie
   best.mo.forEach(x => { if (!isFixed(x.day)) items[x.day].muscu = x.s; });
+  if (ctx.mfix) Object.keys(ctx.mfix).forEach(d => { if (!isFixed(+d) && items[d].muscu === ctx.mfix[d]) items[d].mown = 1; });
   fillEasy(items, ph, tired, best.ko.keys.length, upto);
   // 2e passe : la course, seulement si des jours de course sont réglés (sinon rien ne change, voir tests/plan.mjs)
   const rc = ctx.rc !== undefined ? ctx.rc : runCfg(c), run = rc ? placeRuns(items, rc, ph, ctx, mon, upto) : null;
@@ -468,11 +470,16 @@ function weekFacts(mon) {
 function baseWeek(mon, c, ctx) {
   const key = "planWk:" + ymd(mon), cur = mondayOf(new Date());
   let base = store2.get(key);
-  if (!base || base.v !== 2 || base.sig !== cfgSig(c) || !Array.isArray(base.items)) {
+  // muscu choisie à la main (planOv[jour].m) : la semaine est recalculée quand ce choix change ; sans choix, msig = "" (rien ne change)
+  const ov = store2.get("planOv:" + ymd(mon)) || {}, mfix = {};
+  for (let d = 0; d < 7; d++) if (ov[d] && MUSCU[ov[d].m]) mfix[d] = ov[d].m;
+  const msig = Object.keys(mfix).length ? JSON.stringify(mfix) : "";
+  if (msig) ctx = { ...ctx, mfix };
+  if (!base || base.v !== 2 || base.sig !== cfgSig(c) || (base.msig || "") !== msig || !Array.isArray(base.items)) {
     const td = (new Date().getDay() + 6) % 7;  // disponibilités changées en cours de semaine : les jours passés restent tels quels
     const fixed = +mon === +cur && base && base.v === 2 && Array.isArray(base.items) && td > 0 ? { upto: td, items: base.items } : null;
     const g = genWeek(mon, c, ctx, fixed);
-    base = { v: 2, sig: cfgSig(c), K: g.K, tired: g.tired, items: g.items, at: new Date().toISOString(), ...(g.run ? { run: g.run } : {}) };
+    base = { v: 2, sig: cfgSig(c), ...(msig ? { msig } : {}), K: g.K, tired: g.tired, items: g.items, at: new Date().toISOString(), ...(g.run ? { run: g.run } : {}) };
     if (+mon <= +cur && (S.all || []).length) store2.set(key, base);  // la semaine en cours est figée (une fois les activités chargées : sinon forme et volume de course seraient calculés à vide) ; la suivante reste un aperçu
   }
   return base;
@@ -583,7 +590,7 @@ function effective(mon, c, ctx) {
     // course choisie à la main (n'importe quel jour, même avec muscu et vélo) : jamais bloquée par les règles de placement ; 0 = retirée
     if (o.run === 0) run = null;
     else if (o.run && RUN_OWN(o.run)) { run = { ...(run || { slot: bike ? "add" : "alt" }), t: o.run.t, dur: o.run.dur, st: "plan", own: true, ...(run ? {} : { added: true }) }; delete run.cool; }
-    return { day: d, date: addDays(mon, d), bike, muscu: it.muscu ? { s: it.muscu, st: "plan" } : null, extra: [], ...(run ? { run } : {}) }; });
+    return { day: d, date: addDays(mon, d), bike, muscu: it.muscu ? { s: it.muscu, st: "plan", ...(it.mown ? { own: true } : {}) } : null, extra: [], ...(run ? { run } : {}) }; });
   const out = { mon, ph, items, changes: [], K: base.K, tired: base.tired, isCur, td: isCur ? (now.getDay() + 6) % 7 : mon < cur ? 7 : -1, ...(base.run ? { runInfo: base.run } : {}) };
   if (out.td < 0) return out;  // semaine à venir : simple aperçu
   const td = out.td, F = weekFacts(mon), ftp = profile().ftp, undo = new Set(store2.get("planUndo:" + key) || []), lbl = store2.get("muscuLbl") || {};
@@ -602,7 +609,7 @@ function effective(mon, c, ctx) {
     else if (it.run && (d < td || (d === td && eveningOver))) it.run.st = "missed"; }
   const plannedKeys = items.filter(it => it.bike && isKey(it.bike.t)).length;
   // --- muscu : ce qui a été fait (étiquette choisie, sinon séance prévue ce jour-là, sinon la prochaine de la semaine)
-  const doneS = new Set(), planM = items.filter(it => it.muscu).map(it => it.muscu.s);
+  const doneS = new Set(), planM = items.filter(it => it.muscu && !it.muscu.own).map(it => it.muscu.s);   // une séance choisie à la main n'est jamais prise par une séance faite sans étiquette
   for (let d = 0; d < 7 && d <= td; d++) F[d].muscu.forEach(a => {
     const it = items[d], here = it.muscu && it.muscu.st === "plan" ? it.muscu.s : null;
     let s = lbl[a.id] || (here && !doneS.has(here) ? here : planM.find(x => !doneS.has(x)));
@@ -879,8 +886,10 @@ function runDetail(W, it) {
   }
   return `<div class="wdet" data-d="${it.day}" data-r="1">${h}</div>`;
 }
-function muscuChip(it) {
+function muscuChip(it, W) {
   const m = it.muscu, M = MUSCU[m.s];
+  // séance à venir : on peut en changer avant de la faire, la semaine se recalcule autour (planOv[jour].m)
+  if (W && m.st === "plan" && m.moved == null && editable(W, it)) return `<label class="mchip plan${m.own ? " own" : ""}" title="Change la séance : le reste de la semaine se recalcule autour."><select data-mov="${ymd(it.date)}" aria-label="Séance de muscu prévue">${MORDER.map(s => `<option value="${s}" ${s === m.s ? "selected" : ""}>${MUSCU[s].l}</option>`).join("")}${m.own ? `<option value="">↺ choix du plan</option>` : ""}</select><small>${m.own ? "choisie" : M.d}</small></label>`;
   if (m.st === "done" && m.act) return `<label class="mchip done" title="Séance faite (Garmin). Change l'étiquette si ce n'était pas celle-ci."><b>✓</b><select data-mlbl="${m.act.id}" aria-label="Séance de muscu faite">${MORDER.map(s => `<option value="${s}" ${s === m.s ? "selected" : ""}>${MUSCU[s].l}</option>`).join("")}</select></label>`;
   const sub = m.st === "missed" ? "non faite" : m.st === "swapped" ? "faite un autre jour" : m.moved != null ? `reportée de ${dl(m.moved)}` : M.d;
   return `<span class="mchip ${m.st}${m.moved != null ? " moved" : ""}"><b>${M.l}</b><small>${sub}</small></span>`;
@@ -888,7 +897,7 @@ function muscuChip(it) {
 function renderDay(W, ready) {
   if (W.td < 0 || W.td > 6) return "";
   const it = W.items[W.td], b = it.bike, r = ready.today;
-  const morning = it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : `<span class="dnone">Pas de muscu</span>`;
+  const morning = it.muscu ? muscuChip(it, W) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : `<span class="dnone">Pas de muscu</span>`;
   const rn = it.run, runBtn = rn ? `<button class="dbk" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}"><span class="badge">${TYPES[rn.t].l}</span><span class="dbt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)}${rn.cool ? " · très facile" : ""} · ≈ ${nf(rn.w.km, 1)} km · ≈ ${rn.w.tss} de charge`}</small>${runStatus(rn)}</button>` : "";
   const evening = b ? `<button class="dbk" data-open="${ymd(it.date)}" style="--tc:${TYPES[b.t].c}"><span class="badge">${TYPES[b.t].l}</span><span class="dbt">${esc(b.w.title)}</span><small>${b.st === "done" ? doneSummary(b.acts) : `${fmtMin(b.dur)} · ${placeL(b.place)} · ≈ ${b.w.tss} de charge`}</small>${bikeStatus(b)}</button>`
     : rn && rn.slot === "alt" ? runBtn : it.extra.length ? `<span class="dnone">Repos prévu · ${it.extra.length} sortie faite</span>` : `<span class="dnone">Repos vélo</span>`;
@@ -934,7 +943,7 @@ function weekRow(W, it, prof) {
   const rn = it.run, openR = !!PS.open[ymd(it.date) + ":r"];
   const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"}${rn.cool ? " · très facile" : ""} · ≈ ${rn.w.tss} de charge`}</small>${runStatus(rn)}</button>` : "";
   return `<div class="wrow${now ? " now" : ""}${past ? " past" : ""}"><div class="wday"><b>${DAYN[it.day].slice(0, 3)}</b><span>${it.date.getDate()} ${it.date.toLocaleDateString("fr-FR", { month: "short" })}</span></div>
-    <div class="wmus">${it.muscu ? muscuChip(it) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
+    <div class="wmus">${it.muscu ? muscuChip(it, W) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : ""}</div>
     <div class="wbike">${bikeH}${runH}${extra}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo</span>` : ""}${!rn && editable(W, it) ? addRunBtn(it) : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(W, it) : ""}`;
 }
 // semaine en cours : les jours déjà passés tiennent en une ligne (« Lun → jeu : 4 séances faites »), dépliable ;
@@ -1156,6 +1165,11 @@ function bind(c, prof) {
   if ($("pRedo")) $("pRedo").onclick = () => { store2.del("planUndo:" + ymd(PS.Wc.mon)); render(); };
   box.querySelectorAll("[data-bilan]").forEach(b => b.onclick = () => window.Bilan ? Bilan.open(+b.dataset.bilan) : window.open(`https://connect.garmin.com/modern/activity/${b.dataset.bilan}`, "_blank", "noopener"));
   box.querySelectorAll("[data-mlbl]").forEach(s => s.onchange = () => { const m = store2.get("muscuLbl") || {}; m[s.dataset.mlbl] = s.value; store2.set("muscuLbl", m); render(); });
+  // muscu prévue changée à la main : gardée pour ce jour (une seule fois par séance dans la semaine), la semaine se recalcule
+  box.querySelectorAll("[data-mov]").forEach(s => s.onchange = () => { const dt = parseYmd(s.dataset.mov), k = "planOv:" + ymd(mondayOf(dt)), d = dayIndex(dt, mondayOf(dt)), ov = store2.get(k) || {};
+    Object.keys(ov).forEach(x => { if (+x !== d && ov[x] && ov[x].m === s.value) { delete ov[x].m; if (!Object.keys(ov[x]).length) delete ov[x]; } });
+    ov[d] = { ...(ov[d] || {}) }; if (s.value) ov[d].m = s.value; else delete ov[d].m; if (!Object.keys(ov[d]).length) delete ov[d];
+    store2.set(k, ov); toast(s.value ? `${MUSCU[s.value].l} ${dl(d)} : semaine recalculée.` : "Muscu rendue au plan : semaine recalculée."); render(); });
   box.querySelectorAll("[data-pal]").forEach(b => b.onclick = () => { const [d, t, k, ok] = b.dataset.pal.split(":"); setPal(d, t, +k, ok === "x" ? null : ok === "1"); render(); });
   box.querySelectorAll("[data-setftp]").forEach(b => b.onclick = () => { store2.set("planFtp", +b.dataset.setftp); render(); });
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const it = PS.W.items[+b.dataset.dl]; download(fileName(it.bike, it.date), zwo(it.bike, it.date, prof)); });

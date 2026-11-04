@@ -604,3 +604,26 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   }
   console.log("ok plan (course 5b) : course ratée replacée ou abandonnée, récup basse, course dure imprévue la veille, jauge en risque élevé, chacun annulable");
 }
+
+// ---- 6. Muscu changée à la main avant la séance (planOv[jour].m) : gardée, le reste de la semaine se recalcule autour
+{
+  const h = load(), cfg = CFGS.trois, mon = monday(1), s = { ...SIT.frais, prev: PREV[0] };
+  const g0 = h.Plan._gen(mon, cfg, s), mus = a => a.map(x => x || "-").join(" ");
+  const legs0 = g0.items.findIndex(x => x.muscu === "legs"), tgt = g0.items.findIndex(x => x.muscu && x.muscu !== "legs");
+  const g1 = h.Plan._gen(mon, cfg, { ...s, mfix: { [tgt]: "legs" } });
+  assert.equal(g1.items[tgt].muscu, "legs", "Legs choisie à la main : gardée ce jour-là");
+  assert.ok(g1.items[tgt].mown, "séance marquée « choisie »");
+  assert.equal(g1.items.filter(x => x.muscu === "legs").length, 1, "pas de deuxième Legs dans la semaine");
+  assert.equal(g1.items.filter(x => x.muscu).length, g0.items.filter(x => x.muscu).length, "même nombre de séances de muscu");
+  const key = d => g1.items[d] && g1.items[d].bike && h.Plan.isKey(g1.items[d].bike.t);
+  assert.ok(!key(tgt) && !key(tgt + 1), "pas de séance clé le jour des jambes ni le lendemain : le vélo s'est recalculé");
+  assert.notEqual(legs0, tgt);
+  // par l'effectif : planOv[jour].m relance la génération (semaine à venir), et sans choix rien ne change
+  const W0 = h.Plan._eff(mon, cfg, s), dk = ymd(mon);
+  h.store.set("planOv:" + dk, JSON.stringify({ [tgt]: { m: "legs" } }));
+  const W1 = h.Plan._eff(mon, cfg, s);
+  assert.equal(W1.items[tgt].muscu.s, "legs"); assert.ok(W1.items[tgt].muscu.own);
+  h.store.set("planOv:" + dk, JSON.stringify({ [tgt]: { m: "zzz" } }));
+  assert.equal(mus(h.Plan._eff(mon, cfg, s).items.map(x => x.muscu && x.muscu.s)), mus(W0.items.map(x => x.muscu && x.muscu.s)), "valeur inconnue ignorée");
+  console.log("ok plan (muscu choisie) : gardée, pas de doublon, vélo recalculé autour, valeur inconnue ignorée");
+}
