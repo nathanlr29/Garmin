@@ -625,6 +625,14 @@ function effective(mon, c, ctx) {
   const missedM = [];
   items.forEach(it => { if (it.muscu && it.muscu.displaced && !doneS.has(it.muscu.displaced)) missedM.push({ s: it.muscu.displaced, from: it.day });
     if (it.muscu && it.muscu.st === "plan" && (it.day < td || (it.day === td && morningOver))) { it.muscu.st = "missed"; if (!doneS.has(it.muscu.s)) missedM.push({ s: it.muscu.s, from: it.day }); } });
+  // --- R0 : jambes faites un matin où elles n'étaient pas prévues → pas de séance clé ce soir-là ni le lendemain (règle de placement de la muscu)
+  items.forEach(it => { const d = it.day, m = it.muscu;
+    if (d > td || !m || m.st !== "done" || m.s !== "legs" || base.items[d].muscu === "legs") return;
+    [d, d + 1].forEach(x => { const X = items[x], b = X && X.bike;
+      if (x > 6 || x < td || !b || b.st !== "plan" || !isKey(b.t) || b.t === "grp") return;   // la sortie de groupe ne se déplace pas
+      const t = b.t, tgt = keySlot(items, Math.max(x + 1, td + (now.getHours() >= 20 ? 1 : 0)), F, ftp, { ignore: x }), easy = x === d ? "rec" : "end";
+      step(`legs-${x}`, `Legs faite ${dl(d)} matin : ${TYPES[t].l} de ${dl(x)} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée (pas d'autre jour possible cette semaine)"}, ${easy === "rec" ? "récupération" : "endurance"} ${x === td ? "ce soir" : dl(x)} : pas de séance clé le jour des jambes ni le lendemain.`,
+        () => { if (tgt != null) { const B = items[tgt].bike; B.t = t; B.dur = Math.max(B.dur, 60); B.moved = x; } b.t = easy; b.dur = Math.min(b.dur, easy === "rec" ? 60 : b.dur); b.changed = true; }); }); });
   // --- R1 : séance clé ratée → déplacée si possible
   items.forEach(it => { if (!it.bike || it.bike.st !== "missed" || !isKey(it.bike.t) || it.bike.t === "grp") return;  // une sortie de groupe ne se déplace pas
     const future = items.filter(x => x.day >= td && x.bike && x.bike.st === "plan" && isKey(x.bike.t)).length;

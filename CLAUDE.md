@@ -294,6 +294,7 @@ Premier onglet (`synthese`, titre « Ma forme »). **Défaut** : un appareil san
   - **Plus de séance de moins de 45 min** : 30 retiré de `DURS`, une ancienne config à 30 min passe à 45.
 - Pools par bloc (sans groupe) : [vo2r,thr] [vo2r,ss] [thr,vo2r] [ss,thr].
 - Règles quotidiennes :
+  - R0 (04/11/2026) : Legs faite un matin où elle n'était pas prévue (étiquette de la séance faite ou rattachement automatique) → la séance clé de ce soir-là et du lendemain est décalée (`keySlot`) ou remplacée (récupération le soir des jambes, endurance le lendemain), `legs-<jour>` ; la sortie de groupe ne bouge pas ;
   - R1 : clé manquée → déplacée ;
   - R2 : readiness <45 → clé déplacée ou remplacée ;
   - R2bis : readiness <35 → séance facile remplacée par récup 45 min ;

@@ -633,5 +633,20 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   assert.ok(!g3.items[busy].muscu && g3.items[busy].mnone, "« Pas de muscu » : matin vidé");
   const c6 = { ...CFGS.cinq, days: CFGS.cinq.days.map(d => ({ ...d })) }, nm = c6.days.findIndex(d => !d.muscu);
   assert.equal(h.Plan._gen(mon, c6, { ...s, mfix: { [nm]: "upper" } }).items[nm].muscu, "upper", "même un matin non coché dans les dispos");
+  // jambes faites (étiquette Legs) un matin de séance clé, sans qu'elles soient prévues ce jour-là → clé décalée ou remplacée, rien de dur le lendemain
+  {
+    const MON = new Date(2026, 10, 2), cfgL = CFGS.cinq, ctxL = { form: SIT.frais.form, ready: SIT.frais.ready, prev: PREV[0] };
+    const hb = load(); hb.clock.t = new Date(2026, 10, 2, 5).getTime(); const Wb = hb.Plan._eff(MON, cfgL, ctxL);
+    const k = Wb.items.findIndex(it => it.bike && h.Plan.isKey(it.bike.t) && it.bike.t !== "grp" && !(it.muscu && it.muscu.s === "legs"));
+    const act = { id: 9901, n: "Musculation", t: "strength_training", dt: new Date(2026, 10, 2 + k, 6, 20), d: `2026-11-0${2 + k}T06:20:00`, mt: 900, km: 0, np: 0, w: 0, te: 0, hr: 70 };
+    const hl = load({ acts: [act] }); hl.store.set("muscuLbl", JSON.stringify({ 9901: "legs" })); hl.store.set("planWk:2026-11-02", hb.store.get("planWk:2026-11-02"));
+    hl.clock.t = new Date(2026, 10, 2 + k, 10).getTime();
+    const WL = hl.Plan._eff(MON, cfgL, ctxL), key = d => WL.items[d] && WL.items[d].bike && WL.items[d].bike.st === "plan" && hl.Plan.isKey(WL.items[d].bike.t);
+    assert.equal(WL.items[k].muscu.s, "legs"); assert.equal(WL.items[k].bike.t, "rec", "récupération le soir des jambes");
+    assert.ok(!key(k) && !key(k + 1), "pas de séance clé le jour des jambes ni le lendemain");
+    assert.ok(WL.changes.some(c => c.id === `legs-${k}`), WL.changes.map(c => c.text).join(" | "));
+    hl.store.set("planUndo:2026-11-02", JSON.stringify([`legs-${k}`, `legs-${k + 1}`]));
+    assert.equal(hl.Plan._eff(MON, cfgL, ctxL).items[k].bike.t, Wb.items[k].bike.t, "annulable");
+  }
   console.log("ok plan (muscu choisie) : gardée, pas de doublon, vélo recalculé autour, valeur inconnue ignorée");
 }
