@@ -100,6 +100,8 @@
 .mchip.swapped{opacity:.55}
 .mchip.moved{border-left-color:var(--warn)}
 .mchip.plan select{cursor:pointer;text-decoration:underline dotted var(--muted);text-underline-offset:3px}
+.mchip.add{border-style:dashed;border-left-style:solid;border-left-color:var(--line)}
+#plan .mchip.add select{color:var(--muted);font-weight:600}
 .mchip.own{border-left-color:var(--accent)}
 
 /* Disponibilités */

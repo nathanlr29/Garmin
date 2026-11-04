@@ -625,5 +625,13 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   assert.equal(W1.items[tgt].muscu.s, "legs"); assert.ok(W1.items[tgt].muscu.own);
   h.store.set("planOv:" + dk, JSON.stringify({ [tgt]: { m: "zzz" } }));
   assert.equal(mus(h.Plan._eff(mon, cfg, s).items.map(x => x.muscu && x.muscu.s)), mus(W0.items.map(x => x.muscu && x.muscu.s)), "valeur inconnue ignorée");
+  // un matin sans muscu prévue (même non coché) : Upper ajoutée ; « Pas de muscu » : le matin est vidé
+  const free = g0.items.findIndex(x => !x.muscu), g2 = h.Plan._gen(mon, cfg, { ...s, mfix: { [free]: "upper" } });
+  assert.equal(g2.items[free].muscu, "upper", "Upper ajoutée un matin sans muscu");
+  assert.equal(g2.items.filter(x => x.muscu === "upper").length, 1, "une seule Upper");
+  const busy = g0.items.findIndex(x => x.muscu), g3 = h.Plan._gen(mon, cfg, { ...s, mfix: { [busy]: "none" } });
+  assert.ok(!g3.items[busy].muscu && g3.items[busy].mnone, "« Pas de muscu » : matin vidé");
+  const c6 = { ...CFGS.cinq, days: CFGS.cinq.days.map(d => ({ ...d })) }, nm = c6.days.findIndex(d => !d.muscu);
+  assert.equal(h.Plan._gen(mon, c6, { ...s, mfix: { [nm]: "upper" } }).items[nm].muscu, "upper", "même un matin non coché dans les dispos");
   console.log("ok plan (muscu choisie) : gardée, pas de doublon, vélo recalculé autour, valeur inconnue ignorée");
 }
