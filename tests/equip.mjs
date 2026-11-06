@@ -27,21 +27,23 @@ assert.match(E.wearLine({ tmin: 6, wind: 15, speed: 27, bias: 0 }), /ressenti -?
 assert.equal(E.bias(), 0); E.setBias(true); E.setBias(true); E.setBias(true); E.setBias(true); assert.equal(E.bias(), 6, "borné à +6");
 for (let i = 0; i < 3; i++) E.setBias(false); assert.equal(E.bias(), 0); assert.equal(store.kitBias, "null", "revenu à 0 : rien de gardé");
 
-// ---- pneus (Berto 15 %, ajusté) : 32 mm, 150 lb sur la roue ≈ 87 psi (exemple de la source)
-const w = 150 / 2.20462 / .53 - 9.5;   // poids qui met 150 lb sur l'arrière
-near(E.tyres(w, 32).rear, 87 / 14.5038, .06, "exemple de la source");
-const p = E.tyres(77, 28);
-assert.ok(p.rear > p.front, "plus à l'arrière"); near(p.rear, 5.1, .1, "77 kg en 28 mm"); near(p.front, 4.5, .1, "77 kg en 28 mm, avant");
-assert.ok(E.tyres(77, 25).rear > p.rear && E.tyres(77, 32).rear < p.rear, "pneu plus large = moins de pression");
-near(E.tyres(77, 28, true).rear, p.rear - .3, .051, "route mouillée : −0,3 bar");
+// ---- pneus (méthode du calculateur Legend Wheels, route)
+near(E.baseRear(70 + 8 - 9, 30.5), 4.16, .01, "exemple par défaut de Legend : 70 kg + 8 kg, 28 mm sur leur jante (30,5 mm réels)");
+const lg = E.baseRear(69, 30.5); assert.equal(Math.floor(10 * lg + .2) / 10, 4.1); assert.equal(Math.floor(10 * lg * .95 + .2) / 10, 3.9, "affiché par Legend : 3,9 / 4,1");
+assert.equal(E.realW(32), 32, "jante inconnue (21 mm) : largeur inscrite"); assert.equal(E.realW(28, 24.5), 30.2);
+const p = E.tyres(75.2, 32);
+assert.deepEqual([p.front, p.rear], [4.1, 4.4], "Nathan : 75,2 kg + 10 kg de vélo, 32 mm, chambre butyle (il roule à 4,2 / 4,5)");
+assert.ok(E.tyres(75.2, 28).rear > p.rear && E.tyres(75.2, 25).rear > E.tyres(75.2, 28).rear, "pneu plus étroit = plus de pression");
+assert.ok(E.tyres(85, 32).rear > p.rear && E.tyres(65, 32).rear < p.rear, "plus lourd = plus de pression");
+assert.ok(p.rear - p.front <= .3 + 1e-9 && p.front < p.rear, "avant à 95 % de l'arrière, 0,3 bar d'écart au plus");
+const w = E.tyres(75.2, 32, true); assert.deepEqual([w.front, w.rear], [3.9, 4.1], "route mouillée : −7 %");
+assert.match(E.tyreLine(75.2, 32, false), /^4,1 bar à l'avant, 4,4 à l'arrière en 32 mm avec chambre à air, pour 75,2 kg et 10 kg de vélo avec bidons\.$/);
 assert.match(E.tyreLine(0, 28, false), /75 kg \(pèse-toi dans Garmin/);
-assert.match(E.tyreLine(72, 32, false), /^3,3 bar à l'avant, 3,8 à l'arrière en 32 mm avec chambre à air, pour 72 kg et le vélo\.$/, "Nathan : 32 mm, chambre à air");
 assert.equal(E.tyreWidth(), 32, "32 mm par défaut"); store.tyreW = "28"; assert.equal(E.tyreWidth(), 32, "ancienne clé ignorée");
-store.tyreMm = "28"; assert.equal(E.tyreWidth(), 28); store.tyreMm = "40"; assert.equal(E.tyreWidth(), 32, "largeur inconnue : 32");
+store.tyreMm = "28"; assert.equal(E.tyreWidth(), 28); store.tyreMm = "40"; assert.equal(E.tyreWidth(), 32, "largeur inconnue : 32"); delete store.tyreMm;
 
 // ---- réglage perso « plus / moins gonflé »
-const b0 = E.tyres(75.2, 32); assert.deepEqual([b0.front, b0.rear], [3.5, 3.9], "Nathan, 75,2 kg en 32 mm");
-E.setPBias(true); E.setPBias(true); assert.equal(E.pbias(), .4); near(E.tyres(75.2, 32).rear, 4.3, .051, "+0,4 bar");
+E.setPBias(true); E.setPBias(true); assert.equal(E.pbias(), .4); near(E.tyres(75.2, 32).rear, 4.8, .051, "+0,4 bar");
 assert.match(E.tyreLine(75.2, 32, false), /réglé \+0,4 bar pour toi\.$/);
 for (let i = 0; i < 6; i++) E.setPBias(true); assert.equal(E.pbias(), .6, "borné à +0,6");
 for (let i = 0; i < 3; i++) E.setPBias(false); assert.equal(E.pbias(), 0); assert.equal(store.tyrePBias, "null", "revenu à 0 : rien de gardé");
