@@ -47,20 +47,24 @@ function wearLine(o) {
 
 // Pression des pneus : formule « 15 % d'écrasement » de Frank Berto, ajustée par un lecteur de Bike Forums
 // (P psi = 600 L / W² + 0,75 W − 25, L = charge sur la roue en livres, W = largeur en mm ; route, à ±2 psi du tableau de Berto).
-// Répartition 45 % avant / 55 % arrière, route mouillée −0,3 bar. Berto mesurait des pneus à chambre à air, ce qu'a Nathan (32 mm,
+// Répartition 47 % avant / 53 % arrière (06/11/2026 : 45 / 55 donnait un avant trop bas face aux calculateurs SRAM / Silca),
+// route mouillée −0,3 bar, réglage perso « plus / moins gonflé » par crans de 0,2 bar (tyrePBias, ±0,6, propre à l'appareil). Berto mesurait des pneus à chambre à air, ce qu'a Nathan (32 mm,
 // demande du 06/11/2026) : pas de correction tubeless. Largeur réglable (clé tyreMm ; l'ancienne clé tyreW, 28 par défaut, est ignorée).
-const TYRE = { front: .45, rear: .55, wet: .3, widths: [25, 28, 30, 32], def: 32, key: "tyreMm", tube: true, bike: 9.5, kg: 75, psi: 14.5038 };
+const TYRE = { front: .47, rear: .53, wet: .3, widths: [25, 28, 30, 32], def: 32, key: "tyreMm", tube: true, bike: 9.5, kg: 75, psi: 14.5038 };
+const PB = { key: "tyrePBias", step: .2, max: .6 };
+const pbias = () => { const b = +ls.get(PB.key); return isFinite(b) ? clamp(Math.round(b * 10) / 10, -PB.max, PB.max) : 0; };
+function setPBias(up) { const b = clamp(Math.round((pbias() + (up ? PB.step : -PB.step)) * 10) / 10, -PB.max, PB.max); ls.set(PB.key, b || null); return b; }
 const tyreWidth = () => { const w = +ls.get(TYRE.key); return TYRE.widths.includes(w) ? w : TYRE.def; };
-function tyres(kg, width = TYRE.def, wet = false, bike = TYRE.bike) {
+function tyres(kg, width = TYRE.def, wet = false, bike = TYRE.bike, bias = pbias()) {
   const lb = (kg + bike) * 2.20462, P = part => 600 * lb * part / width ** 2 + .75 * width - 25;
-  const bar = psi => Math.round(clamp(psi / TYRE.psi - (wet ? TYRE.wet : 0), 2, 8.5) * 10) / 10;
+  const bar = psi => Math.round(clamp(psi / TYRE.psi - (wet ? TYRE.wet : 0) + bias, 2, 8.5) * 10) / 10;
   return { front: bar(P(TYRE.front)), rear: bar(P(TYRE.rear)) };
 }
 const nf1 = v => String(v.toFixed(1)).replace(".", ",");
-function tyreLine(kg, width, wet) {
-  const own = kg >= 35, p = tyres(own ? kg : TYRE.kg, width, wet);
-  return `${nf1(p.front)} bar à l'avant, ${nf1(p.rear)} à l'arrière en ${width} mm${TYRE.tube ? " avec chambre à air" : ""}${wet ? " (route mouillée : 0,3 bar de moins)" : ""}, pour ${own ? `${Math.round(kg)} kg` : `${TYRE.kg} kg (pèse-toi dans Garmin ou règle ton poids dans le Plan)`} et le vélo.`;
+function tyreLine(kg, width, wet, bias = pbias()) {
+  const own = kg >= 35, p = tyres(own ? kg : TYRE.kg, width, wet, TYRE.bike, bias);
+  return `${nf1(p.front)} bar à l'avant, ${nf1(p.rear)} à l'arrière en ${width} mm${TYRE.tube ? " avec chambre à air" : ""}${wet ? " (route mouillée : 0,3 bar de moins)" : ""}, pour ${own ? `${Math.round(kg)} kg` : `${TYRE.kg} kg (pèse-toi dans Garmin ou règle ton poids dans le Plan)`} et le vélo${bias ? `, réglé ${bias > 0 ? "+" : "−"}${nf1(Math.abs(bias))} bar pour toi` : ""}.`;
 }
 
-window.Equip = { feel, wear, wearLine, bias, setBias, tyres, tyreLine, tyreWidth, KIT, TYRE, BIAS };
+window.Equip = { feel, wear, wearLine, bias, setBias, tyres, tyreLine, tyreWidth, pbias, setPBias, KIT, TYRE, BIAS, PB };
 })();
