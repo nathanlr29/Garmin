@@ -202,6 +202,31 @@ class RunProfile(unittest.TestCase):
         self.assertNotIn("lt", prof["run"])                             # ancien format : relu même si c'est le même jour
 
 
+class Weight(unittest.TestCase):
+    BC = {"dateWeightList": [
+        {"calendarDate": "2026-10-01", "weight": 72450.0, "timestampGMT": 100, "bodyFat": 14.2},
+        {"calendarDate": "2026-10-01", "weight": 72100.0, "timestampGMT": 200},
+        {"calendarDate": "2026-10-05", "weight": 71800.0, "date": 300},
+        {"calendarDate": "2026-10-06", "weight": 999.0}],
+        "totalAverage": {"from": 1, "until": 2, "weight": 72000.0}}
+
+    def test_lecture(self):
+        self.assertEqual(rc.read_weight(self.BC), [["2026-10-01", 72.1], ["2026-10-05", 71.8]])   # dernière pesée du jour, hors plage écartée
+        self.assertEqual(rc.read_weight(None), [])
+
+    def test_profil_en_repli_et_echec(self):
+        api = FakeApi(get_body_composition={"dateWeightList": []}, get_user_profile={"userData": {"weight": 73000.0}})
+        self.assertEqual(rc.fetch_weight(api, date(2026, 1, 1), TODAY), ([], 73.0))
+        api = FakeApi(get_body_composition=self.BC)
+        self.assertEqual(rc.fetch_weight(api, date(2026, 1, 1), TODAY)[0][-1], ["2026-10-05", 71.8])
+        self.assertNotIn("get_user_profile", api.calls)                  # pesées présentes : profil non lu
+        api = FakeApi(get_body_composition=RuntimeError("500"))
+        self.assertEqual(rc.fetch_weight(api, date(2026, 1, 1), TODAY, {"weight": [["2026-10-01", 72.1]]})[0], [["2026-10-01", 72.1]])
+        prof = rc.fetch_profile(_ProfileApi(FakeApi(get_body_composition=self.BC)), date(2026, 1, 1), TODAY,
+                                {"run": {"d": "2026-10-09", "v": rc.RUN_V}})
+        self.assertEqual(prof["weight"][-1], ["2026-10-05", 71.8])
+
+
 class _ProfileApi:
     """Les appels vélo de fetch_profile répondent vide ; les appels course sont ceux de l'API factice."""
     def __init__(self, inner):

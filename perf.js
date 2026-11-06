@@ -181,7 +181,7 @@
     ${rk ? `<p class="note pf-rank">Repère : à ${fmt(rk.wkg, 2)} W/kg, tu serais dans le top ${rk.zwift} % des coureurs d'une course Zwift ${rk.lab >= 90 ? `, mais sous la plupart des hommes de ${rk.ageTxt} testés en laboratoire` : ` et le top ${rk.lab} % des hommes de ${rk.ageTxt} testés en laboratoire`} (populations plus entraînées que la moyenne).</p>` : ""}
     <div class="rkform pf-form"><label>Poids <input id="pKg" type="number" min="35" max="150" step="0.1" value="${kg || ""}" placeholder="kg"> kg</label>
       <label>Âge <select id="pAge">${Object.keys(AFY).map(k => `<option ${k === age ? "selected" : ""}>${k}</option>`).join("")}</select></label></div>
-    <p class="note pf-priv">${kg ? "" : "Indique ton poids pour avoir tes watts par kilo. "}Poids et âge restent uniquement sur cet appareil.</p></section>`;
+    <p class="note pf-priv">${kg ? "" : "Indique ton poids pour avoir tes watts par kilo. "}Le poids suit ta dernière pesée Garmin (carte Poids de Récup) ; une correction ici tient jusqu'à la pesée suivante.</p></section>`;
   }
 
   // courbe de puissance : durée en abscisse logarithmique, étiquettes au bout des courbes

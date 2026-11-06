@@ -34,7 +34,9 @@ const p = E.tyres(77, 28);
 assert.ok(p.rear > p.front, "plus à l'arrière"); near(p.rear, 5.3, .1, "77 kg en 28 mm"); near(p.front, 4.3, .1, "77 kg en 28 mm, avant");
 assert.ok(E.tyres(77, 25).rear > p.rear && E.tyres(77, 32).rear < p.rear, "pneu plus large = moins de pression");
 near(E.tyres(77, 28, true).rear, p.rear - .3, .051, "route mouillée : −0,3 bar");
-assert.match(E.tyreLine(0, 28, false), /75 kg \(règle ton poids dans le Plan\)/);
-assert.equal(E.tyreWidth(), 28); store.tyreW = "32"; assert.equal(E.tyreWidth(), 32); store.tyreW = "40"; assert.equal(E.tyreWidth(), 28, "largeur inconnue : 28");
+assert.match(E.tyreLine(0, 28, false), /75 kg \(pèse-toi dans Garmin/);
+assert.match(E.tyreLine(72, 32, false), /^3,2 bar à l'avant, 3,9 à l'arrière en 32 mm avec chambre à air, pour 72 kg/, "Nathan : 32 mm, chambre à air");
+assert.equal(E.tyreWidth(), 32, "32 mm par défaut"); store.tyreW = "28"; assert.equal(E.tyreWidth(), 32, "ancienne clé ignorée");
+store.tyreMm = "28"; assert.equal(E.tyreWidth(), 28); store.tyreMm = "40"; assert.equal(E.tyreWidth(), 32, "largeur inconnue : 32");
 
 console.log("equip : OK");

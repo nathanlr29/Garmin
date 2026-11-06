@@ -38,6 +38,8 @@ function prep() {
   RC.days = days; RC.nights = days.filter(d => d.sl);
   RC.pick = days.filter(d => d.sl || d.tr != null);   // jours consultables dans le bilan
   if (RC.sel == null || RC.sel < 0 || RC.sel >= RC.pick.length) RC.sel = RC.pick.length - 1;
+  // nouvelle pesée Garmin : elle devient ton poids (W/kg, pneus, entraîneur) ; le Plan et la Sortie ouverts sont redessinés
+  if (syncWeight(RC.data.profile, lsStore)) { window.PlanSync?.touch(); if (["plan", "sortie"].includes(Nav.curTab())) setTimeout(() => Nav.apply(), 0); }
 }
 
 // ------------------------------------------------------------------ Mise en page
@@ -67,6 +69,7 @@ function renderRecup() {
     <section class="card span6"><h2>Régularité du sommeil <small id="rRegInfo"></small></h2><p class="rans" id="rRegAns"></p><div id="rReg"></div><div id="rSri"></div>
       <p class="note">Barres : de ton coucher à ton lever ; pointillés et bandes : heures cibles de coucher (orange) et de lever (ambre), à ${SRI.tol} min près. Courbe : ta régularité sur 7 jours, la part de la journée où tu dors ou es éveillé aux mêmes heures d'un jour à l'autre, sur 100 (bande verte : ${SRI.good} et plus, régulier).</p></section>
     <section class="card span12"><h2>Fréquence cardiaque au repos <small id="rRhrInfo"></small></h2><p class="rans" id="rRhrAns"></p><div id="rRhr"></div></section>
+    <section class="card span12"><h2>Poids <small id="rKgInfo"></small></h2><p class="rans" id="rKgAns"></p><div id="rKg"></div><div class="note" id="rKgNote"></div></section>
     <section class="card span12"><h2>Tendance de la VFC <small id="rHrvTInfo"></small></h2><p class="rans" id="rHrvTAns"></p><div id="rHrvT"></div>
       <p class="note">Trait orange : moyenne de tes 7 dernières nuits ; points gris : chaque nuit ; bande verte : ta zone normale, calculée par Garmin sur tes dernières semaines. Une mauvaise nuit compte peu : c'est quand la moyenne sort de la zone qu'il faut lever le pied.</p></section>
     <section class="card span12"><h2>Respiration pendant le sommeil <small id="rRespInfo"></small></h2><p class="rans" id="rRespAns"></p><div id="rResp"></div><p class="note" id="rRespNote"></p></section>
@@ -83,10 +86,10 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderSleep(P); renderReg(P); renderRhr(P); renderHrvTrend(P); renderResp(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderRhr(P); renderWeight(P); renderHrvTrend(P); renderResp(P); renderCmp(); renderFacts();
   // l'entraîneur (IA, à la demande) lit la nuit choisie et les tendances affichées
   if (window.IA) IA.mount($("rMorning").parentElement, { kind: "recup", title: "Lecture de l'entraîneur", button: "Que disent ma nuit et ma récup ?",
-    ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rHrvTAns", "#rRespAns", "#rCmpAns"]) });
+    ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rKgAns", "#rHrvTAns", "#rRespAns", "#rCmpAns"]) });
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -458,6 +461,54 @@ function renderRhr(P) {
   box.querySelector("svg").addEventListener("pointerleave", hideTip);
 }
 
+// Poids : pesées Garmin (profile.weight = [[date, kg]], sinon profile.weightProfile = poids du profil Garmin).
+// Une nouvelle pesée remplace bwWeight (W/kg du Plan, pression des pneus de la Sortie, entraîneur) ; une correction à la main
+// tient jusqu'à la pesée suivante (bwKgAt = date de la dernière pesée reprise, propre à l'appareil).
+const WT = { back: 30, stable: .5, old: 14, lo: 35, hi: 150 };
+const lsStore = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const okKg = v => typeof v === "number" && v >= WT.lo && v <= WT.hi;
+const weightSeries = prof => ((prof && prof.weight) || []).filter(p => Array.isArray(p) && typeof p[0] === "string" && okKg(p[1]));
+function syncWeight(prof, st) {
+  const ser = weightSeries(prof), last = ser[ser.length - 1];
+  if (last) {
+    if (st.get("bwKgAt") === last[0]) return false;
+    st.set("bwKgAt", last[0]);
+    if (+st.get("bwWeight") === last[1]) return false;
+    st.set("bwWeight", last[1]); return true;
+  }
+  const wp = prof && prof.weightProfile;
+  if (okKg(wp) && !okKg(+st.get("bwWeight"))) { st.set("bwWeight", wp); return true; }
+  return false;
+}
+// dernière pesée, variation sur 30 jours (contre la dernière pesée d'il y a 30 jours ou plus), âge de la pesée
+function weightTrend(ser, today = new Date()) {
+  if (!ser.length) return null;
+  const [d, kg] = ser[ser.length - 1], dt = parseLocal(d), cut = new Date(dt); cut.setDate(cut.getDate() - WT.back);
+  const past = ser.filter(p => parseLocal(p[0]) <= cut).pop() || null;
+  const t0 = new Date(today); t0.setHours(0, 0, 0, 0);
+  return { d, dt, kg, past, dv: past ? Math.round((kg - past[1]) * 10) / 10 : null, age: Math.round((t0 - dt) / 864e5), n: ser.length };
+}
+function weightAnswer(t, ftp, kgNow) {
+  if (!t) return okKg(kgNow) ? `Pas de pesée dans Garmin : le site utilise <b>${nf(kgNow, 1)} kg</b>${ftp ? `, soit ${nf(ftp / kgNow, 2)} W/kg avec ta FTP de ${ftp} W` : ""}. Pèse-toi avec une balance reliée à Garmin ou saisis ton poids dans l'appli Garmin Connect.`
+    : "Pas de pesée dans Garmin. Pèse-toi avec une balance reliée à Garmin ou saisis ton poids dans l'appli Garmin Connect : tes W/kg et la pression des pneus suivront.";
+  const when = t.age <= 0 ? "ce matin" : t.age === 1 ? "hier" : `le ${t.dt.getDate()} ${MONTHS[t.dt.getMonth()]}`;
+  const tr = t.dv == null ? "" : Math.abs(t.dv) < WT.stable ? `, stable sur 30 jours (${nf(t.past[1], 1)} kg)` : `, ${t.dv > 0 ? "+" : "−"}${nf(Math.abs(t.dv), 1)} kg sur 30 jours (${nf(t.past[1], 1)} kg)`;
+  const wk = ftp ? ` : avec ta FTP de ${ftp} W, ça fait <b>${nf(ftp / t.kg, 2)} W/kg</b>${t.past && Math.abs(t.dv) >= WT.stable ? ` (${nf(ftp / t.past[1], 2)} au poids d'il y a 30 jours)` : ""}.` : ".";
+  const manual = okKg(kgNow) && Math.abs(kgNow - t.kg) >= .1 ? ` Tu as corrigé ton poids à la main (${nf(kgNow, 1)} kg) : il sera remplacé à la prochaine pesée.` : "";
+  return `Tu pesais <b>${nf(t.kg, 1)} kg</b> ${when}${tr}${wk}${t.age > WT.old ? ` Dernière pesée il y a ${t.age} jours : pèse-toi pour garder tes W/kg et la pression des pneus justes.` : ""}${manual}`;
+}
+function renderWeight(P) {
+  const prof = RC.data.profile || {}, ser = weightSeries(prof), t = weightTrend(ser), kgNow = +lsStore.get("bwWeight") || null;
+  const ftp = window.Charge ? Math.round(Charge.params().ftp) : null;
+  $("rKgAns").innerHTML = weightAnswer(t, ftp, kgNow);
+  $("rKgInfo").textContent = ser.length ? `${ser.length} pesée${ser.length > 1 ? "s" : ""} depuis le ${parseLocal(ser[0][0]).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} · min. ${nf(Math.min(...ser.map(p => p[1])), 1)} · max. ${nf(Math.max(...ser.map(p => p[1])), 1)} kg` : "";
+  const kg = okKg(kgNow) ? kgNow : t ? t.kg : null, E = window.Equip;
+  $("rKgNote").innerHTML = kg && E ? `Pression des pneus, route sèche : ${E.tyreLine(kg, E.tyreWidth(), false)} Elle suit ton poids, comme tes W/kg dans le Plan.` : "";
+  const cut = P.length ? P[0].dt : null, pts = ser.filter(p => !cut || parseLocal(p[0]) >= cut).map(p => ({ dt: parseLocal(p[0]), kg: p[1] }));
+  if (!pts.length) { $("rKg").innerHTML = ser.length ? `<div class="empty">Pas de pesée sur la période</div>` : ""; return; }
+  tsChart("rKg", pts, [{ k: "kg", l: "poids", c: "var(--accent)", w: 2, u: "kg", nd: 1 }], { h: 170 });
+}
+
 // Tendance de la VFC : moyenne sur 7 nuits (hrv7) comparée à la zone normale Garmin (hrvLo–hrvUp) et à il y a 4 semaines
 const HRV_T = { back: 28, stablePct: 3 };
 function hrvTrend(days) {
@@ -724,7 +775,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer, WT, weightSeries, syncWeight, weightTrend, weightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
@@ -733,4 +784,6 @@ addEventListener("resize", () => { if (innerWidth === lastW2) return; lastW2 = i
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Nav.curTab() === "recup") openRecup(true); });
 setInterval(() => { if (document.visibilityState === "visible" && Nav.curTab() === "recup") openRecup(true); }, 5 * 60 * 1000);
 Nav.apply();
+// sur les autres onglets aussi, une nouvelle pesée Garmin doit arriver (W/kg, pneus) : données chargées après le premier affichage
+setTimeout(() => { if (!RC.data) ensure("recProbe").catch(() => {}); }, 1500);
 })();

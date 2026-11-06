@@ -616,7 +616,7 @@ function renderTips(r, wx) {
   $("soTips").innerHTML = T.length ? `<dl class="sotips">${T.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : `<p class="note">Les conseils apparaissent avec les prévisions.</p>`;
   const box = $("soTips");
   box.querySelectorAll("[data-kit]").forEach(b => b.onclick = () => { window.Equip.setBias(b.dataset.kit === "cold"); renderTips(r, wx); });
-  const ty = $("soTyre"); if (ty) ty.onchange = () => { try { localStorage.setItem("tyreW", JSON.stringify(+ty.value)); } catch (e) {} renderTips(r, wx); };
+  const ty = $("soTyre"); if (ty) ty.onchange = () => { try { localStorage.setItem(window.Equip.TYRE.key, JSON.stringify(+ty.value)); } catch (e) {} renderTips(r, wx); };
 }
 // ------------------------------------------------------------------ Nutrition
 // Ce que Nathan emporte vraiment : 1 bidon de 850 ml avec 140 g de poudre au plus, l'autre à l'eau ; 6 produits en poche au plus ;

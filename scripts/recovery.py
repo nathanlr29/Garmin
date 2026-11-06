@@ -583,6 +583,12 @@ def fetch_profile(api, start, today, prev=None):
             "rest": _num(pick.get("restingHeartRateUsed"), 30, 100),
             "sport": pick.get("sport"), "method": pick.get("trainingMethod"),
         }
+    # Poids : pesées Garmin (balance ou saisie dans l'appli), sinon poids du profil
+    w, wp = fetch_weight(api, start, today, prev)
+    if w:
+        p["weight"] = w
+    if wp:
+        p["weightProfile"] = wp
     # Course : rafraîchie une fois par jour (l'état précédent, s'il date d'aujourd'hui, est repris tel quel)
     old = prev or {}
     if (old.get("run") or {}).get("d") == today.isoformat() and (old["run"].get("v") == RUN_V):
@@ -596,6 +602,34 @@ def fetch_profile(api, start, today, prev=None):
         raw.update(res[1])
     p["raw"] = raw
     return p
+
+# ------------------------------------------------------------------ Poids (pesées Garmin)
+def read_weight(o):
+    """Pesées de get_body_composition : [[date, kg au dixième]], la dernière pesée de chaque jour."""
+    by = {}
+    for d in _walk(o):
+        g, dt = _num(d.get("weight"), 30000, 200000), d.get("calendarDate")
+        if not g or not (isinstance(dt, str) and len(dt) >= 10):
+            continue
+        t = d.get("timestampGMT") if isinstance(d.get("timestampGMT"), (int, float)) else d.get("date") if isinstance(d.get("date"), (int, float)) else 0
+        if dt[:10] not in by or t >= by[dt[:10]][0]:
+            by[dt[:10]] = (t, round(g / 1000, 1))
+    return [[k, v[1]] for k, v in sorted(by.items())]
+
+
+def fetch_weight(api, start, today, prev=None):
+    """(pesées, poids du profil Garmin) ; le profil n'est lu que s'il n'y a aucune pesée. Échec : on garde l'ancien."""
+    old = prev or {}
+    bc = safe(api.get_body_composition, start.isoformat(), today.isoformat())
+    w = read_weight(bc)
+    if bc is None and old.get("weight"):
+        w = old["weight"]
+    if w:
+        return w, None
+    prof = safe(api.get_user_profile)
+    g = _num(((prof or {}).get("userData") or {}).get("weight"), 30000, 200000)
+    return [], (round(g / 1000, 1) if g else old.get("weightProfile"))
+
 
 # ------------------------------------------------------------------ Point d'entrée
 def run(api):

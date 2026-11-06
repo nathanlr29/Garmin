@@ -74,7 +74,7 @@ store.bwWeight = "76.7"; store.bwAge = JSON.stringify("<30");
 const H = win.Perf.html({ profile: { vo2: [["2026-10-15", 64]] }, ftp: 250, goal: { ftp: 300, vo2: 65 }, acts: A, now: NOW });
 assert.match(H, /^<section class="card span12 rank perf">/); assert.match(H, /<input id="pKg"[^>]*value="76.7"/);
 assert.ok(["<30", "30-39", "40-49", "50-59", "60+"].every(k => H.includes(`<option ${k === "<30" ? "selected" : ""}>${k}</option>`)), "options d'âge");
-assert.match(H, /<select id="pAge">/); assert.match(H, /restent uniquement sur cet appareil/); assert.match(H, /data-pfb="/);
+assert.match(H, /<select id="pAge">/); assert.match(H, /suit ta dernière pesée Garmin/); assert.match(H, /data-pfb="/);
 assert.ok(!/\bTSS|CTL|ATL|TSB\b/.test(H), "pas de sigles");
 delete store.bwWeight;
 const H0 = win.Perf.html({ profile: {}, ftp: 250, goal: {}, acts: [], now: NOW });

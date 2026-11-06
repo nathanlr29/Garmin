@@ -15,7 +15,7 @@ async function load(acts, rec) {
   const win = { Recup: { data: rec } };
   const ctx = { window: win, S: { all: acts }, RIDE_TYPES: RIDE, parseLocal, nf, console, MONTHS: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
     localStorage: { getItem: k => k === "planFtp" ? "230" : null },
-    document: { addEventListener() {}, getElementById() { return {}; } }, addEventListener() {}, innerWidth: 1, setInterval() {},
+    document: { addEventListener() {}, getElementById() { return {}; } }, addEventListener() {}, innerWidth: 1, setInterval() {}, setTimeout() {},
     Nav: { apply() {}, curTab() { return "plan"; } }, fetch: async () => ({ ok: true, json: async () => structuredClone(rec) }) };
   vm.createContext(ctx);
   vm.runInContext(readFileSync(here("../charge.js"), "utf8"), ctx); ctx.Charge = win.Charge;
@@ -165,5 +165,26 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
     const r = Recup.recoScore(Recup.days.find(x => x.d === "2026-10-20"));
     assert.equal(r.score, 64, "20/10 : 74 avant, 64 maintenant (~9 h de récupération Garmin à 18 h)");
   }
+}
+// ------------------------------------------------------------------ 6) Poids : pesées Garmin -> bwWeight, variation, phrase
+{
+  const { Recup: R } = await load([], { days: {} }), W = R._;
+  const mem = {}, st = { get: k => mem[k] ?? null, set: (k, v) => { mem[k] = v; } };
+  const prof = { weight: [["2026-09-20", 73.4], ["2026-10-01", 72.9], ["2026-10-20", 72.6], ["2026-11-05", 72.1], ["2026-11-06", 999]] };
+  assert.deepEqual(W.weightSeries(prof).pop(), ["2026-11-05", 72.1], "valeur hors plage écartée");
+  assert.equal(W.syncWeight(prof, st), true); assert.equal(mem.bwWeight, 72.1); assert.equal(mem.bwKgAt, "2026-11-05");
+  mem.bwWeight = 71; assert.equal(W.syncWeight(prof, st), false, "même pesée : la correction à la main tient"); assert.equal(mem.bwWeight, 71);
+  prof.weight.push(["2026-11-07", 71.8]); assert.equal(W.syncWeight(prof, st), true); assert.equal(mem.bwWeight, 71.8, "nouvelle pesée : elle remplace");
+  const m2 = {}, s2 = { get: k => m2[k] ?? null, set: (k, v) => { m2[k] = v; } };
+  assert.equal(W.syncWeight({ weightProfile: 74 }, s2), true); assert.equal(m2.bwWeight, 74, "sans pesée : poids du profil Garmin si rien n'est réglé");
+  m2.bwWeight = 70; assert.equal(W.syncWeight({ weightProfile: 74 }, s2), false, "… mais ne remplace pas un poids réglé");
+  const t = W.weightTrend(W.weightSeries({ weight: prof.weight.slice(0, 4) }), new Date(2026, 10, 6));
+  assert.equal(t.kg, 72.1); assert.equal(t.past[0], "2026-10-01"); assert.equal(t.dv, -0.8); assert.equal(t.age, 1);
+  const a = W.weightAnswer(t, 230, 72.1);
+  assert.match(a, /72,1 kg<\/b> hier, −0,8 kg sur 30 jours \(72,9 kg\)/); assert.match(a, /3,19 W\/kg<\/b> \(3,16 au poids d'il y a 30 jours\)/);
+  assert.match(W.weightAnswer(t, 230, 70), /corrigé ton poids à la main \(70,0 kg\)/);
+  assert.match(W.weightAnswer({ ...t, age: 20 }, 230, 72.1), /il y a 20 jours : pèse-toi/);
+  assert.match(W.weightAnswer(null, 230, null), /Pas de pesée dans Garmin/);
+  assert.equal(W.weightTrend([]), null);
 }
 console.log("recup : ok");
