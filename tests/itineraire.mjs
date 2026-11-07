@@ -7,7 +7,7 @@ const win = { addEventListener() {} }, esc = t => String(t).replace(/&/g, "&amp;
 const ctx = { nf: (v, d = 0) => (+v).toFixed(d), esc, window: win, document: { addEventListener() {} }, addEventListener() {}, innerWidth: 1280, localStorage: { getItem: () => null, setItem() {} } };
 vm.createContext(ctx);
 vm.runInContext(readFileSync(new URL("../sortie.js", import.meta.url), "utf8"), ctx);
-const { _brf: B, _brfStrict: S, _abShort: short, _abAnswer: ans, _viaInsert: ins } = win.Sortie;
+const { _brf: B, _brfStrict: S, _abShort: short, _abAnswer: ans, _viaInsert: ins, _join: join, _overlap: ov } = win.Sortie;
 
 // 1) profil strict : chaque remplacement a eu lieu, plus aucun coût « non revêtu » permis, le reste identique
 assert.notEqual(S, B);
@@ -46,4 +46,20 @@ assert.equal(J(ins(A, Bz, [[48.1, -1.7], [48.3, -1.7]], [48.2, -1.8], line)), J(
 // sans tracé : là où le détour à vol d'oiseau est le plus court
 assert.equal(J(ins(A, Bz, [[48.3, -1.7]], [48.1, -1.7], null)), J([[48.1, -1.7], [48.3, -1.7]]));
 assert.equal(J(ins(A, Bz, [[48.1, -1.7]], [48.3, -1.7], null)), J([[48.1, -1.7], [48.3, -1.7]]));
+
+// 5) aller-retour : tracés joints, parts pondérées, part du retour sur l'aller
+const N = (lo, n = 21) => Array.from({ length: n }, (_, i) => [48.0 + i * .01, lo, 50]);
+const out = { pts: N(-1.7), km: 22, asc: 100, bad: 0, main: .1, dirt: 0, cyc: 0 };
+assert.ok(ov(out.pts, N(-1.7).reverse()) > .99);          // même route en sens inverse
+assert.ok(ov(out.pts, N(-1.65).reverse()) < .01);         // route parallèle à ~3,7 km
+{ const m = ov(out.pts, [...N(-1.7, 11), ...N(-1.65).slice(10)].reverse()); assert.ok(m > .38 && m < .5, m); }  // 11 km communs sur 25,7 (dont 3,7 de traversée)
+const j = join(out, { pts: N(-1.65).reverse(), km: 33, asc: 50, bad: 0, main: 0, dirt: .1, cyc: 800 });
+assert.equal(j.pts.length, 41); assert.equal(j.km, 55); assert.equal(j.asc, 150); assert.equal(j.cyc, 800);
+assert.ok(Math.abs(j.main - .04) < 1e-9 && Math.abs(j.dirt - .06) < 1e-9 && j.ov < .01);
+const R0 = { km: 55, asc: 150, dirt: 0, main: 0, cyc: 0 };
+assert.match(ans(a, b, { ...R0, ov: .95 }, 0, "same"), /^Rennes ⇄ Bain &lt;b> aller-retour : <b>55.0 km<\/b>.*goudronné\. Retour par la même route\.$/);
+assert.match(ans(a, b, { ...R0, ov: .1 }, 0, "other"), / Retour par d'autres routes\.$/);
+assert.match(ans(a, b, { ...R0, ov: .3 }, 0, "other"), / Retour par d'autres routes sur 70 % du chemin\.$/);
+assert.match(ans(a, b, { ...R0, ov: .9 }, 0, "other"), / Pas d'autre route raisonnable : le retour reprend surtout l'aller\.$/);
+assert.doesNotMatch(ans(a, b, R0), /Retour|⇄/);
 console.log("itineraire : ok");

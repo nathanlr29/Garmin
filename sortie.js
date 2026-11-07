@@ -1474,6 +1474,22 @@ function renderGen() {
 // Départ et arrivée restent sur l'appareil (soAB), jamais publiés.
 const GEO = "https://data.geopf.fr/geocodage/completion", AB = { busy: false, msg: "", res: null, seq: 0, again: null, map: null, layers: [], fit: true };
 const VIA_MAX = 8;
+// trajet (demande de Nathan du 07/11/2026) : aller simple, aller-retour par la même route, ou retour par d'autres routes
+const RT = [["", "Aller simple"], ["same", "Aller-retour, même route"], ["other", "Aller-retour, retour par d'autres routes"]];
+// part du retour sur les routes de l'aller : points du retour (tous les 25 m) à moins de ~40 m d'un point de l'aller
+function overlapShare(out, back) {
+  const key = (la, lo) => `${Math.round(la / 4e-4)}:${Math.round(lo / 6e-4)}`, set = new Set();
+  densePts(out, 25).forEach(p => set.add(key(p[0], p[1])));
+  const B = densePts(back, 25); let n = 0;
+  B.forEach(p => { const i = Math.round(p[0] / 4e-4), j = Math.round(p[1] / 6e-4);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) if (set.has(`${i + di}:${j + dj}`)) { n++; return; } });
+  return B.length ? n / B.length : 0;
+}
+// aller + retour en un seul tracé (parts pondérées par la distance)
+function joinRoutes(o, b) {
+  const t = o.km + b.km, w = k => t ? (o[k] * o.km + b[k] * b.km) / t : 0;
+  return { pts: [...o.pts, ...b.pts.slice(1)], km: t, asc: o.asc + b.asc, bad: w("bad"), main: w("main"), dirt: w("dirt"), cyc: (o.cyc || 0) + (b.cyc || 0), ov: overlapShare(o.pts, b.pts) };
+}
 const abShort = t => String(t || "").replace(/\s*\b\d{5}\b\s*/g, " ").replace(/\s+,/g, ",").replace(/,\s*$/, "").replace(/\s+/g, " ").trim()
   .replace(/^([^,]+), \1$/, "$1");  // « Bain-de-Bretagne, 35470 Bain-de-Bretagne » → « Bain-de-Bretagne »
 async function geoSuggest(q, signal) {  // biais vers la ville de config.json (jamais le point de départ)
@@ -1483,13 +1499,15 @@ async function geoSuggest(q, signal) {  // biais vers la ville de config.json (j
   return (j.results || []).map(x => ({ label: abShort(x.fulltext), lat: Math.round(x.y * 1e5) / 1e5, lon: Math.round(x.x * 1e5) / 1e5, kind: x.kind || "" }))
     .filter(x => isFinite(x.lat) && isFinite(x.lon) && !seen.has(x.label) && seen.add(x.label)).slice(0, 6);
 }
-function abAnswer(a, b, r, nv = 0) {  // phrase-réponse du calcul
+function abAnswer(a, b, r, nv = 0, rt = "") {  // phrase-réponse du calcul
   if (!r) return `Tape un départ et une arrivée, ou touche la carte : l'itinéraire passe uniquement par des routes goudronnées, les petites d'abord (ni chemins, ni sentiers, ni graviers, ni routes forestières).`;
   const bits = [r.dirt > .005 ? `${fmt(r.dirt * 100)} % sans revêtement connu (aucune autre route possible)` : "tout goudronné",
     r.main > .03 ? `${fmt(r.main * 100)} % sur route principale` : "", r.cyc >= 500 ? `${fmt(r.cyc / 1000, 1)} km de piste cyclable goudronnée` : ""].filter(Boolean);
-  return `${esc(a.label)} → ${esc(b.label)}${nv ? ` par ${nv} point${nv > 1 ? "s" : ""} de passage` : ""} : <b>${fmt(r.km, 1)} km</b> et <b>${fmt(r.asc)} m D+</b> par les petites routes, ${bits.join(", ")}.`;
+  const ret = !rt || r.ov == null ? "" : rt === "same" ? (r.ov >= .8 ? " Retour par la même route." : ` Retour par la même route sur ${fmt(r.ov * 100)} % (sens uniques ou points de passage évités au retour).`)
+    : r.ov <= .2 ? " Retour par d'autres routes." : r.ov >= .8 ? " Pas d'autre route raisonnable : le retour reprend surtout l'aller." : ` Retour par d'autres routes sur ${fmt((1 - r.ov) * 100)} % du chemin.`;
+  return `${esc(a.label)} ${rt ? "⇄" : "→"} ${esc(b.label)}${rt ? " aller-retour" : ""}${nv ? ` par ${nv} point${nv > 1 ? "s" : ""} de passage` : ""} : <b>${fmt(r.km, 1)} km</b> et <b>${fmt(r.asc)} m D+</b> par les petites routes, ${bits.join(", ")}.${ret}`;
 }
-function abState() { const v = LS.get("soAB", {}); return { a: v.a || null, b: v.b || null, via: Array.isArray(v.via) ? v.via.filter(p => isFinite(p[0]) && isFinite(p[1])).slice(0, VIA_MAX) : [] }; }
+function abState() { const v = LS.get("soAB", {}); return { a: v.a || null, b: v.b || null, rt: RT.some(x => x[0] === v.rt) ? v.rt : "", via: Array.isArray(v.via) ? v.via.filter(p => isFinite(p[0]) && isFinite(p[1])).slice(0, VIA_MAX) : [] }; }
 // Point de passage touché sur la carte : rangé dans l'ordre du trajet. Avec un itinéraire déjà tracé, selon l'endroit du tracé le plus
 // proche (départ = début, arrivée = fin) ; sinon là où il allonge le moins le trajet à vol d'oiseau.
 function viaInsert(a, b, via, p, line) {
@@ -1519,24 +1537,25 @@ function renderAB() {
   // itinéraire affiché : distance et D+ de l'analyse (altitude IGN), comme l'en-tête, plutôt que ceux de BRouter (SRTM)
   if (r && SO.route && SO.route.src === "ab" && SO.route.abKey === r.key && SO.P) r.r = { ...r.r, km: SO.P[SO.P.length - 1].d / 1000, asc: gain(SO.P) };
   $("abHead").innerHTML = `<h3>Aller d'un point à un autre</h3>
-    <p class="rans" id="abAns">${abAnswer(st.a, st.b, r && r.r, st.via.length)}</p>
+    <p class="rans" id="abAns">${abAnswer(st.a, st.b, r && r.r, st.via.length, st.rt)}</p>
     <div class="abform">
       <div class="abf"><label for="abA">Départ</label><input type="text" id="abA" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.a ? st.a.label : "")}" role="combobox" aria-expanded="false" aria-controls="abAL"><ul class="abs" id="abAL" role="listbox" hidden></ul></div>
       <button class="btn abswap" id="abSwap" title="Inverser départ et arrivée" aria-label="Inverser départ et arrivée">⇅</button>
       <div class="abf"><label for="abB">Arrivée</label><input type="text" id="abB" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.b ? st.b.label : "")}" role="combobox" aria-expanded="false" aria-controls="abBL"><ul class="abs" id="abBL" role="listbox" hidden></ul></div>
     </div>`;
   $("abFoot").innerHTML = `<p class="note abhint">${!st.a ? "Touche la carte pour placer le départ, puis l'arrivée." : !st.b ? "Touche la carte pour placer l'arrivée." : `Touche la carte pour ajouter un point de passage (${VIA_MAX} au plus) ; fais glisser un point pour le déplacer, touche un point de passage pour le retirer.`}</p>
-    <div class="gact"><button class="btn2 primary" id="abGo" ${AB.busy ? "disabled" : ""}>${AB.busy === "go" ? "Calcul…" : "Calculer l'itinéraire"}</button>${r ? `<button class="btn2" id="abAlt" ${AB.busy ? "disabled" : ""}>${AB.busy === "alt" ? "Recherche…" : "Autre itinéraire"} <small>${r.alt + 1}/4</small></button>` : ""}${st.via.length ? `<button class="btn2" id="abClr">Effacer les points de passage <small>${st.via.length}</small></button>` : ""}</div>
+    <div class="gact"><select id="abRt" aria-label="Trajet">${RT.map(([v, l]) => `<option value="${v}" ${v === st.rt ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn2 primary" id="abGo" ${AB.busy ? "disabled" : ""}>${AB.busy === "go" ? "Calcul…" : "Calculer l'itinéraire"}</button>${r ? `<button class="btn2" id="abAlt" ${AB.busy ? "disabled" : ""}>${AB.busy === "alt" ? "Recherche…" : "Autre itinéraire"} <small>${r.alt + 1}/4</small></button>` : ""}${st.via.length ? `<button class="btn2" id="abClr">Effacer les points de passage <small>${st.via.length}</small></button>` : ""}</div>
     <p class="soerr" id="abMsg">${esc(AB.msg || "")}</p>
     <p class="note">Départ et arrivée restent sur cet appareil. Recherche d'adresses : IGN (Géoplateforme) ; itinéraire : BRouter (OpenStreetMap).</p>`;
   bindField("abA", "abAL", "a"); bindField("abB", "abBL", "b");
   $("abSwap").onclick = () => { const v = abState(); LS.set("soAB", { a: v.b, b: v.a, via: v.via.slice().reverse() }); AB.msg = ""; renderAB(); if (v.a && v.b) abGo(0); };
   $("abGo").onclick = () => abGo(0);
   if ($("abAlt")) $("abAlt").onclick = () => abGo((r.alt + 1) % 4, "alt");
+  $("abRt").onchange = e => { const v = abState(); v.rt = e.target.value; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
   if ($("abClr")) $("abClr").onclick = () => { const v = abState(); v.via = []; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
   renderABMap();
 }
-const abKey = st => st.a && st.b ? `${st.a.lat},${st.a.lon}|${(st.via || []).map(p => p.join(",")).join("|")}|${st.b.lat},${st.b.lon}` : "";
+const abKey = st => st.a && st.b ? `${st.rt || ""}|${st.a.lat},${st.a.lon}|${(st.via || []).map(p => p.join(",")).join("|")}|${st.b.lat},${st.b.lon}` : "";
 const pin = (cls, txt) => L.divIcon({ className: "abpin", iconSize: [26, 26], iconAnchor: [13, 13], html: `<span class="${cls}">${txt}</span>` });
 async function renderABMap() {
   const el = $("abMap"); if (!el) return;
@@ -1615,13 +1634,21 @@ async function abGo(alt, mode = "go") {
     const a = await abResolve("a", "abA"), b = await abResolve("b", "abB");
     if (!a || !b) throw new Error("Indique un départ et une arrivée.");
     if (dist([a.lat, a.lon], [b.lat, b.lon]) < 200) throw new Error("Départ et arrivée sont presque au même endroit : pour une boucle, utilise « Créer une boucle ».");
-    const via = abState().via, wps = [[a.lat, a.lon], ...via, [b.lat, b.lon]];
+    const { via, rt } = abState(), wps = [[a.lat, a.lon], ...via, [b.lat, b.lon]];
     let prof = await brProfile(), r;
     try { r = await brRoute(wps, prof, alt); }
     catch (e) { if (!e.prof) throw e; prof = await brProfile(true); r = await brRoute(wps, prof, alt); }  // profil expiré sur le serveur : renvoyé une fois
+    // retour : même route = B → A par les points de passage à l'envers (1 requête, sens uniques respectés) ;
+    // autres routes = B → A sans les points de passage, puis la 2e proposition de BRouter si le retour reprend trop l'aller (2 requêtes au plus)
+    if (rt === "same") r = joinRoutes(r, await brRoute(wps.slice().reverse(), prof));
+    else if (rt === "other") {
+      let bk = await brRoute([wps[wps.length - 1], wps[0]], prof), ov = overlapShare(r.pts, bk.pts);
+      if (ov > .6) { try { const b2 = await brRoute([wps[wps.length - 1], wps[0]], prof, 1), o2 = overlapShare(r.pts, b2.pts); if (o2 < ov - .1 && b2.km < bk.km * 1.4) bk = b2; } catch (e) {} }
+      r = joinRoutes(r, bk);
+    }
     if (seq !== AB.seq) return;
-    AB.res = { key: abKey({ a, b, via }), alt, r }; AB.busy = false; AB.msg = ""; SO.abOpen = true; SO.genOpen = SO.pickOpen = false;  // le panneau reste ouvert au-dessus de l'analyse
-    setRoute({ name: `${a.label} → ${b.label}`, pts: r.pts, src: "ab", abKey: AB.res.key });
+    AB.res = { key: abKey({ a, b, via, rt }), alt, r }; AB.busy = false; AB.msg = ""; SO.abOpen = true; SO.genOpen = SO.pickOpen = false;  // le panneau reste ouvert au-dessus de l'analyse
+    setRoute({ name: `${a.label} ${rt ? "⇄" : "→"} ${b.label}`, pts: r.pts, src: "ab", abKey: AB.res.key });
     abNext();
   } catch (e) {
     if (seq !== AB.seq) return;
@@ -1659,7 +1686,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt, _brfStrict: BRF_STRICT, _brf: BRF, _abShort: abShort, _abAnswer: abAnswer, _viaInsert: viaInsert };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt, _brfStrict: BRF_STRICT, _brf: BRF, _abShort: abShort, _abAnswer: abAnswer, _viaInsert: viaInsert, _join: joinRoutes, _overlap: overlapShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Nav?.curTab() === "sortie") open(); });
 })();
