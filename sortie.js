@@ -324,8 +324,10 @@ function settings() {
 const startOf = s => { const [y, m, d] = s.date.split("-").map(Number); return new Date(y, m - 1, d, s.hour, s.min); };
 
 // ------------------------------------------------------------------ Affichage
-async function ensureLeaflet() {
-  if (window.L) return;
+let LEAF = null;  // un seul chargement : deux appels en même temps chargeaient Leaflet deux fois, et la 2e copie de window.L
+// ne reconnaissait plus les objets de la 1re (« Bounds are not valid », tracés disparus)
+function ensureLeaflet() { if (window.L) return Promise.resolve(); return LEAF || (LEAF = loadLeaflet().catch(e => { LEAF = null; throw e; })); }
+async function loadLeaflet() {
   const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.appendChild(css);
   await new Promise((ok, ko) => { const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; s.onload = ok; s.onerror = () => ko(new Error("Carte indisponible")); document.head.appendChild(s); });
 }
@@ -361,14 +363,16 @@ function renderLoad() {
         <label><select id="soMin">${[0, 15, 30, 45].map(m => `<option value="${m}" ${m === s.min ? "selected" : ""}>${pad(m)}</option>`).join("")}</select></label>
         <label>Vitesse sur le plat <input type="number" id="soSpeed" min="12" max="45" step="0.5" value="${s.speed}"> km/h</label>
         <label>Poids <input type="number" id="soKg" min="35" max="150" step="0.1" value="${riderKg() || ""}" placeholder="75"> kg</label>
-        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button><button class="btn" id="soGpx">Exporter en GPX</button><button class="btn" id="soFit" title="Parcours FIT avec les points d'arrêt : alertes « À venir » sur le GPS Garmin">Exporter pour Garmin (.fit)</button>
+        <button class="btn" id="soChange">Importer un GPX</button><button class="btn" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "Refaire une sortie Garmin"}</button><button class="btn" id="soABBtn">${SO.abOpen ? "Masquer la recherche" : "Départ → Arrivée"}</button><button class="btn" id="soLoop">${SO.genOpen ? "Masquer" : "Créer une boucle"}</button><button class="btn" id="soGpx">Exporter en GPX</button><button class="btn" id="soFit" title="Parcours FIT avec les points d'arrêt : alertes « À venir » sur le GPS Garmin">Exporter pour Garmin (.fit)</button>
       </div></div>
     <p class="soerr" id="soErr"></p>
     ${altBar(r)}
+    <div class="sogen" id="soAB" ${SO.abOpen ? "" : "hidden"}></div>
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
     <div class="sogen" id="soGen" ${SO.genOpen ? "" : "hidden"}></div>
     <input type="file" id="soFile" hidden>` : `
     <h2>Choisis ton parcours</h2>
+    <div class="soab0" id="soAB"></div>
     <label class="sodrop" id="soDrop"><input type="file" id="soFile"><b>Importer une trace GPX</b><span>Dans Garmin Connect : Entraînement et planification → Parcours → ouvre le parcours → ⋯ → Exporter au format GPX.</span></label>
     <div class="sorecent"><button class="btn2" id="soPickBtn">${SO.pickOpen ? "Masquer les sorties" : "ou refaire une sortie Garmin"}</button></div>
     <div class="sopick" id="soPick" ${SO.pickOpen ? "" : "hidden"}></div>
@@ -377,8 +381,10 @@ function renderLoad() {
   const file = $("soFile");
   file.onchange = async () => { const f = file.files[0]; if (!f) return; try { setRoute(parseGPX(await f.text(), f.name)); } catch (e) { showErr(e.message); } };
   if ($("soChange")) $("soChange").onclick = () => file.click();
-  if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; if (SO.genOpen) SO.pickOpen = false; renderLoad(); };
-  $("soPickBtn").onclick = () => { SO.pickOpen = !SO.pickOpen; if (SO.pickOpen && SO.route) SO.genOpen = false; renderLoad(); if (SO.pickOpen) $("soPick").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
+  if ($("soLoop")) $("soLoop").onclick = () => { SO.genOpen = !SO.genOpen; if (SO.genOpen) SO.pickOpen = SO.abOpen = false; renderLoad(); };
+  if ($("soABBtn")) $("soABBtn").onclick = () => { SO.abOpen = !SO.abOpen; if (SO.abOpen) SO.pickOpen = SO.genOpen = false; renderLoad(); if (SO.abOpen) $("abA").focus(); };
+  $("soPickBtn").onclick = () => { SO.pickOpen = !SO.pickOpen; if (SO.pickOpen && SO.route) SO.genOpen = SO.abOpen = false; renderLoad(); if (SO.pickOpen) $("soPick").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
+  if ($("soAB") && !$("soAB").hidden) renderAB();
   if (SO.pickOpen) renderPick();
   if ($("soGpx")) $("soGpx").onclick = exportGPX;
   if ($("soFit")) $("soFit").onclick = exportFIT;
@@ -1021,24 +1027,39 @@ function dest(p, b, km) { const R = 6371, d = km / R, la = rad(p[0]), lo = rad(p
   const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(br)), lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
   return [deg(la2), ((deg(lo2) + 540) % 360) - 180]; }
 function startPt() { const h = LS.get("soStart", null); return h && isFinite(h.lat) ? { lat: h.lat, lon: h.lon, label: h.label || "ton point de départ", own: true } : { lat: S.cfg.latitude ?? 48.1173, lon: S.cfg.longitude ?? -1.6778, label: `centre de ${S.cfg.ville || "Rennes"}`, own: false }; }
-async function brProfile(force) {
-  const c = LS.get("soBrf", null); if (!force && c && c.v === BRF_V && Date.now() - c.at < 2 * 864e5) return c.id;
-  const r = await fetch(BR + "/profile", { method: "POST", body: BRF }); const j = r.ok ? await r.json() : {};
+// Profil « routes goudronnées seulement » (demande de Nathan du 07/11/2026, Départ → Arrivée puis boucles) : BRF, mais chemins,
+// pistes, sentiers, graviers et routes forestières non revêtus sont interdits (coût 10000 = jamais pris) au lieu d'être pénalisés.
+// Chemin ou piste sans revêtement connu = interdit aussi (en Bretagne, presque toujours de la terre). Pistes cyclables goudronnées gardées (coût 6).
+const BRF_STRICT = [
+  [" switch highway=unclassified switch isunpaved 40 1.0", " switch highway=unclassified switch isunpaved 10000 1.0"],
+  [" switch highway=bridleway 40", " switch highway=bridleway 10000"],
+  [" switch highway=cycleway switch isunpaved 40 6", " switch highway=cycleway switch isunpaved 10000 6"],
+  [" switch isresidentialorliving switch isunpaved 40 1.3", " switch isresidentialorliving switch isunpaved 10000 1.3"],
+  [" switch highway=service switch isunpaved 40 1.6", " switch highway=service switch isunpaved 10000 1.6"],
+  [" switch tracktype=grade1 switch isunpaved 40 6", " switch tracktype=grade1 switch isunpaved 10000 6"],
+  [/ switch tracktype=grade([2-5]) \d+/g, " switch tracktype=grade$1 10000"],
+  [" switch or bicycle=designated bicycle_road=yes switch isunpaved 40 8", " switch or bicycle=designated bicycle_road=yes switch isunpaved 10000 8"],
+  [" switch ispaved 6 switch isunpaved 50 25", " switch ispaved 6 10000"],
+].reduce((t, [a, b]) => t.replace(a, b), BRF);
+async function brProfile(force) {  // boucles et Départ → Arrivée : routes goudronnées seulement (BRF_STRICT, 07/11/2026)
+  const key = "soBrfS", c = LS.get(key, null); if (!force && c && c.v === BRF_V && Date.now() - c.at < 2 * 864e5) return c.id;
+  const r = await fetch(BR + "/profile", { method: "POST", body: BRF_STRICT }); const j = r.ok ? await r.json() : {};
   if (!j.profileid || j.error) throw new Error("Le service d'itinéraires BRouter ne répond pas, réessaie dans un moment.");
-  LS.set("soBrf", { id: j.profileid, at: Date.now(), v: BRF_V }); return j.profileid;
+  LS.set(key, { id: j.profileid, at: Date.now(), v: BRF_V }); return j.profileid;
 }
-async function brRoute(wps, prof) {
+async function brRoute(wps, prof, alt = 0) {
   const ll = wps.map(p => `${p[1].toFixed(5)},${p[0].toFixed(5)}`).join("|");
-  const r = await fetch(`${BR}?lonlats=${ll}&profile=${prof}&alternativeidx=0&format=geojson`);
+  const r = await fetch(`${BR}?lonlats=${ll}&profile=${prof}&alternativeidx=${alt}&format=geojson`);
   if (!r.ok) { const t = await r.text().catch(() => ""); const e = new Error(t.slice(0, 120) || "itinéraire impossible"); e.prof = /profile|lookup|ParseException|not found/i.test(t); throw e; }
   const f = (await r.json()).features[0], pr = f.properties, M = pr.messages || [], head = M[0] || [], iT = head.indexOf("WayTags"), iD = head.indexOf("Distance");
-  const share = { bad: 0, main: 0, dirt: 0, tot: 0 };
+  const share = { bad: 0, main: 0, dirt: 0, cyc: 0, tot: 0 };
   M.slice(1).forEach(m => { const d = +m[iD] || 0, wt = m[iT] || ""; share.tot += d;
+    if (/highway=(cycleway|path)/.test(wt)) share.cyc += d;
     if (/highway=(cycleway|path|footway|track|bridleway|pedestrian)/.test(wt)) share.bad += d;
     if (/highway=(primary|trunk)/.test(wt)) share.main += d;
     if (/surface=(gravel|compacted|ground|dirt|fine_gravel|unpaved|grass|sand)/.test(wt)) share.dirt += d; });
   return { pts: f.geometry.coordinates.map(c => [Math.round(c[1] * 1e5) / 1e5, Math.round(c[0] * 1e5) / 1e5, c[2] != null ? Math.round(c[2] * 10) / 10 : null]), km: +pr["track-length"] / 1000, asc: +pr["filtered ascend"] || 0,
-    bad: share.tot ? share.bad / share.tot : 0, main: share.tot ? share.main / share.tot : 0, dirt: share.tot ? share.dirt / share.tot : 0 };
+    bad: share.tot ? share.bad / share.tot : 0, main: share.tot ? share.main / share.tot : 0, dirt: share.tot ? share.dirt / share.tot : 0, cyc: share.cyc };
 }
 async function windHere(st, day) {  // prévisions à un seul point (départ) pour noter les boucles
   const d2 = new Date(day); d2.setDate(d2.getDate() + 1);
@@ -1396,7 +1417,7 @@ function renderGen() {
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
     <p class="rans" id="gAns"></p>
-    <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>
+    <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes goudronnées : ni chemins, ni sentiers, ni graviers, ni routes forestières.</p>
     <div class="soform gform">
       <label>Distance <input type="number" id="gKm" min="20" max="300" step="5" value="${LS.get("soGenKm", 80)}"> km</label>
       <label>Relief <select id="gRel">${[["flat", "plutôt plat"], ["any", "peu importe"], ["hilly", "vallonné"]].map(([v, l]) => `<option value="${v}" ${LS.get("soGenRel", "any") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -1448,6 +1469,195 @@ function renderGen() {
   $("gMore").onclick = moreLoops;
   renderGenMap();
 }
+// --- Départ → Arrivée (demande de Nathan du 07/11/2026) : recherche d'adresses (géocodage IGN de la Géoplateforme, sans clé,
+// prévu pour la saisie au fil des lettres) et itinéraire BRouter sur les routes goudronnées seulement (BRF_STRICT).
+// Départ et arrivée restent sur l'appareil (soAB), jamais publiés.
+const GEO = "https://data.geopf.fr/geocodage/completion", AB = { busy: false, msg: "", res: null, seq: 0, again: null, map: null, layers: [], fit: true };
+const VIA_MAX = 8;
+// trajet (demande de Nathan du 07/11/2026) : aller simple, aller-retour par la même route, ou retour par d'autres routes
+const RT = [["", "Aller simple"], ["same", "Aller-retour, même route"], ["other", "Aller-retour, retour par d'autres routes"]];
+// part du retour sur les routes de l'aller : points du retour (tous les 25 m) à moins de ~40 m d'un point de l'aller
+function overlapShare(out, back) {
+  const key = (la, lo) => `${Math.round(la / 4e-4)}:${Math.round(lo / 6e-4)}`, set = new Set();
+  densePts(out, 25).forEach(p => set.add(key(p[0], p[1])));
+  const B = densePts(back, 25); let n = 0;
+  B.forEach(p => { const i = Math.round(p[0] / 4e-4), j = Math.round(p[1] / 6e-4);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) if (set.has(`${i + di}:${j + dj}`)) { n++; return; } });
+  return B.length ? n / B.length : 0;
+}
+// aller + retour en un seul tracé (parts pondérées par la distance)
+function joinRoutes(o, b) {
+  const t = o.km + b.km, w = k => t ? (o[k] * o.km + b[k] * b.km) / t : 0;
+  return { pts: [...o.pts, ...b.pts.slice(1)], km: t, asc: o.asc + b.asc, bad: w("bad"), main: w("main"), dirt: w("dirt"), cyc: (o.cyc || 0) + (b.cyc || 0), ov: overlapShare(o.pts, b.pts) };
+}
+const abShort = t => String(t || "").replace(/\s*\b\d{5}\b\s*/g, " ").replace(/\s+,/g, ",").replace(/,\s*$/, "").replace(/\s+/g, " ").trim()
+  .replace(/^([^,]+), \1$/, "$1");  // « Bain-de-Bretagne, 35470 Bain-de-Bretagne » → « Bain-de-Bretagne »
+async function geoSuggest(q, signal) {  // biais vers la ville de config.json (jamais le point de départ)
+  const ll = `${(S.cfg.longitude ?? -1.6778).toFixed(2)},${(S.cfg.latitude ?? 48.1173).toFixed(2)}`;
+  const r = await fetch(`${GEO}?text=${encodeURIComponent(q)}&type=StreetAddress,PositionOfInterest&maximumResponses=8&lonlat=${ll}`, { signal });
+  const j = r.ok ? await r.json() : {}, seen = new Set();
+  return (j.results || []).map(x => ({ label: abShort(x.fulltext), lat: Math.round(x.y * 1e5) / 1e5, lon: Math.round(x.x * 1e5) / 1e5, kind: x.kind || "" }))
+    .filter(x => isFinite(x.lat) && isFinite(x.lon) && !seen.has(x.label) && seen.add(x.label)).slice(0, 6);
+}
+function abAnswer(a, b, r, nv = 0, rt = "") {  // phrase-réponse du calcul
+  if (!r) return `Tape un départ et une arrivée, ou touche la carte : l'itinéraire passe uniquement par des routes goudronnées, les petites d'abord (ni chemins, ni sentiers, ni graviers, ni routes forestières).`;
+  const bits = [r.dirt > .005 ? `${fmt(r.dirt * 100)} % sans revêtement connu (aucune autre route possible)` : "tout goudronné",
+    r.main > .03 ? `${fmt(r.main * 100)} % sur route principale` : "", r.cyc >= 500 ? `${fmt(r.cyc / 1000, 1)} km de piste cyclable goudronnée` : ""].filter(Boolean);
+  const ret = !rt || r.ov == null ? "" : rt === "same" ? (r.ov >= .8 ? " Retour par la même route." : ` Retour par la même route sur ${fmt(r.ov * 100)} % (sens uniques ou points de passage évités au retour).`)
+    : r.ov <= .2 ? " Retour par d'autres routes." : r.ov >= .8 ? " Pas d'autre route raisonnable : le retour reprend surtout l'aller." : ` Retour par d'autres routes sur ${fmt((1 - r.ov) * 100)} % du chemin.`;
+  return `${esc(a.label)} ${rt ? "⇄" : "→"} ${esc(b.label)}${rt ? " aller-retour" : ""}${nv ? ` par ${nv} point${nv > 1 ? "s" : ""} de passage` : ""} : <b>${fmt(r.km, 1)} km</b> et <b>${fmt(r.asc)} m D+</b> par les petites routes, ${bits.join(", ")}.${ret}`;
+}
+function abState() { const v = LS.get("soAB", {}); return { a: v.a || null, b: v.b || null, rt: RT.some(x => x[0] === v.rt) ? v.rt : "", via: Array.isArray(v.via) ? v.via.filter(p => isFinite(p[0]) && isFinite(p[1])).slice(0, VIA_MAX) : [] }; }
+// Point de passage touché sur la carte : rangé dans l'ordre du trajet. Avec un itinéraire déjà tracé, selon l'endroit du tracé le plus
+// proche (départ = début, arrivée = fin) ; sinon là où il allonge le moins le trajet à vol d'oiseau.
+function viaInsert(a, b, via, p, line) {
+  const out = via.slice();
+  if (line && line.length > 1) {
+    const st = Math.max(1, Math.floor(line.length / 400)), near = q => { let bi = 0, bd = Infinity; for (let i = 0; i < line.length; i += st) { const d = dist(q, line[i]); if (d < bd) { bd = d; bi = i; } } return bi; };
+    const t = near(p); out.splice(via.filter(v => near(v) <= t).length, 0, p); return out;
+  }
+  const S = [a, ...via, b]; let bk = 0, bc = Infinity;
+  for (let k = 0; k < S.length - 1; k++) { const c = dist(S[k], p) + dist(p, S[k + 1]) - dist(S[k], S[k + 1]); if (c < bc) { bc = c; bk = k; } }
+  out.splice(bk, 0, p); return out;
+}
+async function geoReverse(lat, lon) {  // nom d'un point touché (rue et commune), sinon « point sur la carte »
+  try { const r = await fetch(`https://data.geopf.fr/geocodage/reverse?lon=${lon}&lat=${lat}&index=address&limit=1`), j = r.ok ? await r.json() : {}, f = j.features && j.features[0], q = f && f.properties;
+    if (q && q.city) return q.distance < 300 && (q.street || q.name) ? `${q.street || q.name}, ${q.city}` : `près de ${q.city}`; } catch (e) {}
+  return "point sur la carte";
+}
+function renderAB() {
+  const box = $("soAB"); if (!box) return;
+  const st = abState(), r = AB.res && AB.res.key === abKey(st) ? AB.res : null;
+  // la carte ne bouge jamais dans la page (une carte Leaflet déplacée pendant une animation perdait son tracé et ses points) :
+  // seuls l'en-tête et le pied sont redessinés ; panneau recréé (renderLoad) = nouvelle carte, même cadrage
+  if (!box.querySelector("#abMap")) {
+    if (AB.map) { AB.view = [AB.map.getCenter(), AB.map.getZoom()]; AB.map.remove(); AB.map = null; AB.layers = []; }
+    box.innerHTML = `<div id="abHead"></div><div class="gmapbox"><div id="abMap" class="gmap abmap"></div></div><div id="abFoot"></div>`;
+  }
+  // itinéraire affiché : distance et D+ de l'analyse (altitude IGN), comme l'en-tête, plutôt que ceux de BRouter (SRTM)
+  if (r && SO.route && SO.route.src === "ab" && SO.route.abKey === r.key && SO.P) r.r = { ...r.r, km: SO.P[SO.P.length - 1].d / 1000, asc: gain(SO.P) };
+  $("abHead").innerHTML = `<h3>Aller d'un point à un autre</h3>
+    <p class="rans" id="abAns">${abAnswer(st.a, st.b, r && r.r, st.via.length, st.rt)}</p>
+    <div class="abform">
+      <div class="abf"><label for="abA">Départ</label><input type="text" id="abA" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.a ? st.a.label : "")}" role="combobox" aria-expanded="false" aria-controls="abAL"><ul class="abs" id="abAL" role="listbox" hidden></ul></div>
+      <button class="btn abswap" id="abSwap" title="Inverser départ et arrivée" aria-label="Inverser départ et arrivée">⇅</button>
+      <div class="abf"><label for="abB">Arrivée</label><input type="text" id="abB" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.b ? st.b.label : "")}" role="combobox" aria-expanded="false" aria-controls="abBL"><ul class="abs" id="abBL" role="listbox" hidden></ul></div>
+    </div>`;
+  $("abFoot").innerHTML = `<p class="note abhint">${!st.a ? "Touche la carte pour placer le départ, puis l'arrivée." : !st.b ? "Touche la carte pour placer l'arrivée." : `Touche la carte pour ajouter un point de passage (${VIA_MAX} au plus) ; fais glisser un point pour le déplacer, touche un point de passage pour le retirer.`}</p>
+    <div class="gact"><select id="abRt" aria-label="Trajet">${RT.map(([v, l]) => `<option value="${v}" ${v === st.rt ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn2 primary" id="abGo" ${AB.busy ? "disabled" : ""}>${AB.busy === "go" ? "Calcul…" : "Calculer l'itinéraire"}</button>${r ? `<button class="btn2" id="abAlt" ${AB.busy ? "disabled" : ""}>${AB.busy === "alt" ? "Recherche…" : "Autre itinéraire"} <small>${r.alt + 1}/4</small></button>` : ""}${st.via.length ? `<button class="btn2" id="abClr">Effacer les points de passage <small>${st.via.length}</small></button>` : ""}</div>
+    <p class="soerr" id="abMsg">${esc(AB.msg || "")}</p>
+    <p class="note">Départ et arrivée restent sur cet appareil. Recherche d'adresses : IGN (Géoplateforme) ; itinéraire : BRouter (OpenStreetMap).</p>`;
+  bindField("abA", "abAL", "a"); bindField("abB", "abBL", "b");
+  $("abSwap").onclick = () => { const v = abState(); LS.set("soAB", { a: v.b, b: v.a, via: v.via.slice().reverse() }); AB.msg = ""; renderAB(); if (v.a && v.b) abGo(0); };
+  $("abGo").onclick = () => abGo(0);
+  if ($("abAlt")) $("abAlt").onclick = () => abGo((r.alt + 1) % 4, "alt");
+  $("abRt").onchange = e => { const v = abState(); v.rt = e.target.value; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
+  if ($("abClr")) $("abClr").onclick = () => { const v = abState(); v.via = []; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
+  renderABMap();
+}
+const abKey = st => st.a && st.b ? `${st.rt || ""}|${st.a.lat},${st.a.lon}|${(st.via || []).map(p => p.join(",")).join("|")}|${st.b.lat},${st.b.lon}` : "";
+const pin = (cls, txt) => L.divIcon({ className: "abpin", iconSize: [26, 26], iconAnchor: [13, 13], html: `<span class="${cls}">${txt}</span>` });
+async function renderABMap() {
+  const el = $("abMap"); if (!el) return;
+  try { await ensureLeaflet(); } catch (e) { el.innerHTML = `<p class="note">Carte indisponible.</p>`; return; }
+  if (!el.isConnected || (AB.map && AB.map.getContainer() !== el)) return;
+  const st = abState();
+  if (!AB.map) {
+    const c = st.a || { lat: S.cfg.latitude ?? 48.1173, lon: S.cfg.longitude ?? -1.6778 };
+    AB.map = L.map(el, { zoomControl: true, attributionControl: true, zoomSnap: .25 });
+    if (AB.view) AB.map.setView(...AB.view); else AB.map.setView([c.lat, c.lon], 11);
+    baseLayers(AB.map);
+    AB.map.on("click", e => abTap(e.latlng.lat, e.latlng.lng));
+  }
+  const map = AB.map, add = l => { l.addTo(map); AB.layers.push(l); return l; };
+  AB.layers.forEach(l => l.remove()); AB.layers = [];
+  const R = AB.res, line = R && R.r.pts.map(p => [p[0], p[1]]), fresh = R && R.key === abKey(st);
+  if (line) { add(L.polyline(line, { color: "#fff", weight: 9, opacity: fresh ? .95 : .5, interactive: false })); add(L.polyline(line, { color: GC.sel, weight: 5, opacity: fresh ? 1 : .4, interactive: false })); }
+  const drag = (m, set) => m.on("dragend", () => { const q = m.getLatLng(); set(Math.round(q.lat * 1e5) / 1e5, Math.round(q.lng * 1e5) / 1e5); });
+  st.via.forEach((p, k) => { const m = add(L.marker(p, { draggable: true, icon: pin("v", k + 1), title: "Point de passage : glisse pour le déplacer, touche pour le retirer" }));
+    m.on("click", () => { const v = abState(); v.via.splice(k, 1); LS.set("soAB", v); abGo(0); });
+    drag(m, (la, lo) => { const v = abState(); v.via[k] = [la, lo]; LS.set("soAB", v); abGo(0); }); });
+  ["a", "b"].forEach(w => { const p = st[w]; if (!p) return;
+    const m = add(L.marker([p.lat, p.lon], { draggable: true, zIndexOffset: 500, icon: pin(w, w.toUpperCase()), title: w === "a" ? "Départ" : "Arrivée" }));
+    drag(m, async (la, lo) => { const v = abState(); v[w] = { label: "point sur la carte", lat: la, lon: lo }; LS.set("soAB", v); abGo(0);
+      const nm = await geoReverse(la, lo), v2 = abState(); if (v2[w] && v2[w].lat === la && v2[w].lon === lo) { v2[w].label = nm; LS.set("soAB", v2); renderAB(); } }); });
+  map.invalidateSize();
+  if (AB.fit && el.offsetWidth) {
+    const pts = line && fresh ? line.filter((_, i) => i % 10 === 0) : [st.a, ...st.via.map(p => ({ lat: p[0], lon: p[1] })), st.b].filter(Boolean).map(p => [p.lat, p.lon]);
+    if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), { padding: [24, 24], animate: false }); if (fresh || !AB.busy) AB.fit = false; } else if (pts.length) map.setView(pts[0], Math.max(map.getZoom(), 12));
+  } else if (AB.fit) setTimeout(renderABMap, 120);  // panneau pas encore affiché
+}
+async function abTap(lat, lon) {  // départ, puis arrivée, puis points de passage
+  lat = Math.round(lat * 1e5) / 1e5; lon = Math.round(lon * 1e5) / 1e5;
+  const v = abState(), w = !v.a ? "a" : !v.b ? "b" : null;
+  if (w) { v[w] = { label: "point sur la carte", lat, lon }; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB();
+    const nm = await geoReverse(lat, lon), v2 = abState(); if (v2[w] && v2[w].lat === lat) { v2[w].label = nm; LS.set("soAB", v2); renderAB(); } return; }
+  if (v.via.length >= VIA_MAX) { AB.msg = `${VIA_MAX} points de passage au plus : retires-en un en le touchant.`; return renderAB(); }
+  const R = AB.res;
+  v.via = viaInsert([v.a.lat, v.a.lon], [v.b.lat, v.b.lon], v.via, [lat, lon], R && R.r.pts); LS.set("soAB", v); abGo(0);
+}
+function bindField(id, lid, which) {
+  const inp = $(id), ul = $(lid); let items = [], hi = -1, t = 0, ctl = null;
+  const pick = it => { const v = abState(); v[which] = it; LS.set("soAB", v); inp.value = it.label; close(); AB.msg = ""; AB.fit = true;
+    const o = which === "a" ? $("abB") : null; if (o && !v.b) o.focus(); else if (v.a && v.b) abGo(0); };
+  const close = () => { ul.hidden = true; inp.setAttribute("aria-expanded", "false"); hi = -1; };
+  const show = () => { ul.innerHTML = items.map((it, k) => `<li role="option" data-k="${k}" class="${k === hi ? "on" : ""}" aria-selected="${k === hi}">${esc(it.label)}${it.note ? ` <small>${esc(it.note)}</small>` : ""}</li>`).join("");
+    ul.hidden = !items.length; inp.setAttribute("aria-expanded", String(!!items.length));
+    ul.querySelectorAll("li").forEach(li => li.onmousedown = e => { e.preventDefault(); const it = items[+li.dataset.k]; if (it.here) here(); else pick(it); }); };
+  const here = () => { close(); if (!navigator.geolocation) { AB.msg = "Géolocalisation indisponible sur cet appareil."; return renderAB(); }
+    inp.value = "Localisation…";
+    navigator.geolocation.getCurrentPosition(p => pick({ label: "Ma position", lat: Math.round(p.coords.latitude * 1e5) / 1e5, lon: Math.round(p.coords.longitude * 1e5) / 1e5 }),
+      () => { AB.msg = "Position refusée ou introuvable."; renderAB(); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 }); };
+  const own = () => { const sp = startPt(); return [{ label: "Ma position actuelle", here: true }, ...(sp.own ? [{ label: "Mon point de départ", note: sp.label, lat: sp.lat, lon: sp.lon }] : [])]; };
+  inp.onfocus = () => { if (!inp.value.trim() || inp.value === (abState()[which] || {}).label) { items = own(); show(); } };
+  inp.onblur = () => setTimeout(close, 150);
+  inp.oninput = () => { const q = inp.value.trim(); clearTimeout(t); if (ctl) ctl.abort();
+    const v = abState(); if (v[which]) { v[which] = null; LS.set("soAB", v); }
+    items = q.length < 3 && !q ? own() : []; hi = -1; show(); if (q.length < 3) return;
+    t = setTimeout(async () => { ctl = new AbortController(); try { items = await geoSuggest(q, ctl.signal); hi = items.length ? 0 : -1; show(); } catch (e) { if (e.name !== "AbortError") { items = []; show(); } } }, 250); };
+  inp.onkeydown = e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { if (!items.length) return; e.preventDefault(); hi = (hi + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length; show(); }
+    else if (e.key === "Enter") { e.preventDefault(); const it = items[hi >= 0 ? hi : 0]; if (!ul.hidden && it) { if (it.here) here(); else pick(it); } else abGo(0); }
+    else if (e.key === "Escape") close(); };
+}
+async function abResolve(which, id) {  // texte tapé sans choisir dans la liste : on prend la première adresse trouvée
+  const v = abState(); if (v[which]) return v[which];
+  const q = ($(id)?.value || "").trim(); if (q.length < 2) return null;
+  const L = await geoSuggest(q); if (!L.length) throw new Error(`Adresse introuvable : « ${q} ».`);
+  v[which] = L[0]; LS.set("soAB", v); return L[0];
+}
+async function abGo(alt, mode = "go") {
+  if (AB.busy) { AB.again = [alt, mode]; renderAB(); return; }  // touché pendant un calcul : on recalcule juste après
+  const seq = ++AB.seq;
+  AB.busy = mode; AB.msg = ""; renderAB();
+  try {
+    const a = await abResolve("a", "abA"), b = await abResolve("b", "abB");
+    if (!a || !b) throw new Error("Indique un départ et une arrivée.");
+    if (dist([a.lat, a.lon], [b.lat, b.lon]) < 200) throw new Error("Départ et arrivée sont presque au même endroit : pour une boucle, utilise « Créer une boucle ».");
+    const { via, rt } = abState(), wps = [[a.lat, a.lon], ...via, [b.lat, b.lon]];
+    let prof = await brProfile(), r;
+    try { r = await brRoute(wps, prof, alt); }
+    catch (e) { if (!e.prof) throw e; prof = await brProfile(true); r = await brRoute(wps, prof, alt); }  // profil expiré sur le serveur : renvoyé une fois
+    // retour : même route = B → A par les points de passage à l'envers (1 requête, sens uniques respectés) ;
+    // autres routes = B → A sans les points de passage, puis la 2e proposition de BRouter si le retour reprend trop l'aller (2 requêtes au plus)
+    if (rt === "same") r = joinRoutes(r, await brRoute(wps.slice().reverse(), prof));
+    else if (rt === "other") {
+      let bk = await brRoute([wps[wps.length - 1], wps[0]], prof), ov = overlapShare(r.pts, bk.pts);
+      if (ov > .6) { try { const b2 = await brRoute([wps[wps.length - 1], wps[0]], prof, 1), o2 = overlapShare(r.pts, b2.pts); if (o2 < ov - .1 && b2.km < bk.km * 1.4) bk = b2; } catch (e) {} }
+      r = joinRoutes(r, bk);
+    }
+    if (seq !== AB.seq) return;
+    AB.res = { key: abKey({ a, b, via, rt }), alt, r }; AB.busy = false; AB.msg = ""; SO.abOpen = true; SO.genOpen = SO.pickOpen = false;  // le panneau reste ouvert au-dessus de l'analyse
+    setRoute({ name: `${a.label} ${rt ? "⇄" : "→"} ${b.label}`, pts: r.pts, src: "ab", abKey: AB.res.key });
+    abNext();
+  } catch (e) {
+    if (seq !== AB.seq) return;
+    AB.busy = false; if (mode === "alt" && AB.res) AB.res.alt = 3;  // la suivante repart de l'itinéraire principal
+    AB.msg = alt && mode === "alt" ? "Pas d'autre itinéraire par les routes goudronnées." : /target island|not found|no route|position not mapped/i.test(e.message) ? "Aucun itinéraire par les routes goudronnées : place le départ, l'arrivée et les points de passage au bord d'une route." : /retry later|Failed to fetch|NetworkError/i.test(e.message) ? "Le service d'itinéraires BRouter est saturé ou injoignable : réessaie dans une minute." : e.message || "Itinéraire impossible pour l'instant.";
+    renderAB(); abNext();
+  }
+}
+function abNext() { const n = AB.again; AB.again = null; if (n) abGo(...n); }
 // --- Export : GPX (trace + waypoints des arrêts) et parcours FIT (points de parcours typés, le plus fiable pour les alertes Garmin)
 const xml = t => String(t).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
 function toGPX(r, W = []) {
@@ -1476,7 +1686,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt, _brfStrict: BRF_STRICT, _brf: BRF, _abShort: abShort, _abAnswer: abAnswer, _viaInsert: viaInsert, _join: joinRoutes, _overlap: overlapShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Nav?.curTab() === "sortie") open(); });
 })();
