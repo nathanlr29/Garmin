@@ -52,7 +52,7 @@ function wearLine(o) {
 // plafond du pneu ; avant = 95 % de l'arrière (0,3 bar d'écart au plus) ; arrondi au dixième inférieur.
 // Nathan : 32 mm, chambre butyle, vélo + bidons ≈ 10 kg, poids = dernière pesée Garmin. Puis réglage perso « plus / moins gonflé »
 // par crans de 0,2 bar (tyrePBias, ±0,6, propre à l'appareil). Remplace la formule de Berto (avant trop bas : 3,3 bar contre 4,2 roulés).
-const TYRE = { widths: [25, 28, 30, 32], def: 32, key: "tyreMm", mount: .3, tube: true, bike: 10, kg: 75, rim: 21, offset: 9, frontK: .95, gap: .3, floor: 2,
+const TYRE = { widths: [25, 28, 30, 32], def: 32, key: "tyreMm", mount: .3, tube: true, bike: 10, kg: 75, rim: 21 /* Elitewheels ENT 2.0 de Nathan : 21 mm interne, à crochets */, offset: 9, frontK: .95, gap: .3, floor: 2,
   grid: { 50: [3.4, 3.2, 3, 2.8], 60: [3.8, 3.6, 3.3, 3.2], 70: [4.2, 3.9, 3.7, 3.5], 80: [4.5, 4.3, 4, 3.8], 90: [4.8, 4.6, 4.3, 4], 100: [5, 4.7, 4.3, 4] },
   gridReal: [30.5, 31.5, 33.8, 35] };
 const capOf = w => w <= 25 ? 7 : w <= 28 ? 6.5 : w <= 32 ? 6 : 5;     // plafond du pneu (repère Legend, jante à crochets)
