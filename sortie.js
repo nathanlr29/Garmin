@@ -1025,7 +1025,7 @@ function dest(p, b, km) { const R = 6371, d = km / R, la = rad(p[0]), lo = rad(p
   const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(br)), lo2 = lo + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
   return [deg(la2), ((deg(lo2) + 540) % 360) - 180]; }
 function startPt() { const h = LS.get("soStart", null); return h && isFinite(h.lat) ? { lat: h.lat, lon: h.lon, label: h.label || "ton point de départ", own: true } : { lat: S.cfg.latitude ?? 48.1173, lon: S.cfg.longitude ?? -1.6778, label: `centre de ${S.cfg.ville || "Rennes"}`, own: false }; }
-// Profil « routes goudronnées seulement » (Départ → Arrivée, demande de Nathan du 07/11/2026) : celui des boucles, mais chemins,
+// Profil « routes goudronnées seulement » (demande de Nathan du 07/11/2026, Départ → Arrivée puis boucles) : BRF, mais chemins,
 // pistes, sentiers, graviers et routes forestières non revêtus sont interdits (coût 10000 = jamais pris) au lieu d'être pénalisés.
 // Chemin ou piste sans revêtement connu = interdit aussi (en Bretagne, presque toujours de la terre). Pistes cyclables goudronnées gardées (coût 6).
 const BRF_STRICT = [
@@ -1039,9 +1039,9 @@ const BRF_STRICT = [
   [" switch or bicycle=designated bicycle_road=yes switch isunpaved 40 8", " switch or bicycle=designated bicycle_road=yes switch isunpaved 10000 8"],
   [" switch ispaved 6 switch isunpaved 50 25", " switch ispaved 6 10000"],
 ].reduce((t, [a, b]) => t.replace(a, b), BRF);
-async function brProfile(force, strict) {
-  const key = strict ? "soBrfS" : "soBrf", c = LS.get(key, null); if (!force && c && c.v === BRF_V && Date.now() - c.at < 2 * 864e5) return c.id;
-  const r = await fetch(BR + "/profile", { method: "POST", body: strict ? BRF_STRICT : BRF }); const j = r.ok ? await r.json() : {};
+async function brProfile(force) {  // boucles et Départ → Arrivée : routes goudronnées seulement (BRF_STRICT, 07/11/2026)
+  const key = "soBrfS", c = LS.get(key, null); if (!force && c && c.v === BRF_V && Date.now() - c.at < 2 * 864e5) return c.id;
+  const r = await fetch(BR + "/profile", { method: "POST", body: BRF_STRICT }); const j = r.ok ? await r.json() : {};
   if (!j.profileid || j.error) throw new Error("Le service d'itinéraires BRouter ne répond pas, réessaie dans un moment.");
   LS.set(key, { id: j.profileid, at: Date.now(), v: BRF_V }); return j.profileid;
 }
@@ -1415,7 +1415,7 @@ function renderGen() {
     </div>`; };
   box.innerHTML = `<h3>Créer une boucle face au vent</h3>
     <p class="rans" id="gAns"></p>
-    <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes : pas de pistes cyclables, voies vertes ni chemins de halage.</p>
+    <p class="sosmall">Départ : <b>${esc(st.label)}</b>${st.own ? "" : " (définis le tien ci-dessous)"} · aller face au vent, retour poussé. Uniquement des routes goudronnées : ni chemins, ni sentiers, ni graviers, ni routes forestières.</p>
     <div class="soform gform">
       <label>Distance <input type="number" id="gKm" min="20" max="300" step="5" value="${LS.get("soGenKm", 80)}"> km</label>
       <label>Relief <select id="gRel">${[["flat", "plutôt plat"], ["any", "peu importe"], ["hilly", "vallonné"]].map(([v, l]) => `<option value="${v}" ${LS.get("soGenRel", "any") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -1546,9 +1546,9 @@ async function abGo(alt, mode = "go") {
     if (!a || !b) throw new Error("Indique un départ et une arrivée.");
     if (dist([a.lat, a.lon], [b.lat, b.lon]) < 200) throw new Error("Départ et arrivée sont presque au même endroit : pour une boucle, utilise « Créer une boucle ».");
     const wps = [[a.lat, a.lon], [b.lat, b.lon]];
-    let prof = await brProfile(false, true), r;
+    let prof = await brProfile(), r;
     try { r = await brRoute(wps, prof, alt); }
-    catch (e) { if (!e.prof) throw e; prof = await brProfile(true, true); r = await brRoute(wps, prof, alt); }  // profil expiré sur le serveur : renvoyé une fois
+    catch (e) { if (!e.prof) throw e; prof = await brProfile(true); r = await brRoute(wps, prof, alt); }  // profil expiré sur le serveur : renvoyé une fois
     if (seq !== AB.seq) return;
     AB.res = { key: abKey({ a, b }), alt, r }; AB.busy = false; AB.msg = ""; SO.abOpen = true; SO.genOpen = SO.pickOpen = false;  // le panneau reste ouvert au-dessus de l'analyse
     setRoute({ name: `${a.label} → ${b.label}`, pts: r.pts, src: "ab", abKey: AB.res.key });
