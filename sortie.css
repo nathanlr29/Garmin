@@ -238,3 +238,10 @@
 #sortie .abs li.on{box-shadow:inset 3px 0 0 var(--accent)}
 #sortie #soAB .gact .btn2 small{font-weight:500;color:var(--muted);margin-left:4px}
 @media (max-width:620px){#sortie .abswap{align-self:center;order:0}#sortie .abf{flex-basis:100%}#sortie #soAB .gact .btn2{flex:1 1 auto;min-height:44px}}
+/* carte de Départ → Arrivée : points posés sur la carte (exception assumée : fond plein et petite ombre, lisibles sur le fond de carte) */
+#sortie .abmap{height:360px;cursor:crosshair}
+@media (max-width:620px){#sortie .abmap{height:300px}}
+#abMap svg{width:auto;height:auto;display:block}
+#sortie .abhint{margin-top:6px}
+#sortie .abpin span{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;color:#fff;font:800 12px/1 var(--font-num);border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:grab}
+#sortie .abpin .a{background:#16a34a}#sortie .abpin .b{background:#222226}#sortie .abpin .v{background:#fc4c02;width:22px;height:22px;margin:2px}

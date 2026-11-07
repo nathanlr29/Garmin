@@ -7,7 +7,7 @@ const win = { addEventListener() {} }, esc = t => String(t).replace(/&/g, "&amp;
 const ctx = { nf: (v, d = 0) => (+v).toFixed(d), esc, window: win, document: { addEventListener() {} }, addEventListener() {}, innerWidth: 1280, localStorage: { getItem: () => null, setItem() {} } };
 vm.createContext(ctx);
 vm.runInContext(readFileSync(new URL("../sortie.js", import.meta.url), "utf8"), ctx);
-const { _brf: B, _brfStrict: S, _abShort: short, _abAnswer: ans } = win.Sortie;
+const { _brf: B, _brfStrict: S, _abShort: short, _abAnswer: ans, _viaInsert: ins } = win.Sortie;
 
 // 1) profil strict : chaque remplacement a eu lieu, plus aucun coût « non revêtu » permis, le reste identique
 assert.notEqual(S, B);
@@ -28,8 +28,22 @@ assert.equal(short("Bain-de-Bretagne, 35470"), "Bain-de-Bretagne");
 assert.equal(short("12 Rue de Brest, 29200 Brest"), "12 Rue de Brest, Brest");
 
 // 3) phrase-réponse
-assert.match(ans(null, null, null), /^Tape un départ et une arrivée : l'itinéraire passe uniquement par des routes goudronnées/);
+assert.match(ans(null, null, null), /^Tape un départ et une arrivée, ou touche la carte : l'itinéraire passe uniquement par des routes goudronnées/);
 const a = { label: "Rennes" }, b = { label: "Bain <b>" };
 assert.equal(ans(a, b, { km: 39.73, asc: 212, dirt: 0, main: 0, cyc: 0 }), "Rennes → Bain &lt;b> : <b>39.7 km</b> et <b>212 m D+</b> par les petites routes, tout goudronné.");
 assert.match(ans(a, b, { km: 40, asc: 200, dirt: .02, main: .08, cyc: 1200 }), /2 % sans revêtement connu \(aucune autre route possible\), 8 % sur route principale, 1.2 km de piste cyclable goudronnée\.$/);
+assert.match(ans(a, b, { km: 40, asc: 200, dirt: 0, main: 0, cyc: 0 }, 1), /^Rennes → Bain &lt;b> par 1 point de passage : /);
+assert.match(ans(a, b, { km: 40, asc: 200, dirt: 0, main: 0, cyc: 0 }, 3), / par 3 points de passage : /);
+
+// 4) points de passage rangés dans l'ordre du trajet
+const A = [48.0, -1.7], Bz = [48.4, -1.7];   // trajet sud → nord
+const line = Array.from({ length: 41 }, (_, i) => [48.0 + i * .01, -1.7]);
+const J = x => JSON.stringify(x);
+assert.equal(J(ins(A, Bz, [], [48.2, -1.65], line)), J([[48.2, -1.65]]));
+assert.equal(J(ins(A, Bz, [[48.3, -1.7]], [48.1, -1.6], line)), J([[48.1, -1.6], [48.3, -1.7]]));       // avant le premier
+assert.equal(J(ins(A, Bz, [[48.1, -1.7], [48.2, -1.7]], [48.35, -1.75], line)), J([[48.1, -1.7], [48.2, -1.7], [48.35, -1.75]]));  // après le dernier
+assert.equal(J(ins(A, Bz, [[48.1, -1.7], [48.3, -1.7]], [48.2, -1.8], line)), J([[48.1, -1.7], [48.2, -1.8], [48.3, -1.7]]));   // entre les deux
+// sans tracé : là où le détour à vol d'oiseau est le plus court
+assert.equal(J(ins(A, Bz, [[48.3, -1.7]], [48.1, -1.7], null)), J([[48.1, -1.7], [48.3, -1.7]]));
+assert.equal(J(ins(A, Bz, [[48.1, -1.7]], [48.3, -1.7], null)), J([[48.1, -1.7], [48.3, -1.7]]));
 console.log("itineraire : ok");
