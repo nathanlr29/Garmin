@@ -219,12 +219,11 @@ function renderHero(acts,km,prevSame,isCur,todayIdx,Y,prev){
   const prevTotal=sum(prev,a=>a.km);
   let goalHtml="";
   if(goal>0 && S.sport!=="all"){
-    const pct=Math.min(100,km/goal*100), expected=isCur?goal*elapsed/n:goal;
-    const ahead=km-expected;
+    const pct=Math.min(100,km/goal*100);
     const left=Math.max(0,goal-km), weeksLeft=Math.max(1,(n-elapsed)/7);
     let note;
     if(km>=goal) note=`<b>Objectif atteint</b> : ${nf(km-goal)} km de bonus.`;
-    else if(isCur) note=`${ahead>=0?`<b>${nf(ahead)} km d'avance</b> sur le rythme.`:`<b>${nf(-ahead)} km de retard</b> sur le rythme.`} Encore <b>${nf(left/weeksLeft)} km par semaine</b> pour y arriver.`;
+    else if(isCur) note=`Encore <b>${nf(left/weeksLeft)} km par semaine</b> pour boucler les ${nf(goal)} km.`;
     else note=`Objectif manqué de <b>${nf(left)} km</b>.`;
     goalHtml=`<div class="goal">
       <div class="goalrow"><span>Objectif ${Y} : <b>${nf(goal)} km</b></span><span><b>${nf(pct)} %</b></span></div>
