@@ -32,8 +32,18 @@ assert.match(ans(null, null, null), /^Tape un départ et une arrivée, ou touche
 const a = { label: "Rennes" }, b = { label: "Bain <b>" };
 assert.equal(ans(a, b, { km: 39.73, asc: 212, dirt: 0, main: 0, cyc: 0 }), "Rennes → Bain &lt;b> : <b>39.7 km</b> et <b>212 m D+</b> par les petites routes, tout goudronné.");
 assert.match(ans(a, b, { km: 40, asc: 200, dirt: .02, main: .08, cyc: 1200 }), /2 % sans revêtement connu \(aucune autre route possible\), 8 % sur route principale, 1.2 km de piste cyclable goudronnée\.$/);
-assert.match(ans(a, b, { km: 40, asc: 200, dirt: 0, main: 0, cyc: 0 }, 1), /^Rennes → Bain &lt;b> par 1 point de passage : /);
-assert.match(ans(a, b, { km: 40, asc: 200, dirt: 0, main: 0, cyc: 0 }, 3), / par 3 points de passage : /);
+const R1 = { km: 40, asc: 200, dirt: 0, main: 0, cyc: 0 };
+assert.match(ans(a, b, R1, 1), /^Rennes → Bain &lt;b> par 1 étape : /);
+assert.match(ans(a, b, R1, 3), / par 3 étapes : /);
+// étapes nommées (3 au plus) : « par Redon et Guer » ; une sans nom ou plus de 3 : leur nombre
+assert.match(ans(a, b, R1, [[47.6, -2.1, "Redon"]]), /^Rennes → Bain &lt;b> par Redon : /);
+assert.match(ans(a, b, R1, [[47.6, -2.1, "Redon"], [47.9, -2.2, "Guer"]]), / par Redon et Guer : /);
+assert.match(ans(a, b, R1, [[1, 1, "A"], [2, 2, "B<"], [3, 3, "C"]]), / par A, B&lt; et C : /);
+assert.match(ans(a, b, R1, [[47.6, -2.1, "Redon"], [47.9, -2.2]]), / par 2 étapes : /);
+assert.match(ans(a, b, R1, [[1, 1, "A"], [2, 2, "B"], [3, 3, "C"], [4, 4, "D"]]), / par 4 étapes : /);
+// rangement d'une étape touchée sur la carte : les noms des autres étapes sont gardés
+assert.equal(JSON.stringify(win.Sortie._viaInsert([48.0, -1.7], [48.4, -1.7], [[48.1, -1.7, "Chartres"], [48.3, -1.7, "Vern"]], [48.2, -1.8], Array.from({ length: 41 }, (_, i) => [48.0 + i * .01, -1.7]))),
+  JSON.stringify([[48.1, -1.7, "Chartres"], [48.2, -1.8], [48.3, -1.7, "Vern"]]));
 
 // 4) points de passage rangés dans l'ordre du trajet
 const A = [48.0, -1.7], Bz = [48.4, -1.7];   // trajet sud → nord
@@ -62,4 +72,9 @@ assert.match(ans(a, b, { ...R0, ov: .1 }, 0, "other"), / Retour par d'autres rou
 assert.match(ans(a, b, { ...R0, ov: .3 }, 0, "other"), / Retour par d'autres routes sur 70 % du chemin\.$/);
 assert.match(ans(a, b, { ...R0, ov: .9 }, 0, "other"), / Pas d'autre route raisonnable : le retour reprend surtout l'aller\.$/);
 assert.doesNotMatch(ans(a, b, R0), /Retour|⇄/);
+
+// 6) cache d'altitude : deux tracés aux mêmes départ, milieu et arrivée ne se confondent plus ; le sens inverse se reconnaît
+const sig = win.Sortie._ignSig, T1 = [[48, -1.7], [48.1, -1.6], [48.2, -1.7], [48.3, -1.8], [48.4, -1.7]], T2 = [[48, -1.7], [48.1, -1.8], [48.2, -1.7], [48.3, -1.6], [48.4, -1.7]];
+assert.notEqual(sig(T1), sig(T2));
+assert.equal(sig(T1.slice().reverse(), true), sig(T1));
 console.log("itineraire : ok");
