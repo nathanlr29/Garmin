@@ -92,7 +92,11 @@ async function ignElevation(pts) {
 }
 // altitude IGN déjà lue pour la page (boucle revue, sens inversé) : aucun nouvel appel
 const IGN_C = new Map();
-const ignSig = (pts, rev) => { const n = pts.length, at = i => pts[rev ? n - 1 - i : i]; return [n, at(0), at(n >> 1), at(n - 1)].map(p => Array.isArray(p) ? p[0] + "," + p[1] : p).join("|"); };
+// empreinte de tous les points (dans le sens demandé) : avec seulement le 1er, le milieu et le dernier, deux tracés différents
+// (mêmes départ et arrivée, étapes dans un autre ordre) pouvaient prendre l'altitude, donc le tracé, de l'autre (08/11/2026)
+const ignSig = (pts, rev) => { const n = pts.length, at = i => pts[rev ? n - 1 - i : i]; let h = 0;
+  for (let i = 0; i < n; i++) { const p = at(i); h = (h * 31 + Math.round(p[0] * 1e5) * 7 + Math.round(p[1] * 1e5)) % 2147483647; }
+  return [n, at(0), at(n - 1)].map(p => Array.isArray(p) ? p[0] + "," + p[1] : p).join("|") + "|" + h; };
 // altitude d'une trace : IGN d'abord ; sinon celle de la trace (GPX, BRouter) ; sinon Open-Meteo. Rend { pts, src }.
 async function fillElevation(pts) {
   const key = ignSig(pts), rk = ignSig(pts, true);
@@ -1499,16 +1503,20 @@ async function geoSuggest(q, signal) {  // biais vers la ville de config.json (j
   return (j.results || []).map(x => ({ label: abShort(x.fulltext), lat: Math.round(x.y * 1e5) / 1e5, lon: Math.round(x.x * 1e5) / 1e5, kind: x.kind || "" }))
     .filter(x => isFinite(x.lat) && isFinite(x.lon) && !seen.has(x.label) && seen.add(x.label)).slice(0, 6);
 }
-function abAnswer(a, b, r, nv = 0, rt = "") {  // phrase-réponse du calcul
+const viaName = p => p[2] || "point sur la carte";
+function abAnswer(a, b, r, via = 0, rt = "") {  // phrase-réponse du calcul ; via = étapes [lat, lon, nom] (ou leur nombre)
   if (!r) return `Tape un départ et une arrivée, ou touche la carte : l'itinéraire passe uniquement par des routes goudronnées, les petites d'abord (ni chemins, ni sentiers, ni graviers, ni routes forestières).`;
   const bits = [r.dirt > .005 ? `${fmt(r.dirt * 100)} % sans revêtement connu (aucune autre route possible)` : "tout goudronné",
     r.main > .03 ? `${fmt(r.main * 100)} % sur route principale` : "", r.cyc >= 500 ? `${fmt(r.cyc / 1000, 1)} km de piste cyclable goudronnée` : ""].filter(Boolean);
-  const ret = !rt || r.ov == null ? "" : rt === "same" ? (r.ov >= .8 ? " Retour par la même route." : ` Retour par la même route sur ${fmt(r.ov * 100)} % (sens uniques ou points de passage évités au retour).`)
+  const ret = !rt || r.ov == null ? "" : rt === "same" ? (r.ov >= .8 ? " Retour par la même route." : ` Retour par la même route sur ${fmt(r.ov * 100)} % (sens uniques ou étapes évitées au retour).`)
     : r.ov <= .2 ? " Retour par d'autres routes." : r.ov >= .8 ? " Pas d'autre route raisonnable : le retour reprend surtout l'aller." : ` Retour par d'autres routes sur ${fmt((1 - r.ov) * 100)} % du chemin.`;
-  return `${esc(a.label)} ${rt ? "⇄" : "→"} ${esc(b.label)}${rt ? " aller-retour" : ""}${nv ? ` par ${nv} point${nv > 1 ? "s" : ""} de passage` : ""} : <b>${fmt(r.km, 1)} km</b> et <b>${fmt(r.asc)} m D+</b> par les petites routes, ${bits.join(", ")}.${ret}`;
+  const V = Array.isArray(via) ? via : [], nv = Array.isArray(via) ? via.length : via || 0;
+  // jusqu'à 3 étapes nommées : « par Redon et Guer » ; sinon leur nombre
+  const par = !nv ? "" : nv <= 3 && V.length === nv && V.every(p => p[2]) ? ` par ${V.map(p => esc(p[2])).join(", ").replace(/, ([^,]*)$/, " et $1")}` : ` par ${nv} étape${nv > 1 ? "s" : ""}`;
+  return `${esc(a.label)} ${rt ? "⇄" : "→"} ${esc(b.label)}${rt ? " aller-retour" : ""}${par} : <b>${fmt(r.km, 1)} km</b> et <b>${fmt(r.asc)} m D+</b> par les petites routes, ${bits.join(", ")}.${ret}`;
 }
-function abState() { const v = LS.get("soAB", {}); return { a: v.a || null, b: v.b || null, rt: RT.some(x => x[0] === v.rt) ? v.rt : "", via: Array.isArray(v.via) ? v.via.filter(p => isFinite(p[0]) && isFinite(p[1])).slice(0, VIA_MAX) : [] }; }
-// Point de passage touché sur la carte : rangé dans l'ordre du trajet. Avec un itinéraire déjà tracé, selon l'endroit du tracé le plus
+function abState() { const v = LS.get("soAB", {}); return { a: v.a || null, b: v.b || null, rt: RT.some(x => x[0] === v.rt) ? v.rt : "", via: Array.isArray(v.via) ? v.via.filter(p => isFinite(p[0]) && isFinite(p[1])).slice(0, VIA_MAX).map(p => typeof p[2] === "string" && p[2] ? [p[0], p[1], p[2]] : [p[0], p[1]]) : [] }; }
+// Étape touchée sur la carte : rangée dans l'ordre du trajet. Avec un itinéraire déjà tracé, selon l'endroit du tracé le plus
 // proche (départ = début, arrivée = fin) ; sinon là où il allonge le moins le trajet à vol d'oiseau.
 function viaInsert(a, b, via, p, line) {
   const out = via.slice();
@@ -1537,17 +1545,25 @@ function renderAB() {
   // itinéraire affiché : distance et D+ de l'analyse (altitude IGN), comme l'en-tête, plutôt que ceux de BRouter (SRTM)
   if (r && SO.route && SO.route.src === "ab" && SO.route.abKey === r.key && SO.P) r.r = { ...r.r, km: SO.P[SO.P.length - 1].d / 1000, asc: gain(SO.P) };
   $("abHead").innerHTML = `<h3>Aller d'un point à un autre</h3>
-    <p class="rans" id="abAns">${abAnswer(st.a, st.b, r && r.r, st.via.length, st.rt)}</p>
-    <div class="abform">
-      <div class="abf"><label for="abA">Départ</label><input type="text" id="abA" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.a ? st.a.label : "")}" role="combobox" aria-expanded="false" aria-controls="abAL"><ul class="abs" id="abAL" role="listbox" hidden></ul></div>
-      <button class="btn abswap" id="abSwap" title="Inverser départ et arrivée" aria-label="Inverser départ et arrivée">⇅</button>
-      <div class="abf"><label for="abB">Arrivée</label><input type="text" id="abB" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(st.b ? st.b.label : "")}" role="combobox" aria-expanded="false" aria-controls="abBL"><ul class="abs" id="abBL" role="listbox" hidden></ul></div>
-    </div>`;
-  $("abFoot").innerHTML = `<p class="note abhint">${!st.a ? "Touche la carte pour placer le départ, puis l'arrivée." : !st.b ? "Touche la carte pour placer l'arrivée." : `Touche la carte pour ajouter un point de passage (${VIA_MAX} au plus) ; fais glisser un point pour le déplacer, touche un point de passage pour le retirer.`}</p>
-    <div class="gact"><select id="abRt" aria-label="Trajet">${RT.map(([v, l]) => `<option value="${v}" ${v === st.rt ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn2 primary" id="abGo" ${AB.busy ? "disabled" : ""}>${AB.busy === "go" ? "Calcul…" : "Calculer l'itinéraire"}</button>${r ? `<button class="btn2" id="abAlt" ${AB.busy ? "disabled" : ""}>${AB.busy === "alt" ? "Recherche…" : "Autre itinéraire"} <small>${r.alt + 1}/4</small></button>` : ""}${st.via.length ? `<button class="btn2" id="abClr">Effacer les points de passage <small>${st.via.length}</small></button>` : ""}</div>
+    <p class="rans" id="abAns">${abAnswer(st.a, st.b, r && r.r, st.via, st.rt)}</p>
+    <div class="ablist">
+      ${field("abA", "Départ", st.a && st.a.label, `<button class="btn abic" id="abSwap" title="Inverser le trajet" aria-label="Inverser le trajet">⇅</button>`)}
+      ${st.via.map((p, k) => field(`abV${k}`, `Étape ${k + 1}`, viaName(p), `<button class="btn abic" data-up="${k}" ${k ? "" : "disabled"} title="Monter" aria-label="Monter l'étape ${k + 1}">↑</button><button class="btn abic" data-down="${k}" ${k < st.via.length - 1 ? "" : "disabled"} title="Descendre" aria-label="Descendre l'étape ${k + 1}">↓</button><button class="btn abic" data-del="${k}" title="Retirer" aria-label="Retirer l'étape ${k + 1}">✕</button>`, "abv")).join("")}
+      ${AB.adding ? field("abN", `Étape ${st.via.length + 1}`, "", `<button class="btn abic" id="abNx" title="Annuler" aria-label="Annuler la nouvelle étape">✕</button>`, "abv") : ""}
+      ${field("abB", "Arrivée", st.b && st.b.label, "")}
+    </div>
+    ${st.via.length < VIA_MAX && !AB.adding ? `<button class="btn2 abadd" id="abAdd">+ Ajouter une étape</button>` : ""}`;
+  $("abFoot").innerHTML = `<p class="note abhint">${!st.a ? "Touche la carte pour placer le départ, puis l'arrivée." : !st.b ? "Touche la carte pour placer l'arrivée." : `Touche la carte pour ajouter une étape (${VIA_MAX} au plus, rangée dans l'ordre du trajet) ; fais glisser un point pour le déplacer, touche une étape pour la retirer.`}</p>
+    <div class="gact"><select id="abRt" aria-label="Trajet">${RT.map(([v, l]) => `<option value="${v}" ${v === st.rt ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn2 primary" id="abGo" ${AB.busy ? "disabled" : ""}>${AB.busy === "go" ? "Calcul…" : "Calculer l'itinéraire"}</button>${r ? `<button class="btn2" id="abAlt" ${AB.busy ? "disabled" : ""}>${AB.busy === "alt" ? "Recherche…" : "Autre itinéraire"} <small>${r.alt + 1}/4</small></button>` : ""}${st.via.length ? `<button class="btn2" id="abClr">Effacer les étapes <small>${st.via.length}</small></button>` : ""}</div>
     <p class="soerr" id="abMsg">${esc(AB.msg || "")}</p>
     <p class="note">Départ et arrivée restent sur cet appareil. Recherche d'adresses : IGN (Géoplateforme) ; itinéraire : BRouter (OpenStreetMap).</p>`;
-  bindField("abA", "abAL", "a"); bindField("abB", "abBL", "b");
+  bindField("abA", "a"); bindField("abB", "b"); st.via.forEach((_, k) => bindField(`abV${k}`, k));
+  if (AB.adding) { bindField("abN", "new"); $("abNx").onclick = () => { AB.adding = false; renderAB(); }; if (AB.adding === "focus") { AB.adding = true; $("abN").focus(); } }
+  if ($("abAdd")) $("abAdd").onclick = () => { AB.adding = "focus"; renderAB(); };
+  const moveVia = (k, d) => { const v = abState(), j = k + d; if (j < 0 || j >= v.via.length) return; [v.via[k], v.via[j]] = [v.via[j], v.via[k]]; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
+  $("abHead").querySelectorAll("[data-up]").forEach(bt => bt.onclick = () => moveVia(+bt.dataset.up, -1));
+  $("abHead").querySelectorAll("[data-down]").forEach(bt => bt.onclick = () => moveVia(+bt.dataset.down, 1));
+  $("abHead").querySelectorAll("[data-del]").forEach(bt => bt.onclick = () => { const v = abState(); v.via.splice(+bt.dataset.del, 1); LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); });
   $("abSwap").onclick = () => { const v = abState(); LS.set("soAB", { a: v.b, b: v.a, via: v.via.slice().reverse() }); AB.msg = ""; renderAB(); if (v.a && v.b) abGo(0); };
   $("abGo").onclick = () => abGo(0);
   if ($("abAlt")) $("abAlt").onclick = () => abGo((r.alt + 1) % 4, "alt");
@@ -1555,7 +1571,9 @@ function renderAB() {
   if ($("abClr")) $("abClr").onclick = () => { const v = abState(); v.via = []; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB(); };
   renderABMap();
 }
-const abKey = st => st.a && st.b ? `${st.rt || ""}|${st.a.lat},${st.a.lon}|${(st.via || []).map(p => p.join(",")).join("|")}|${st.b.lat},${st.b.lon}` : "";
+const abKey = st => st.a && st.b ? `${st.rt || ""}|${st.a.lat},${st.a.lon}|${(st.via || []).map(p => p[0] + "," + p[1]).join("|")}|${st.b.lat},${st.b.lon}` : "";
+// un champ d'adresse avec suggestions (départ, étape, arrivée), ses boutons à droite
+const field = (id, lab, val, acts, cls = "") => `<div class="abrow ${cls}"><div class="abf"><label for="${id}">${lab}</label><input type="text" id="${id}" autocomplete="off" placeholder="Adresse, ville, lieu-dit…" value="${esc(val || "")}" role="combobox" aria-expanded="false" aria-controls="${id}L"><ul class="abs" id="${id}L" role="listbox" hidden></ul></div>${acts ? `<div class="abacts">${acts}</div>` : ""}</div>`;
 const pin = (cls, txt) => L.divIcon({ className: "abpin", iconSize: [26, 26], iconAnchor: [13, 13], html: `<span class="${cls}">${txt}</span>` });
 async function renderABMap() {
   const el = $("abMap"); if (!el) return;
@@ -1574,9 +1592,9 @@ async function renderABMap() {
   const R = AB.res, line = R && R.r.pts.map(p => [p[0], p[1]]), fresh = R && R.key === abKey(st);
   if (line) { add(L.polyline(line, { color: "#fff", weight: 9, opacity: fresh ? .95 : .5, interactive: false })); add(L.polyline(line, { color: GC.sel, weight: 5, opacity: fresh ? 1 : .4, interactive: false })); }
   const drag = (m, set) => m.on("dragend", () => { const q = m.getLatLng(); set(Math.round(q.lat * 1e5) / 1e5, Math.round(q.lng * 1e5) / 1e5); });
-  st.via.forEach((p, k) => { const m = add(L.marker(p, { draggable: true, icon: pin("v", k + 1), title: "Point de passage : glisse pour le déplacer, touche pour le retirer" }));
+  st.via.forEach((p, k) => { const m = add(L.marker([p[0], p[1]], { draggable: true, icon: pin("v", k + 1), title: `Étape ${k + 1} : ${viaName(p)} (glisse pour la déplacer, touche pour la retirer)` }));
     m.on("click", () => { const v = abState(); v.via.splice(k, 1); LS.set("soAB", v); abGo(0); });
-    drag(m, (la, lo) => { const v = abState(); v.via[k] = [la, lo]; LS.set("soAB", v); abGo(0); }); });
+    drag(m, (la, lo) => { const v = abState(); v.via[k] = [la, lo]; LS.set("soAB", v); abGo(0); viaLabel(la, lo); }); });
   ["a", "b"].forEach(w => { const p = st[w]; if (!p) return;
     const m = add(L.marker([p.lat, p.lon], { draggable: true, zIndexOffset: 500, icon: pin(w, w.toUpperCase()), title: w === "a" ? "Départ" : "Arrivée" }));
     drag(m, async (la, lo) => { const v = abState(); v[w] = { label: "point sur la carte", lat: la, lon: lo }; LS.set("soAB", v); abGo(0);
@@ -1587,19 +1605,27 @@ async function renderABMap() {
     if (pts.length > 1) { map.fitBounds(L.latLngBounds(pts), { padding: [24, 24], animate: false }); if (fresh || !AB.busy) AB.fit = false; } else if (pts.length) map.setView(pts[0], Math.max(map.getZoom(), 12));
   } else if (AB.fit) setTimeout(renderABMap, 120);  // panneau pas encore affiché
 }
-async function abTap(lat, lon) {  // départ, puis arrivée, puis points de passage
+async function viaLabel(lat, lon) {  // nom d'une étape posée ou déplacée sur la carte
+  const nm = await geoReverse(lat, lon), v = abState(), p = v.via.find(q => q[0] === lat && q[1] === lon);
+  if (p && nm !== "point sur la carte") { p[2] = nm; LS.set("soAB", v); renderAB(); }
+}
+async function abTap(lat, lon) {  // départ, puis arrivée, puis étapes
   lat = Math.round(lat * 1e5) / 1e5; lon = Math.round(lon * 1e5) / 1e5;
   const v = abState(), w = !v.a ? "a" : !v.b ? "b" : null;
   if (w) { v[w] = { label: "point sur la carte", lat, lon }; LS.set("soAB", v); AB.msg = ""; if (v.a && v.b) abGo(0); else renderAB();
     const nm = await geoReverse(lat, lon), v2 = abState(); if (v2[w] && v2[w].lat === lat) { v2[w].label = nm; LS.set("soAB", v2); renderAB(); } return; }
-  if (v.via.length >= VIA_MAX) { AB.msg = `${VIA_MAX} points de passage au plus : retires-en un en le touchant.`; return renderAB(); }
+  if (v.via.length >= VIA_MAX) { AB.msg = `${VIA_MAX} étapes au plus : retires-en une en la touchant.`; return renderAB(); }
   const R = AB.res;
-  v.via = viaInsert([v.a.lat, v.a.lon], [v.b.lat, v.b.lon], v.via, [lat, lon], R && R.r.pts); LS.set("soAB", v); abGo(0);
+  v.via = viaInsert([v.a.lat, v.a.lon], [v.b.lat, v.b.lon], v.via, [lat, lon], R && R.r.pts); LS.set("soAB", v); abGo(0); viaLabel(lat, lon);
 }
-function bindField(id, lid, which) {
-  const inp = $(id), ul = $(lid); let items = [], hi = -1, t = 0, ctl = null;
-  const pick = it => { const v = abState(); v[which] = it; LS.set("soAB", v); inp.value = it.label; close(); AB.msg = ""; AB.fit = true;
-    const o = which === "a" ? $("abB") : null; if (o && !v.b) o.focus(); else if (v.a && v.b) abGo(0); };
+function bindField(id, which) {
+  const inp = $(id), ul = $(id + "L"), ends = which === "a" || which === "b"; let items = [], hi = -1, t = 0, ctl = null;
+  const cur = () => { const v = abState(); return ends ? v[which] : typeof which === "number" && v.via[which] ? { label: viaName(v.via[which]) } : null; };
+  const pick = it => { const v = abState(); AB.msg = ""; AB.fit = true; close();
+    if (ends) v[which] = it;
+    else { const p = [it.lat, it.lon, it.label]; if (which === "new") { v.via.push(p); AB.adding = false; } else v.via[which] = p; }
+    LS.set("soAB", v); inp.value = it.label;
+    if (which === "a" && !v.b) $("abB").focus(); else if (v.a && v.b) abGo(0); else renderAB(); };
   const close = () => { ul.hidden = true; inp.setAttribute("aria-expanded", "false"); hi = -1; };
   const show = () => { ul.innerHTML = items.map((it, k) => `<li role="option" data-k="${k}" class="${k === hi ? "on" : ""}" aria-selected="${k === hi}">${esc(it.label)}${it.note ? ` <small>${esc(it.note)}</small>` : ""}</li>`).join("");
     ul.hidden = !items.length; inp.setAttribute("aria-expanded", String(!!items.length));
@@ -1609,10 +1635,10 @@ function bindField(id, lid, which) {
     navigator.geolocation.getCurrentPosition(p => pick({ label: "Ma position", lat: Math.round(p.coords.latitude * 1e5) / 1e5, lon: Math.round(p.coords.longitude * 1e5) / 1e5 }),
       () => { AB.msg = "Position refusée ou introuvable."; renderAB(); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 }); };
   const own = () => { const sp = startPt(); return [{ label: "Ma position actuelle", here: true }, ...(sp.own ? [{ label: "Mon point de départ", note: sp.label, lat: sp.lat, lon: sp.lon }] : [])]; };
-  inp.onfocus = () => { if (!inp.value.trim() || inp.value === (abState()[which] || {}).label) { items = own(); show(); } };
+  inp.onfocus = () => { if (!inp.value.trim() || inp.value === (cur() || {}).label) { items = own(); show(); } };
   inp.onblur = () => setTimeout(close, 150);
   inp.oninput = () => { const q = inp.value.trim(); clearTimeout(t); if (ctl) ctl.abort();
-    const v = abState(); if (v[which]) { v[which] = null; LS.set("soAB", v); }
+    const v = abState(); if (ends && v[which]) { v[which] = null; LS.set("soAB", v); }  // une étape garde sa place tant qu'on n'en a pas choisi une autre
     items = q.length < 3 && !q ? own() : []; hi = -1; show(); if (q.length < 3) return;
     t = setTimeout(async () => { ctl = new AbortController(); try { items = await geoSuggest(q, ctl.signal); hi = items.length ? 0 : -1; show(); } catch (e) { if (e.name !== "AbortError") { items = []; show(); } } }, 250); };
   inp.onkeydown = e => {
@@ -1686,7 +1712,7 @@ async function open() {
   $("soBody").hidden = !SO.route;
   if (SO.route) compute();
 }
-window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt, _brfStrict: BRF_STRICT, _brf: BRF, _abShort: abShort, _abAnswer: abAnswer, _viaInsert: viaInsert, _join: joinRoutes, _overlap: overlapShare };
+window.Sortie = { open, _parse: parseGPX, _profile: profile, _climbs: climbs, _gpx: toGPX, _spurs: spurs, _cutSpurs: cutSpurs, _dbl: dblShare, _nutSuggest: nutSuggest, _nutSchedule: nutSchedule, _nutG: nutG, _nutAnswer: nutAnswer, _windAgree: windAgree, _altAt: altAt, _brfStrict: BRF_STRICT, _brf: BRF, _abShort: abShort, _abAnswer: abAnswer, _viaInsert: viaInsert, _ignSig: ignSig, _join: joinRoutes, _overlap: overlapShare };
 let rt, lw = innerWidth; addEventListener("resize", () => { if (innerWidth === lw) return; lw = innerWidth; clearTimeout(rt); rt = setTimeout(() => { if (window.Nav?.curTab() === "sortie" && SO.res) renderProfile(SO.res); }, 200); });
 document.addEventListener("velo:loaded", () => { if (window.Nav?.curTab() === "sortie") open(); });
 })();
