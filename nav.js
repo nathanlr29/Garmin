@@ -47,7 +47,14 @@ function mount() {
   nav.className = "tabs"; nav.id = "tabs"; nav.setAttribute("role", "tablist"); nav.setAttribute("aria-label", "Onglets");
   nav.innerHTML = TABS.map(t => `<button role="tab" data-tab="${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${t.icon || ""}</svg><span>${t.label}</span></button>`).join("");
   document.querySelector(".appbar-in").appendChild(nav);   // ordinateur : dans la barre du haut ; mobile : fixée en bas (theme.css)
-  nav.onclick = e => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); };
+  nav.onclick = e => {
+    const b = e.target.closest("[data-tab]"); if (!b) return;
+    if (find(b.dataset.tab) === current()) {   // onglet déjà ouvert : retour en haut, sans tout redessiner
+      window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      return;
+    }
+    setTab(b.dataset.tab);
+  };
   let prev = null;
   const first = TABS.map(panelOf).find(Boolean);   // un onglet sans élément (Synthèse) se place avant le premier panneau existant
   TABS.forEach(t => {
