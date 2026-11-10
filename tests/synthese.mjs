@@ -250,6 +250,8 @@ sj = Y.todaySessions({ ...thrPl, st: "done", acts: [{ id: 1, mt: 3720, n: "MyWho
 assert.equal(sj.planned, null); assert.deepEqual(plain(sj.done), [{ label: "Seuil #2 · 3 × 10'", min: 62, plan: true }], "séance faite : rattachée au Plan, pas comptée deux fois");
 ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: sj.planned, done: sj.done }); assert.equal(ad.tone, "good");
 assert.equal(ad.text, "Séance « Seuil #2 · 3 × 10' » (62 min) faite ✓. C'est bouclé pour aujourd'hui : place à la récup.");
+ad = Y.advice({ tsb: 14, reco: 73, hrvLow: false, planned: null, done: sj.done, night: { at: "21 h 40", dev: -28 } });
+assert.equal(ad.text, "Séance « Seuil #2 · 3 × 10' » (62 min) faite ✓. C'est bouclé pour aujourd'hui : place à la récup. Grosse journée : vise d'être endormi vers 21 h 40 ; demain ta VFC sera sans doute 28 % sous ta normale, c'est ta réaction habituelle.", "grosse journée : heure de coucher (Recup.tonight)");
 ad = Y.advice({ tsb: -30, reco: 70, hrvLow: false, planned: null, done: sj.done }); assert.equal(ad.tone, "good", "faite : plus de « à alléger »");
 assert.equal(ad.text, "Séance « Seuil #2 · 3 × 10' » (62 min) faite ✓. Fatigue récente très élevée : récupère bien ce soir, mange bien et couche-toi tôt.");
 sj = Y.todaySessions({ t: "end", dur: 90, label: "Endurance", st: "done", acts: [{ id: 2, mt: 5400 }], run: { t: "rfoot", dur: 30, label: "Footing", sport: "run", st: "plan" } }, TY, [{ id: 2, mt: 5400 }]);

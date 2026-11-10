@@ -269,7 +269,9 @@ function advice(o) {
   if (o.hrvLow) reasons.push("VFC basse");
   const bad = recoLow || lab === "très chargé" || (tired && o.hrvLow), mid = !bad && reasons.length > 0, why = reasons.join(" et ");
   const done = (o.done || []).filter(Boolean);
-  if (done.length && !pl) return { text: `${doneList(done)}. ` + (reasons.length ? `${cap(why)} : récupère bien ce soir, mange bien et couche-toi tôt.` : "C'est bouclé pour aujourd'hui : place à la récup."), tone: "good", label: lab, reasons, done: true };
+  // grosse journée faite (Recup.tonight, 150 de charge et plus) : heure d'endormissement conseillée et baisse de VFC attendue demain
+  const nt = o.night, bed = nt ? ` Grosse journée : vise d'être endormi vers ${nt.at}${nt.dev != null && nt.dev < 0 ? ` ; demain ta VFC sera sans doute ${Math.abs(nt.dev)} % sous ta normale, c'est ta réaction habituelle` : ""}.` : "";
+  if (done.length && !pl) return { text: `${doneList(done)}. ` + (reasons.length ? `${cap(why)} : récupère bien ce soir, mange bien et couche-toi tôt.` : "C'est bouclé pour aujourd'hui : place à la récup.") + bed, tone: "good", label: lab, reasons, done: true };
   let tone, text;
   if (bad) {
     tone = "bad";
@@ -688,7 +690,7 @@ function gather() {
   // séance prévue ce soir (Plan) pour la phrase « Que faire aujourd'hui ? »
   let planned = null, done = []; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) ({ planned, done } = todaySessions(pl, planAPI.TYPES, planAPI.doneOn ? planAPI.doneOn(ymd(today)) : [])); else if (planAPI && planAPI.doneOn) done = todaySessions(null, planAPI.TYPES, planAPI.doneOn(ymd(today))).done; } catch (e) {}
   const f = fit[fit.length - 1];
-  const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned, done });
+  const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned, done, night: (() => { try { return window.Recup?.tonight?.(today) || null; } catch (e) { return null; } })() });
   return { pal, today, now, acts, loads, daily, profile, proj, obj, det: { res, hist }, report, dctx, fit, prog: fit.length ? progress(fit) : null, adv, planned, share: sportShare(daily, today), weeks: weeklyBySport(daily, today), week: weekStats(acts, today, a => ch.tssOf(a)),
     ftp: { cur: ftpNow, ser: ftpSer, meas: lastFtp, v30: lastFtp ? listVariation(ftpSer, now, 30) : null },   // variation : la mesure contre la mesure, jamais la FTP du Plan contre une mesure
     vo2: { cur: vo2Cur, date: vo2Ser.length ? vo2Ser[vo2Ser.length - 1].t : null, ser: vo2Ser, v30: listVariation(vo2Ser, now, 30) },

@@ -72,6 +72,8 @@ function renderRecup() {
     <section class="card span12"><h2>Poids <small id="rKgInfo"></small></h2><p class="rans" id="rKgAns"></p><div id="rKg"></div><div class="note" id="rKgNote"></div></section>
     <section class="card span12"><h2>Tendance de la VFC <small id="rHrvTInfo"></small></h2><p class="rans" id="rHrvTAns"></p><div id="rHrvT"></div>
       <p class="note">Trait orange : moyenne de tes 7 dernières nuits ; points gris : chaque nuit ; bande verte : ta zone normale, calculée par Garmin sur tes dernières semaines. Une mauvaise nuit compte peu : c'est quand la moyenne sort de la zone qu'il faut lever le pied.</p></section>
+    <section class="card span12" id="rBig"><h2>Après une grosse journée <small id="rBigInfo"></small></h2><p class="rans" id="rBigAns"></p><div class="bign" id="rBigN"></div><div id="rBigChart"></div>
+      <p class="note" id="rBigSleep"></p><div class="meth" id="rBigMeth"></div><h3 class="bigh">Anticiper</h3><p id="rBigAhead"></p><h3 class="bigh">Mieux récupérer le soir même</h3><div id="rBigTips"></div></section>
     <section class="card span12"><h2>Respiration pendant le sommeil <small id="rRespInfo"></small></h2><p class="rans" id="rRespAns"></p><div id="rResp"></div><p class="note" id="rRespNote"></p></section>
     <section class="card span12"><h2>Ce qui joue sur ton sommeil <small>toutes tes nuits depuis janvier</small></h2><p class="rans" id="rCmpAns"></p><div class="cmp" id="rCmp"></div>
       <p class="note">Tes nuits comparées entre elles (score de sommeil, durée, VFC). Seuls les facteurs dont l'écart est net, pas dû au hasard, sont gardés (5 au plus, 6 nuits concernées au moins) : ce sont des tendances observées, pas des causes prouvées.</p></section>
@@ -86,10 +88,10 @@ function renderRecup() {
   $("rShuffle").onclick = () => { RC.factSeed++; renderFacts(); };
   const P = inPeriod();
   selectDay(RC.sel);
-  renderSleep(P); renderReg(P); renderRhr(P); renderWeight(P); renderHrvTrend(P); renderResp(P); renderCmp(); renderFacts();
+  renderSleep(P); renderReg(P); renderRhr(P); renderWeight(P); renderHrvTrend(P); renderBig(); renderResp(P); renderCmp(); renderFacts();
   // l'entraîneur (IA, à la demande) lit la nuit choisie et les tendances affichées
   if (window.IA) IA.mount($("rMorning").parentElement, { kind: "recup", title: "Lecture de l'entraîneur", button: "Que disent ma nuit et ma récup ?",
-    ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rKgAns", "#rHrvTAns", "#rRespAns", "#rCmpAns"]) });
+    ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rKgAns", "#rHrvTAns", "#rBigAns", "#rBigSleep", "#rBigAhead", "#rRespAns", "#rCmpAns"]) });
 }
 function selectDay(i) {
   if (!RC.pick.length) return;
@@ -561,6 +563,175 @@ function renderHrvTrend(P) {
     { band: ["hrvLo", "hrvUp", "var(--teal)", .16], marks, tipExtra: d => (d.hrvLo != null ? `<br>zone normale : ${d.hrvLo}–${d.hrvUp}` : "") + (d.lowc ? `<br><b>sous la zone</b> : ${d.lowc.long}` : "") });
 }
 
+// ------------------------------------------------------------------ Après une grosse journée (demande de Nathan du 10/11/2026)
+// Comment tes nuits réagissent à une journée de 150 de charge et plus : VFC des 3 nuits suivantes contre ta moyenne des 30 nuits d'avant,
+// sommeil de la 1re nuit (durée, endormissement, éveil, profond) contre tes médianes / moyennes, droite VFC = a + b × charge pour anticiper.
+const BIG = { load: 150, base: 30, minBase: 10, minRef: 7, short: 45, back: -5, min: 8, ahead: 7, mus: 84 };
+const avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+const medOf = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+const eveMin = dt => { let m = dt.getHours() * 60 + dt.getMinutes(); if (m < 720) m += 1440; return m; };   // 23:30 → 1410, 00:30 → 1470
+const dayMin = dt => dt.getHours() * 60 + dt.getMinutes();
+const keyAdd = (k, n) => { const t = parseLocal(k); t.setDate(t.getDate() + n); return window.Charge.ymd(t); };
+function bigLoads(acts) {
+  const ch = window.Charge, L = {};
+  (acts || []).forEach(a => { if (!a.d) return; const k = a.d.slice(0, 10), x = L[k] || (L[k] = { t: 0, km: 0 }); x.t += ch.tssOf(a); if (ch.sportOf(a) === "bike") x.km += (a.m || 0) / 1000; });
+  return L;
+}
+function linFit(xs, ys) {
+  const n = xs.length, mx = avg(xs), my = avg(ys); let sxy = 0, sxx = 0;
+  for (let i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
+  return sxx ? { b: sxy / sxx, a: my - sxy / sxx * mx } : null;
+}
+function reactions(days, acts) {
+  const ch = window.Charge; if (!ch || !days.length) return null;
+  const L = bigLoads(acts), idx = new Map(days.map((d, i) => [d.d, i])), rows = [];
+  Object.keys(L).sort().forEach(k => {
+    if (L[k].t < BIG.load) return;
+    const j1 = idx.get(keyAdd(k, 1)); if (j1 == null) return;
+    const lo = keyAdd(k, 1 - BIG.base), base = days.slice(Math.max(0, j1 - BIG.base - 1), j1).filter(x => x.d >= lo && x.d <= k);
+    const hv = base.map(x => x.hrv).filter(v => v != null); if (hv.length < BIG.minBase) return;
+    const bh = avg(hv), ref = f => base.map(f).filter(v => v != null), sl = ref(x => x.sl || null), bed = ref(x => x.bedDt ? eveMin(x.bedDt) : null), aw = ref(x => x.awake), dp = ref(x => x.deep);
+    const dev = [1, 2, 3].map(n => { const j = idx.get(keyAdd(k, n)), x = j != null ? days[j] : null; return x && x.hrv != null ? Math.round((x.hrv / bh - 1) * 100) : null; });
+    const n1 = days[j1], ok = a => a.length >= BIG.minRef;
+    rows.push({ k, load: Math.round(L[k].t), km: Math.round(L[k].km), dev, night: n1,
+      sl: n1.sl && ok(sl) ? Math.round((n1.sl - medOf(sl)) / 60) : null,
+      bed: n1.bedDt && ok(bed) ? eveMin(n1.bedDt) - medOf(bed) : null,
+      awake: n1.awake != null && ok(aw) ? Math.round((n1.awake - avg(aw)) / 60) : null,
+      deep: n1.deep != null && ok(dp) ? Math.round((n1.deep - avg(dp)) / 60) : null });
+  });
+  const R = { rows, n: rows.length }; if (R.n < BIG.min) return R;
+  const m = (f, A = rows) => { const v = A.map(f).filter(x => x != null); return v.length ? Math.round(avg(v)) : null; };
+  R.avg = [0, 1, 2].map(i => m(r => r.dev[i]));
+  R.back = [1, 2, 3].find(n => R.avg[n - 1] != null && R.avg[n - 1] >= BIG.back) || null;
+  const P = rows.filter(r => r.dev[0] != null); R.fit = linFit(P.map(r => r.load), P.map(r => r.dev[0]));
+  const S = P.filter(r => r.sl != null && r.sl <= -BIG.short), O = P.filter(r => r.sl != null && r.sl > -BIG.short);
+  R.short = S.length >= 3 && O.length >= 3 ? { n: S.length, dev: m(r => r.dev[0], S), okDev: m(r => r.dev[0], O) } : null;
+  R.sleep = { sl: m(r => r.sl), bed: m(r => r.bed), awake: m(r => r.awake), deep: m(r => r.deep) };
+  const B = rows.filter(r => r.bed != null && r.sl != null), f = B.length >= BIG.min ? linFit(B.map(r => r.bed), B.map(r => r.sl)) : null;
+  R.bedCost = f && f.b < 0 ? Math.min(1, -f.b) : null;   // minutes de sommeil perdues par minute d'endormissement en retard
+  return R;
+}
+const bigPredict = (R, load) => R && R.fit ? Math.max(-80, Math.min(10, Math.round(R.fit.a + R.fit.b * load))) : null;
+const pct = v => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)} %`;
+const dateFr = k => { const d = parseLocal(k); return `${["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"][d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+const nthNight = n => n === 1 ? "dès la nuit suivante" : n === 2 ? "dès la 2e nuit" : "la 3e nuit";
+function bigAnswer(R) {
+  if (!R || R.n < BIG.min) return `Pas encore assez de grosses journées (150 de charge et plus) pour lire ta réaction : ${R ? R.n : 0} sur ${BIG.min}.`;
+  const a1 = R.avg[0], a3 = R.avg[2], per100 = R.fit ? Math.round(-R.fit.b * 100) : null;
+  let s = `Après une grosse journée, ta VFC chute de <b>${Math.abs(a1)} %</b> la nuit suivante et revient à ta normale ${R.back ? nthNight(R.back) : "après plus de 3 nuits"}`;
+  s += a3 != null && a3 >= 5 && R.back && R.back < 3 ? `, puis la dépasse (${pct(a3)} la 3e nuit) : ton corps encaisse bien, c'est l'effet d'entraînement.` : ".";
+  if (per100 > 0) s += ` Plus la journée est grosse, plus elle chute : environ ${per100} % de plus par tranche de 100 de charge.`;
+  if (R.short && R.short.dev < R.short.okDev) s += ` Une nuit courte aggrave tout : ${pct(R.short.dev)} quand tu dors 45 min de moins que d'habitude, ${pct(R.short.okDev)} sinon.`;
+  return s;
+}
+function bigSleepLine(R) {
+  if (!R || !R.sleep) return "";
+  const z = R.sleep, parts = [];
+  if (z.bed != null && z.bed >= 10) parts.push(`tu t'endors ${hmin(z.bed)} plus tard que d'habitude`);
+  if (z.awake != null && z.awake >= 5) parts.push(`tu passes ${hmin(z.awake)} de plus éveillé`);
+  if (z.deep != null && z.deep <= -5) parts.push(`avec ${hmin(-z.deep)} de sommeil profond en moins`);
+  if (!parts.length) return "";
+  const cost = R.bedCost ? ` Ton réveil, lui, ne bouge pas : chaque quart d'heure d'endormissement en retard te coûte environ ${Math.round(15 * R.bedCost)} min de sommeil.` : "";
+  return `La nuit d'après est plus agitée : ${parts.join(", ")}.${cost}`;
+}
+function lastBigLine(R) {
+  const r = R && R.rows.length ? R.rows[R.rows.length - 1] : null; if (!r) return "";
+  const n = r.night, bits = [];
+  if (n.bedDt) bits.push(`endormi à ${clock(n.bedDt).replace(":", " h ")}`);
+  if (n.sl) bits.push(`${hm(n.sl / 60)} de sommeil`);
+  if (r.dev[0] != null) bits.push(`VFC ${pct(r.dev[0])} le lendemain`);
+  if (r.dev[1] != null) bits.push(`${pct(r.dev[1])} le surlendemain`);
+  return `Dernière en date, ${dateFr(r.k)} (${r.km >= 20 ? `${r.km} km, ` : ""}${r.load} de charge) : ${bits.join(", ")}.`;
+}
+// heure à laquelle être endormi la veille d'un jour donné : ton lever habituel ce jour de la semaine (8 dernières fois) − ton sommeil habituel (médiane 30 nuits) − l'éveil en plus mesuré après les grosses journées
+function bedTarget(days, R, wakeKey) {
+  const dow = parseLocal(wakeKey).getDay(), W = days.filter(d => d.wakeDt && d.dt.getDay() === dow && d.d < wakeKey).slice(-8).map(d => dayMin(d.wakeDt));
+  const sl = days.slice(-BIG.base).map(d => d.sl).filter(Boolean);
+  if (W.length < 3 || sl.length < BIG.minRef) return null;
+  const wake = medOf(W), need = Math.round(medOf(sl) / 60) + Math.max(0, (R && R.sleep && R.sleep.awake) || 0);
+  let t = Math.round((wake - need) / 5) * 5; if (t < 0) t += 1440;
+  const f = m => `${Math.floor(m / 60) % 24} h ${pad(m % 60)}`;
+  return { at: t, wake, need, sleep: Math.round(medOf(sl) / 60), txt: f(t), wakeTxt: f(wake), day: dateFr(wakeKey).split(" ")[0] };
+}
+// les matins de muscu (avant 9 h) contre les autres matins de semaine, sur les 12 dernières semaines : lever et durée de sommeil
+function muscuMornings(days, acts) {
+  const mus = new Set((acts || []).filter(a => a.t === "strength_training" && a.d && +a.d.slice(11, 13) < 9).map(a => a.d.slice(0, 10)));
+  const D = days.slice(-BIG.mus).filter(d => d.sl && d.wakeDt && d.dt.getDay() >= 1 && d.dt.getDay() <= 5);
+  const g = b => { const A = D.filter(d => mus.has(d.d) === b); return A.length >= 5 ? { n: A.length, wake: medOf(A.map(d => dayMin(d.wakeDt))), sl: Math.round(medOf(A.map(d => d.sl)) / 60) } : null; };
+  const m = g(true), o = g(false); return m && o && o.sl - m.sl >= 10 ? { m, o, lost: o.sl - m.sl } : null;
+}
+// prochaine grosse journée : aujourd'hui si elle est déjà faite, sinon la plus grosse séance prévue par le Plan dans les 7 jours
+function nextBig(R, acts, today = new Date()) {
+  const ch = window.Charge, t0 = ch.ymd(today), L = bigLoads(acts);
+  if (L[t0] && L[t0].t >= BIG.load) return { k: t0, load: Math.round(L[t0].t), km: Math.round(L[t0].km), done: true };
+  let best = null;
+  if (window.Plan && Plan.plannedFor) for (let n = 0; n < BIG.ahead; n++) {
+    const k = keyAdd(t0, n); let p = null; try { p = Plan.plannedFor(k); } catch (e) {}
+    if (!p || p.st === "done" || p.st === "missed") continue;
+    const load = Math.round(((p.w && p.w.tss) || 0) + ((p.run && p.run.w && p.run.w.tss) || 0));
+    if (load >= BIG.load && (!best || load > best.load)) best = { k, load, label: p.label, dur: p.dur };
+  }
+  return best;
+}
+function aheadHtml(R, nb, bt) {
+  if (!nb) return `Aucune grosse journée (150 de charge et plus) prévue dans ton Plan ces 7 prochains jours.`;
+  const pr = bigPredict(R, nb.load), nxt = dateFr(keyAdd(nb.k, 1)).split(" ")[0], when = nb.done ? "Aujourd'hui" : cap(dateFr(nb.k));
+  let s = nb.done ? `Aujourd'hui, ${nb.km >= 20 ? `${nb.km} km et ` : ""}${nb.load} de charge.` : `Ta prochaine grosse journée : ${dateFr(nb.k)}, ${nb.label ? nb.label.toLowerCase() : "séance"}${nb.dur ? ` de ${hm(nb.dur)}` : ""} (≈ ${nb.load} de charge).`;
+  if (pr != null) s += ` Attends-toi à une VFC vers <b>${pct(pr)}</b> ${nxt} matin${R.back === 2 ? `, de retour à la normale ${dateFr(keyAdd(nb.k, 2)).split(" ")[0]}` : ""} : c'est ta réaction habituelle, pas un signal d'alerte.`;
+  if (bt) s += ` ${when === "Aujourd'hui" ? "Ce soir" : "Ce soir-là"}, vise d'être endormi vers <b>${bt.txt}</b> (lever habituel du ${nxt} : ${bt.wakeTxt}).`;
+  return s;
+}
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+function bigTips(R, bt, mm) {
+  const kg = +lsStore.get("bwWeight") || 75, T = [];
+  if (bt) T.push(`<b>Endormi vers ${bt.txt}</b>, pas plus tard : ${hm(bt.sleep)} de sommeil habituel${R.sleep && R.sleep.awake > 0 ? ` plus les ${R.sleep.awake} min d'éveil en plus de ces nuits-là` : ""}, avant ton lever du ${bt.day} (${bt.wakeTxt}). <span class="bsrc">tes données</span>`);
+  if (mm) T.push(`<b>Pas de muscu le lendemain matin</b> : ces matins-là tu te lèves vers ${hm(mm.m.wake)} au lieu de ${hm(mm.o.wake)} et dors ${mm.lost} min de moins. Le Plan l'évite le lendemain d'une grosse journée dès que tu as un autre matin de libre. <span class="bsrc">tes données</span>`);
+  T.push(`<b>Recharge dans l'heure</b> après l'arrivée : environ ${Math.round(kg)} g de glucides et 20 à 25 g de protéines (lait chocolaté, riz au lait, sandwich jambon), puis un dîner riche en glucides fini 2 h avant de dormir. <span class="bsrc">repère général</span>`);
+  T.push(`<b>Pas de caféine après 14 h</b> (gels, Coca, café) : il faut environ 5 h pour en éliminer la moitié. <span class="bsrc">repère général</span>`);
+  T.push(`<b>Bois tout l'après-midi, moins après le dîner</b>, et une chambre fraîche (17-19 °C) : le corps reste chaud après un long effort, et les réveils pour aller aux toilettes hachent la nuit. <span class="bsrc">repère général</span>`);
+  return `<ul class="btips">${T.map(t => `<li>${t}</li>`).join("")}</ul>`;
+}
+function bigChart(el, R) {
+  const box = $(el), P = R.rows.filter(r => r.dev[0] != null);
+  if (!P.length) { box.innerHTML = ""; return; }
+  const W = Math.max(300, box.clientWidth), H = 230, m = { l: 40, r: 14, t: 14, b: 30 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const xs = P.map(r => r.load), ys = P.map(r => r.dev[0]).concat([10]);
+  const x0 = BIG.load, x1 = Math.max(...xs) * 1.04, y0 = Math.min(...ys) - 5, y1 = Math.max(...ys) + 5;
+  const X = v => m.l + (v - x0) / (x1 - x0) * iw, Y = v => m.t + (y1 - v) / (y1 - y0) * ih, last = P[P.length - 1];
+  let g = `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--teal)" stroke-width="1.5"/><text x="${W - m.r}" y="${Y(0) - 5}" text-anchor="end" fill="var(--teal)" font-size="11">ta normale</text>`;
+  for (let v = Math.ceil(y0 / 20) * 20; v <= y1; v += 20) g += `<text x="${m.l - 6}" y="${Y(v) + 4}" text-anchor="end" fill="var(--muted)" font-size="11">${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)} %</text>`;
+  for (let v = 200; v <= x1; v += 200) if (X(v) < W - m.r - 70) g += `<text x="${X(v)}" y="${H - 8}" text-anchor="middle" fill="var(--muted)" font-size="11">${v}</text>`;
+  g += `<text x="${W - m.r}" y="${H - 8}" text-anchor="end" fill="var(--muted)" font-size="11">charge du jour →</text>`;
+  if (R.fit) g += `<line x1="${X(x0)}" x2="${X(x1)}" y1="${Y(R.fit.a + R.fit.b * x0)}" y2="${Y(R.fit.a + R.fit.b * x1)}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>`;
+  P.forEach(r => { const sh = r.sl != null && r.sl <= -BIG.short, me = r === last;
+    g += `<circle cx="${X(r.load)}" cy="${Y(r.dev[0])}" r="${me ? 6 : 4.5}" fill="${me ? "var(--accent)" : sh ? "var(--amber)" : "var(--muted)"}" fill-opacity="${me ? 1 : .8}"><title>${dateFr(r.k)} : ${r.km >= 20 ? `${r.km} km, ` : ""}${r.load} de charge → VFC ${pct(r.dev[0])}${r.night.sl ? `, ${hm(r.night.sl / 60)} de sommeil` : ""}</title></circle>`; });
+  g += `<text x="${Math.min(X(last.load) + 9, W - m.r - 70)}" y="${Y(last.dev[0]) - 8}" fill="var(--ink)" font-size="11.5" font-weight="600">${dateFr(last.k).split(" ").slice(1).join(" ")}</text>`;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="VFC de la nuit suivante selon la charge de la journée">${g}</svg>
+    <div class="legend"><span><i style="background:var(--muted)"></i>nuit suivante</span><span><i style="background:var(--amber)"></i>nuit courte (45 min de moins)</span><span><i style="background:var(--accent)"></i>la dernière</span><span><i style="background:var(--accent);height:2px"></i>ta tendance</span></div>`;
+}
+function renderBig() {
+  const acts = (typeof S !== "undefined" && S.all) || [], R = reactions(RC.days, acts);
+  $("rBigAns").innerHTML = bigAnswer(R);
+  $("rBigInfo").textContent = R && R.n ? `${R.n} journées de 150 de charge et plus` : "";
+  if (!R || R.n < BIG.min) { ["rBigN", "rBigChart", "rBigSleep", "rBigAhead", "rBigTips", "rBigMeth"].forEach(id => $(id).innerHTML = ""); return; }
+  $("rBigN").innerHTML = R.avg.map((v, i) => `<div><small>${["nuit suivante", "2e nuit", "3e nuit"][i]}</small><span class="dpill ${v <= -10 ? "warn" : v >= 3 ? "good" : ""}">${v == null ? "–" : pct(v)}</span></div>`).join("");
+  bigChart("rBigChart", R);
+  $("rBigSleep").innerHTML = [bigSleepLine(R), lastBigLine(R)].filter(Boolean).join(" ");
+  const nb = nextBig(R, acts), bt = bedTarget(RC.days, R, nb ? keyAdd(nb.k, 1) : nextMonday()), mm = muscuMornings(RC.days, acts);
+  $("rBigAhead").innerHTML = aheadHtml(R, nb, nb ? bt : null);
+  $("rBigTips").innerHTML = bigTips(R, bt, mm);
+  $("rBigMeth").innerHTML = `<span>VFC de chaque nuit contre ta moyenne des 30 nuits d'avant · sommeil contre tes médianes</span><span>n = ${R.n} depuis janvier</span>`;
+}
+const nextMonday = () => { const t = new Date(); t.setDate(t.getDate() + ((8 - t.getDay()) % 7 || 7)); return window.Charge.ymd(t); };
+// pour la Synthèse et le Plan : heure d'endormissement conseillée ce soir après une grosse journée (null sinon)
+function tonight(today = new Date()) {
+  if (!RC.days.length || !window.Charge) return null;
+  const acts = (typeof S !== "undefined" && S.all) || [], t0 = window.Charge.ymd(today), L = bigLoads(acts)[t0];
+  if (!L || L.t < BIG.load) return null;
+  const R = reactions(RC.days, acts), bt = bedTarget(RC.days, R, keyAdd(t0, 1));
+  return bt ? { at: bt.txt, wake: bt.wakeTxt, dev: bigPredict(R, L.t), load: Math.round(L.t) } : null;
+}
+
 // Respiration de la nuit (à la Whoop) : moyenne de la nuit (rx au dixième, sinon resp de Garmin, arrondie à l'unité),
 // comparée à ta normale = moyenne des 30 jours d'avant (14 nuits au moins). +1 /min ou plus = au-dessus ;
 // alerte si c'est 2 nuits de suite, ou une nuit avec le cœur au repos (+3 bpm, RHR_HI) ou la VFC sous sa zone normale.
@@ -798,7 +969,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, lowCause, lowNightsLine, LOWC, nightAnswer, respAt, respTrend, respAnswer, WT, weightSeries, syncWeight, weightTrend, weightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, lowCause, lowNightsLine, LOWC, BIG, reactions, bigPredict, bigAnswer, bigSleepLine, lastBigLine, bedTarget, muscuMornings, nextBig, aheadHtml, nightAnswer, respAt, respTrend, respAnswer, WT, weightSeries, syncWeight, weightTrend, weightAnswer }, tonight, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });
