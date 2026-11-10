@@ -33,6 +33,7 @@
   --shadow:0 0 #0000;   /* gardé pour compatibilité : plus d'ombre portée */
   --font-ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --font-num:"Barlow Condensed","Barlow",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;   /* ligne de méthode sous les graphes (design v2) */
   --bar-h:60px;          /* barre d'onglets du bas (mobile), flottante */
   --bar-gap:max(10px, calc(env(safe-area-inset-bottom) - 8px));   /* écart entre la barre et le bas de l'écran */
   /* verre liquide (barre du bas sur mobile) : panneau translucide, reflet en haut */
@@ -298,3 +299,21 @@ footer{margin-top:28px;font-size:12.5px;color:var(--muted);text-align:center}
 .iafoot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .iafoot .linkbtn{background:none;border:0;color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer;padding:0}
 @media (max-width:600px){.iamsgs{max-height:none;flex:1}.iachat{min-height:100%}.iabtn span{display:none}.iabtn{padding:7px 9px}}
+
+/* ------------------------------------------------------------------ Kit de chiffres (design v2, 10/11/2026)
+   .dpill : variation colorée selon le sens qui est bon pour toi (une fatigue qui monte est ambre, pas verte) ;
+   .meth : méthode, nombre de mesures et période, en petit sous un graphe ;
+   .zbar : intensité Z1-Z5 en une barre, % dans les segments, repère 80 % facile (zones.js, synthese.js). */
+.dpill{display:inline-flex;align-items:center;gap:3px;font:700 14px/1 var(--font-num);padding:3px 6px;border-radius:var(--r-sm);white-space:nowrap;
+  color:var(--muted);background:var(--raised)}
+.dpill.good{color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
+.dpill.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+.dpill.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.meth{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;margin-top:8px;font:400 11px/1.45 var(--font-mono);color:var(--muted)}
+.zbar{position:relative;margin:24px 0 22px}
+.zbar-in{display:flex;height:24px;gap:2px;border-radius:var(--r-sm);overflow:hidden}
+.zbar-in>div{min-width:2px;height:100%;display:flex;align-items:center;justify-content:center;font:700 13px/1 var(--font-num);color:#fff}
+.zbar-in>div.dk{color:#141416}
+.zbar-ref{position:absolute;top:-6px;bottom:-6px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
+.zbar-ref span{position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);font-size:11.5px;font-weight:600;white-space:nowrap;color:var(--ink)}
+.zbar-easy{position:absolute;bottom:calc(100% + 4px);left:0;font-size:11.5px;color:var(--muted);white-space:nowrap}

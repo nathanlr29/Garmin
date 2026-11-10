@@ -180,6 +180,8 @@ function chartRun(box, st, thrPace) {
   if (thrPace && thrPace >= lo && thrPace <= hi) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(thrPace)}" y2="${y(thrPace)}" stroke="var(--ink)" stroke-dasharray="4 3" opacity=".5"/>`;
   if (pc) { let d = "", pen = false; pc.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" opacity=".95"/>`; }
   if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--hr)" stroke-width="1.6" stroke-linejoin="round"/>`; }
+  if (blk && blk.length >= 2) blk.forEach((b, k) => { const xa = x(b.i0), xb = x(b.i1 - 1), xc = (xa + xb) / 2;
+    s += `<line x1="${xa.toFixed(1)}" x2="${xb.toFixed(1)}" y1="${m.t + 2}" y2="${m.t + 2}" stroke="var(--ink)" stroke-width="1.5"/><circle cx="${xc.toFixed(1)}" cy="${m.t + 2}" r="7" fill="var(--ink)"/><text x="${xc.toFixed(1)}" y="${m.t + 5.5}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--card)">${k + 1}</text>`; });
   s += `<line id="bmCur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="bmHit"/></svg>`;
   box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:var(--accent)"></i>allure (min/km, plus rapide en haut)</span>${H2.length ? `<span><i style="background:var(--hr)"></i>cardio (bpm)</span>` : ""}${A.length ? `<span><i style="background:var(--muted);opacity:.4"></i>altitude (${Math.round(aLo)}–${Math.round(aHi)} m)</span>` : ""}${thrPace && thrPace >= lo && thrPace <= hi ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>seuil ${paceTxt(thrPace)}</span>` : ""}</div>`;
   const svg = box.querySelector("svg"), cur = box.querySelector("#bmCur"), hit = box.querySelector("#bmHit");
@@ -298,12 +300,13 @@ async function open(id) {
   const plan = window.Plan && Plan.plannedFor ? Plan.plannedFor(a.d.slice(0, 10), "bike") : null;
   const an = st ? analyze(a, st) : null;
   const co = st && plan && st.p && plan.place === "mw" && isIndoor(a) ? compliance(st, plan) : null;
+  const blk = st ? blocks(st, ftpNow()) : [];
   body.innerHTML = header(a) + tiles(a, an) + verdict(a, an, co, plan) + (st ? `<section class="bm-sec"><h4>Déroulé <small>${st.p ? "puissance" : "vitesse"}${st.h ? " et cardio" : ""}${co ? " · en pointillés : le prévu" : ""}</small></h4><div id="bmChart"></div></section>` : "")
-    + (co ? planTable(co) : "") + zonesHtml(a, an) + enduHtml(an) + (!isIndoor(a) && st && st.g ? `<section class="bm-sec" id="bmWind"><h4>Vent subi</h4><p class="note">Récupération de la météo du jour…</p></section>` : "")
+    + blocksHtml(blk) + (co ? planTable(co) : "") + zonesHtml(a, an) + enduHtml(an) + (!isIndoor(a) && st && st.g ? `<section class="bm-sec" id="bmWind"><h4>Vent subi</h4><p class="note">Récupération de la météo du jour…</p></section>` : "")
     + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
     + aiHtml(a) + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
   aiBind(a, body);
-  if (st) chart(document.getElementById("bmChart"), st, co ? { plan, shift: co.shift } : null);
+  if (st) chart(document.getElementById("bmChart"), st, co ? { plan, shift: co.shift } : null, blk);
   if (!isIndoor(a) && st && st.g) { const w = await windFor(st).catch(() => null), box = document.getElementById("bmWind"); if (box) box.innerHTML = windHtml(a, w); }
 }
 // ------------------------------------------------------------------ Commentaire de l'entraîneur (IA, Gemini par l'Apps Script de synchro)
@@ -421,7 +424,49 @@ function windHtml(a, w) {
     <p class="bm-p">${c ? `À puissance égale (≈ ${nf(w.Pc)} W), le vent ${cost > 0 ? "t'a coûté" : "t'a fait gagner"} <b>environ ${hms(Math.abs(cost))}</b> sur ce parcours par rapport à une journée sans vent.` : "Le vent n'a quasiment rien changé à ton temps sur ce parcours."} Puissance estimée : <b>≈ ${nf(w.avgP)} W</b> de moyenne.</p>
     <p class="note">Estimation sans capteur de puissance : vent à 10 m au centre du parcours, modèle physique (${nf(w.M - PHY.bike)} kg + vélo). En groupe, l'abri fausse le calcul.</p>`;
 }
-function chart(box, st, cmp) {
+// ------------------------------------------------------------------ Blocs durs repérés et comparés (design v2, 10/11/2026)
+// Un bloc = puissance moyenne sur 60 s (centrée) ≥ 85 % de la FTP, trous de 45 s au plus comblés, 2 min au moins.
+// Un 30/15 à 115 % / 50 % fait ~93 % de moyenne : une série entière compte pour un bloc. Dérive = coût cardiaque par watt du dernier bloc contre le premier.
+const BLK = { win: 60, thr: .85, gap: 45, min: 120, max: 12, flat: 3 };
+function blocks(st, ftp) {
+  if (!st || !st.p || !(ftp > 0)) return [];
+  const dt = st.dt || 1, n = st.n || st.p.length, P = st.p.map(x => x || 0), h = Math.max(1, Math.round(BLK.win / dt / 2)), cs = [0];
+  for (let i = 0; i < n; i++) cs.push(cs[i] + P[i]);
+  const on = Array.from({ length: n }, (_, i) => { const a = Math.max(0, i - h), b = Math.min(n, i + h + 1); return (cs[b] - cs[a]) / (b - a) >= BLK.thr * ftp; });
+  const seg = []; let i = 0;
+  while (i < n) { if (!on[i]) { i++; continue; } let j = i; while (j < n && on[j]) j++; seg.push([i, j]); i = j; }
+  const merged = []; seg.forEach(sg => { const L = merged[merged.length - 1]; if (L && (sg[0] - L[1]) * dt <= BLK.gap) L[1] = sg[1]; else merged.push(sg.slice()); });
+  // bords recalés sur la puissance réelle (moyenne 10 s) : la moyenne de 60 s rogne ou déborde de ~30 s à chaque bout
+  const w10 = Math.max(1, Math.round(10 / dt)), T = BLK.thr * ftp, avg = (a, b) => { a = Math.max(0, a); b = Math.min(n, b); return b > a ? (cs[b] - cs[a]) / (b - a) : 0; };
+  merged.forEach(sg => { let [a, b] = sg;
+    while (a > 0 && avg(a - 1, a - 1 + w10) >= T) a--; while (a < b - w10 && avg(a, a + w10) < T) a++;
+    while (b < n && avg(b + 1 - w10, b + 1) >= T) b++; while (b > a + w10 && avg(b - w10, b) < T) b--;
+    sg[0] = a; sg[1] = b; });
+  return merged.filter(([a, b]) => (b - a) * dt >= BLK.min).slice(0, BLK.max).map(([a, b]) => {
+    const p = P.slice(a, b), hr = st.h ? st.h.slice(a, b).filter(v => v > 0) : [];
+    return { i0: a, i1: b, t: a * dt, d: (b - a) * dt, w: p.reduce((x, y) => x + y, 0) / p.length, h: hr.length ? hr.reduce((x, y) => x + y, 0) / hr.length : null, hmax: hr.length ? Math.max(...hr) : null };
+  });
+}
+function blocksAnswer(B0) {
+  // on compare les blocs du corps de séance : à ±6 % de la puissance médiane (un bout d'échauffement ou un sprint final n'entre pas)
+  const med = B0.map(b => b.w).sort((a, b) => a - b)[Math.floor((B0.length - 1) / 2)], B = B0.filter(b => Math.abs(b.w / med - 1) <= .06);
+  if (B.length < 2) return "";
+  const f = B[0], l = B[B.length - 1], wr = Math.abs(l.w - f.w) / f.w * 100;
+  const same = wr < 3 ? (Math.round(f.w) === Math.round(l.w) ? `${B.length} blocs réguliers à ${nf(f.w)} W` : `${B.length} blocs réguliers, ${nf(f.w)} puis ${nf(l.w)} W`) : `${B.length} blocs, de ${nf(f.w)} à ${nf(l.w)} W`;
+  if (!(f.h && l.h)) return same + ".";
+  const drift = ((l.h / l.w) / (f.h / f.w) - 1) * 100, dh = l.h - f.h;
+  if (Math.abs(drift) < BLK.flat) return `${same}, et le cœur ${Math.abs(dh) < .5 ? "identique" : `${dh > 0 ? "+" : "−"}${nf(Math.abs(dh))} bpm`} sur le dernier : pas de dérive.`;
+  return drift > 0 ? `${same} : le dernier a coûté ${nf(drift)} % de cardio de plus par watt que le premier, la fatigue est montée.`
+    : `${same} : le cœur est ${nf(-drift)} % plus bas par watt sur le dernier, aucune dérive.`;
+}
+function blocksHtml(B) {
+  if (B.length < 2 || !blocksAnswer(B)) return "";
+  const rows = B.map((b, k) => `<tr><td><span class="bm-bn">${k + 1}</span></td><td>${hms(b.d)}</td><td><b>${nf(b.w)} W</b></td><td>${b.h ? nf(b.h) : "–"}</td><td>${b.hmax ? nf(b.hmax) : "–"}</td></tr>`).join("");
+  return `<section class="bm-sec"><h4>Blocs durs <small>repérés tout seuls, numérotés sur le graphe</small></h4><p class="bm-p">${blocksAnswer(B)}</p>
+    <table class="bm-tab bm-blk"><thead><tr><th>bloc</th><th>durée</th><th>puissance</th><th>cardio moy.</th><th>cardio max</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="meth"><span>moyenne 60 s ≥ ${Math.round(BLK.thr * 100)} % de FTP (${nf(ftpNow())} W), 2 min au moins</span><span>n = ${B.length}</span></div></section>`;
+}
+function chart(box, st, cmp, blk) {
   if (!box) return;
   const W = Math.max(300, box.clientWidth || 600), H = 200, m = { l: 34, r: 34, t: 10, b: 22 }, iw = W - m.l - m.r, ih = H - m.t - m.b, n = st.n, dt = st.dt;
   const smooth = (arr, w) => { if (!arr || w <= 1) return arr; return arr.map((v, i) => { if (v == null) return null; let s_ = 0, c = 0; for (let k = Math.max(0, i - w + 1); k <= i; k++) if (arr[k] != null) { s_ += arr[k]; c++; } return c ? s_ / c : null; }); };
@@ -449,6 +494,8 @@ function chart(box, st, cmp) {
       if (a != null) d += `M${x(t / dt).toFixed(1)},${y(a).toFixed(1)}L${x((t + stp.d) / dt).toFixed(1)},${y(b).toFixed(1)}`; t += stp.d; });
     s += `<path d="${d}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-dasharray="4 3" opacity=".75"/>`; }
   if (H2.length) { let d = "", pen = false; HR.forEach((v, i) => { if (!v) { pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + yh(v).toFixed(1); pen = true; }); s += `<path d="${d}" fill="none" stroke="var(--hr)" stroke-width="1.8" stroke-linejoin="round"/>`; }
+  if (blk && blk.length >= 2) blk.forEach((b, k) => { const xa = x(b.i0), xb = x(b.i1 - 1), xc = (xa + xb) / 2;
+    s += `<line x1="${xa.toFixed(1)}" x2="${xb.toFixed(1)}" y1="${m.t + 2}" y2="${m.t + 2}" stroke="var(--ink)" stroke-width="1.5"/><circle cx="${xc.toFixed(1)}" cy="${m.t + 2}" r="7" fill="var(--ink)"/><text x="${xc.toFixed(1)}" y="${m.t + 5.5}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--card)">${k + 1}</text>`; });
   s += `<line id="bmCur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="bmHit"/></svg>`;
   box.innerHTML = s + `<div class="legend bm-leg"><span><i style="background:${isP ? "linear-gradient(90deg,var(--z2) 0 33%,var(--z4) 33% 66%,var(--z6) 66%)" : "var(--accent)"}"></i>${isP ? "puissance (W), couleur de la zone" : "vitesse (km/h)"}</span>${H2.length ? `<span><i style="background:var(--hr)"></i>cardio (bpm)</span>` : ""}${cmp && isP ? `<span><i style="background:repeating-linear-gradient(90deg,var(--ink) 0 3px,transparent 3px 6px)"></i>prévu</span>` : ""}</div>`;
   const svg = box.querySelector("svg"), cur = box.querySelector("#bmCur"), hit = box.querySelector("#bmHit");
@@ -617,5 +664,5 @@ document.addEventListener("click", e => {
   e.preventDefault(); open(id);
 }, true);
 document.addEventListener("velo:loaded", () => { B.idx = null; B.cache = {}; });
-window.Bilan = { open, close, progress, _analyze: analyze, _compliance: compliance, _wind: windFor, _prog: { ftpPts, efPts, bestAt, bestSteps, ftpAnswer, efTrend, efAnswer, decAnswer, profileType, profileHtml, spreadLabels, PG }, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
+window.Bilan = { open, close, progress, _analyze: analyze, _blocks: { blocks, blocksAnswer, blocksHtml, BLK }, _compliance: compliance, _wind: windFor, _prog: { ftpPts, efPts, bestAt, bestSteps, ftpAnswer, efTrend, efAnswer, decAnswer, profileType, profileHtml, spreadLabels, PG }, _run: { paceTxt, pace: runPace, analyze: analyzeRun, zoneOf: runZoneOf, zones: RUN_ZONES, verdict: verdictRun, tiles: tilesRun } };
 })();

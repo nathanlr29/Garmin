@@ -796,6 +796,25 @@ function profileSvg(steps) {
     x += w; });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="wprof" role="img" aria-label="Profil de la séance">${out}<line x1="0" x2="${W}" y1="${H - 1 / 1.4 * H}" y2="${H - 1 / 1.4 * H}" stroke="currentColor" stroke-dasharray="4 4" opacity=".35"/></svg>`;
 }
+// Semaine en une bande (design v2, 10/11/2026) : un mini-profil par jour (vélo puis course), coloré par zone comme profileSvg ;
+// largeur proportionnelle à la durée (la plus longue journée de la semaine remplit sa case), jour en cours entouré
+function weekStrip(W) {
+  const lvl = s => s.free ? 1.05 : s.v != null ? s.v : Math.max(s.lo, s.hi);
+  const sess = it => [it.bike, it.run].filter(x => x && x.w && x.w.steps && x.w.steps.length);
+  const dur = it => sess(it).reduce((a, x) => a + x.w.steps.reduce((b, s) => b + s.d, 0), 0), maxT = Math.max(1, ...W.items.map(dur));
+  const cells = W.items.map(it => {
+    const L = sess(it), T = dur(it), Wd = 100, H = 36; let x = 0, out = "";
+    L.forEach(ses => ses.w.steps.forEach(s => { const w = s.d / maxT * Wd, f = Math.min(1.4, lvl(s)), h = Math.max(3, f / 1.4 * H);
+      out += `<rect x="${x.toFixed(2)}" y="${(H - h).toFixed(1)}" width="${Math.max(.4, w - .3).toFixed(2)}" height="${h.toFixed(1)}" fill="${ZONES[zoneOf(lvl(s))][2]}"/>`; x += w; }));
+    const now = W.isCur && it.day === W.td, b = it.bike || it.run, done = L.length && L.every(x => x.st === "done"), miss = L.some(x => x.st === "missed");
+    const lab = b ? TYPES[b.t].l : it.muscu ? "muscu" : "repos";
+    const svg = T ? `<svg viewBox="0 0 ${Wd} ${H}" preserveAspectRatio="none" aria-hidden="true">${out}</svg>` : "";
+    const tip = `${DAYN[it.day]} : ${L.length ? L.map(x => `${x.w.title} (${fmtMin(Math.round(x.w.steps.reduce((a, s) => a + s.d, 0) / 60))})`).join(" + ") : lab}${done ? ", faite" : miss ? ", non faite" : ""}`;
+    const inner = `<span class="wsd">${DAYN[it.day].slice(0, 3)}</span><span class="wsc${miss ? " miss" : ""}">${svg}</span><span class="wsl">${done ? "✓ " : ""}${esc(lab)}</span>`;
+    return b ? `<button class="wscell${now ? " now" : ""}" data-open="${ymd(it.date)}${it.bike ? "" : ":r"}" title="${esc(tip)}" aria-label="${esc(tip)}">${inner}</button>` : `<div class="wscell${now ? " now" : ""}" title="${esc(tip)}">${inner}</div>`;
+  }).join("");
+  return `<div class="wstrip" role="group" aria-label="La semaine en un coup d'œil">${cells}</div>`;
+}
 function cleanDur(d) { return d < 60 ? `${d} s` : fmtMin(Math.round(d / 60)); }
 function stepsTable(b, prof) {
   const st = b.w.steps, same = (a, c) => a && c && a.d === c.d && a.lo === c.lo && a.hi === c.hi && !!a.free === !!c.free;
@@ -986,6 +1005,7 @@ function renderWeek(W, prof) {
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
   return `<section class="card span12 wkc" id="pWeek"><h2>La semaine <small>${cyc} · ≈ ${plannedT} de charge prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
     <p class="pnote">${esc(ph.focus)}.${W.tired ? " Version allégée : fatigue détectée." : ""}${W.td < 0 ? " Aperçu : la semaine se fige lundi, puis s'ajuste chaque jour." : ""} Muscu le matin, vélo le soir ; jamais les jambes le jour ou la veille d'une séance clé.</p>
+    ${weekStrip(W)}
     <div class="wk">${pastFold(W, prof)}</div>${runNote}
     ${mw.length ? `<div class="factions">${mw.length > 1 ? `<button class="btn2 primary" id="pZip">Télécharger les ${mw.length} séances MyWhoosh (.zip)</button>` : ""}</div>
     <details class="howto"><summary>Importer dans MyWhoosh</summary><ol>
@@ -1170,7 +1190,7 @@ function bind(c, prof) {
     if (f >= 100 && f <= 600 && d) { c.goal = { ftp: Math.round(f), vo2: v >= 30 && v <= 90 ? v : c.goal.vo2, date: d }; saveCfg(c); PS.goalEdit = false; render(); } };
   box.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { PS.mon = addDays(mondayOf(new Date()), +b.dataset.w); render(); });
   box.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { const k = b.dataset.open, d = parseYmd(k.slice(0, 10)), mon = mondayOf(d), isR = k.endsWith(":r");
-    const inDay = !!b.closest(".dayc");
+    const inDay = !!b.closest(".dayc, .wstrip");   // carte Aujourd'hui et bande de la semaine : ouvre et fait défiler jusqu'au détail
     if (+mon !== +PS.mon) { PS.mon = mon; PS.open = {}; }
     PS.open[k] = inDay ? true : !PS.open[k]; render();
     if (inDay) setTimeout(() => document.querySelector(`.wdet[data-d="${dayIndex(d, mon)}"]${isR ? "[data-r]" : ":not([data-r])"}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 30); });

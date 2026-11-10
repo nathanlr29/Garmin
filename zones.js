@@ -145,6 +145,15 @@
     return `<b>Semaine du ${w.mon.getDate()}/${w.mon.getMonth() + 1}${w.cur ? " (en cours)" : ""}</b><br>${hm(w.total)} · ${w.n} séance${w.n > 1 ? "s" : ""}<br>` +
       w.sec.map((s, z) => `Z${z + 1} ${NAMES[z]} : ${hm(s)} (${pct(s / w.total)} %)`).join("<br>");
   }
+  // Intensité en une barre (design v2) : Z1-Z5 avec le % dans chaque segment assez large, repère « cible 80 % facile », part facile au-dessus
+  function zbar(sec) {
+    const T = sec.reduce((s, v) => s + (+v || 0), 0); if (!T) return "";
+    const easy = pct((sec[0] + sec[1]) / T);
+    return `<div class="zbar" role="img" aria-label="Répartition du temps par zone : ${sec.map((x, z) => `Z${z + 1} ${pct(x / T)} %`).join(", ")}">
+      <span class="zbar-easy">facile (Z1-Z2) : ${easy} %</span>
+      <div class="zbar-in">${sec.map((x, z) => x ? `<div style="flex:${x};background:var(--z${z + 1})"${z === 2 || z === 3 ? ' class="dk"' : ""} title="Zone ${z + 1} ${NAMES[z]} : ${pct(x / T)} %">${x / T >= .09 ? pct(x / T) + " %" : ""}</div>` : "").join("")}</div>
+      <i class="zbar-ref" style="left:${REF.easy * 100}%"><span>cible ${pct(REF.easy)} % facile</span></i></div>`;
+  }
   function html(opt = {}) {
     last = opt;
     const now = opt.now || Date.now(), acts = opt.acts || [], sport = sportCur();
@@ -152,8 +161,7 @@
     const cur = agg(acts, sport, now - WIN * DAY, now), prev = agg(acts, sport, now - 2 * WIN * DAY, now - WIN * DAY), s = shares(cur), v = verdict(cur);
     const W = weeks(acts, sport, now); lastW = W;
     const chips = SPORTS.map(([k, l]) => `<button class="chip" data-hrz="${k}" aria-pressed="${k === sport}">${l}</button>`).join("");
-    const bar = cur.total ? `<div class="hrz-bar" role="img" aria-label="Répartition du temps par zone">${cur.sec.map((x, z) => x ? `<div style="flex:${x};background:var(--z${z + 1})" title="Zone ${z + 1} : ${pct(x / cur.total)} %"></div>` : "").join("")}</div>
-      <div class="hrz-ref"><span style="left:80%">80 % facile</span></div>` : "";
+    const bar = cur.total ? zbar(cur.sec) : "";
     const rows = Z.z.map((r, z) => {
       const p0 = prev.total ? pct(prev.sec[z] / prev.total) : null;
       return `<div class="hrz-row" style="--zc:var(--z${z + 1})"><div class="hrz-n"><b>Z${z + 1} ${NAMES[z]}</b><span class="hrz-bpm">${r.lo}-${r.hi} bpm</span><span class="hrz-pm">${pct(r.lo / Z.max)}-${pct(r.hi / Z.max)} % de ta FC max</span><small>${USES[z]}</small></div>
@@ -164,7 +172,7 @@
   <div class="hrz-cols">
     <div>
       <p class="hrz-ans${v.good === false ? " hrz-warn" : ""}">${E(answer(cur, sport))}</p>
-      ${bar}
+      ${bar}${cur.total ? `<div class="meth"><span>fréquence cardiaque · ${WIN} derniers jours</span><span>n = ${cur.n} séance${cur.n > 1 ? "s" : ""} · ${hm(cur.total)}</span></div>` : ""}
       <p class="note hrz-cmp">${E(compare(cur, prev))}</p>
       <div class="hrz-rows">${rows}</div>
       <p class="note">${E(methodNote(Z))}${sport === "all" ? " " + HELP_ALL : ""}</p>
@@ -195,5 +203,5 @@
     });
   }
 
-  window.Zones = { html, bind, _: { ageOf, zonesFrom, sportOk, agg, shares, verdict, answer, compare, weeks, weeksTitle, practical, methodNote, hm, mondayOf, tipHtml, REF, WIN, KARV, NAMES } };
+  window.Zones = { html, bind, zbar, _: { ageOf, zonesFrom, sportOk, agg, shares, verdict, answer, compare, weeks, weeksTitle, practical, methodNote, hm, mondayOf, tipHtml, REF, WIN, KARV, NAMES } };
 })();

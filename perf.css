@@ -20,3 +20,5 @@
 .perf .pf-priv{margin-top:6px}
 .perf .pf-tiles .tile .s{white-space:normal}
 @media (max-width:520px){.perf .pf-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.perf .pf-tiles .tile{padding:12px}}
+.pf-cp{margin:10px 0 0;font-size:14px;line-height:1.45}
+.pf-cp b{font:700 17px/1 var(--font-num)}

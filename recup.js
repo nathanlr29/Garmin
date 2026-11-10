@@ -362,6 +362,9 @@ function tsChart(el, days, series, opt = {}) {
     s += `<path d="${d}" fill="none" stroke="${se.c}" stroke-width="${se.w || 2}" ${se.dash ? `stroke-dasharray="${se.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
     if (n <= 35 && !se.dash) days.forEach((dd, i) => { if (dd[se.k] != null) s += `<circle cx="${x(i)}" cy="${y(dd[se.k])}" r="2.4" fill="${se.c}"/>`; });
   });
+  // repères annotés (design v2) : { i, v, t, c } = étiquette sous le point i, ancrée vers l'intérieur du graphe
+  (opt.marks || []).forEach(mk => { const px = x(mk.i), anc = px > W - 90 ? "end" : px < m.l + 70 ? "start" : "middle";
+    s += `<text x="${px.toFixed(1)}" y="${Math.min(m.t + ih - 3, y(mk.v) + 15).toFixed(1)}" text-anchor="${anc}" font-size="10.5" font-weight="600" fill="${mk.c || "var(--amber)"}">${esc(mk.t)}</text>`; });
   s += `<line id="${el}Cur" y1="${m.t}" y2="${m.t + ih}" stroke="var(--muted)" opacity="0"/><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent" id="${el}Hit"/></svg>`;
   box.innerHTML = s;
   const svg = box.querySelector("svg"), cur = $(el + "Cur"), hit = $(el + "Hit");
@@ -529,13 +532,33 @@ function hrvTrendAnswer(t) {
     : `, dans ta zone normale (${z}) : pas de fatigue qui dure.`;
   return `Ta VFC moyenne sur 7 nuits est de <b>${t.v} ms</b>${tr}${zone}`;
 }
+// Creux de VFC expliqués (design v2, 10/11/2026) : une nuit sous la zone normale Garmin porte sa cause probable, lue dans la veille.
+// Ordre : grosse journée (charge ≥ 100, km si sortie vélo de 50 km et plus), nuit courte (≥ 1 h sous ta médiane des 30 nuits), sinon pas de cause visible.
+const LOWC = { load: 100, shortMin: 60, base: 30, marks: 2 };
+function lowCause(days, i, acts) {
+  const d = days[i]; if (!d || d.hrv == null || d.hrvLo == null || d.hrv >= d.hrvLo) return null;
+  const ch = window.Charge, prev = new Date(d.dt); prev.setDate(prev.getDate() - 1);
+  const k = ch ? ch.ymd(prev) : null, A = k ? (acts || []).filter(a => a.d && a.d.slice(0, 10) === k) : [], load = ch ? A.reduce((t, a) => t + ch.tssOf(a), 0) : 0;
+  if (load >= LOWC.load) { const km = A.filter(a => ch.sportOf(a) === "bike" && a.m >= 50000).reduce((t, a) => t + a.m, 0) / 1000;
+    return { k: "load", short: km ? `lendemain des ${nf(km)} km` : `après ${nf(load)} de charge`, long: `la veille, ${km ? `${nf(km)} km et ` : ""}${nf(load)} de charge` }; }
+  const sl = days.slice(Math.max(0, i - LOWC.base), i).map(x => x.sl).filter(Boolean).sort((a, b) => a - b), med = sl.length >= 7 ? sl[Math.floor(sl.length / 2)] : null;
+  if (d.sl && med && med - d.sl >= LOWC.shortMin * 60) return { k: "sleep", short: "nuit courte", long: `nuit courte (${hm(d.sl / 60)}, ${Math.round((med - d.sl) / 60)} min sous ta médiane)` };
+  return { k: "none", short: "", long: "pas de cause visible dans tes données (stress, alcool, virus ?)" };
+}
+function lowNightsLine(L) {
+  if (!L.length) return " Aucune nuit sous ta zone sur la période.";
+  const last = L[L.length - 1], nLoad = L.filter(x => x.c.k === "load").length;
+  return ` ${L.length} nuit${L.length > 1 ? "s" : ""} sous ta zone sur la période${nLoad ? `, dont ${nLoad} le lendemain d'une grosse journée` : ""} ; la dernière, le ${last.d.dt.getDate()} ${MONTHS[last.d.dt.getMonth()]} : ${last.c.long}.`;
+}
 function renderHrvTrend(P) {
-  const t = hrvTrend(RC.days);
-  $("rHrvTAns").innerHTML = hrvTrendAnswer(t);
-  const N = P.filter(d => d.hrv != null || d.hrv7 != null);
+  const t = hrvTrend(RC.days), acts = (typeof S !== "undefined" && S.all) || [];
+  const N = P.filter(d => d.hrv != null || d.hrv7 != null).map(d => { const c = lowCause(RC.days, RC.days.indexOf(d), acts); return c ? Object.assign({}, d, { hrvLow: d.hrv, lowc: c }) : d; });
+  const L = N.filter(d => d.lowc).map(d => ({ d, c: d.lowc }));
+  $("rHrvTAns").innerHTML = hrvTrendAnswer(t) + (t && N.length ? lowNightsLine(L) : "");
   $("rHrvTInfo").textContent = t ? `zone normale ${t.lo}–${t.up} ms` : "";
-  tsChart("rHrvT", N, [{ k: "hrv", l: "nuit", c: "var(--muted)", w: 1, u: "ms" }, { k: "hrv7", l: "moyenne 7 nuits", c: "var(--accent)", w: 2.6, u: "ms" }],
-    { band: ["hrvLo", "hrvUp", "var(--teal)", .16], tipExtra: d => d.hrvLo != null ? `<br>zone normale : ${d.hrvLo}–${d.hrvUp}` : "" });
+  const marks = N.map((d, i) => d.lowc && d.lowc.short ? { i, v: d.hrv, t: `${d.hrv} · ${d.lowc.short}` } : null).filter(Boolean).slice(-LOWC.marks);
+  tsChart("rHrvT", N, [{ k: "hrv", l: "nuit", c: "var(--muted)", w: 1, u: "ms" }, { k: "hrv7", l: "moyenne 7 nuits", c: "var(--accent)", w: 2.6, u: "ms" }, { k: "hrvLow", l: "sous la zone", c: "var(--amber)", pts: true, noTip: true }],
+    { band: ["hrvLo", "hrvUp", "var(--teal)", .16], marks, tipExtra: d => (d.hrvLo != null ? `<br>zone normale : ${d.hrvLo}–${d.hrvUp}` : "") + (d.lowc ? `<br><b>sous la zone</b> : ${d.lowc.long}` : "") });
 }
 
 // Respiration de la nuit (à la Whoop) : moyenne de la nuit (rx au dixième, sinon resp de Garmin, arrondie à l'unité),
@@ -775,7 +798,7 @@ async function ensure(target, after) {
   if (!RC.data) { RC.data = RC.env.plain; prep(); }
   return true;
 }
-window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, nightAnswer, respAt, respTrend, respAnswer, WT, weightSeries, syncWeight, weightTrend, weightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
+window.Recup = { ensure, recoScore, scoreColor, _: { REC, RESP, RESP_WHY, SRI, HM, sriAt, sriAnswer, sleepTarget, targetLine, healthAt, healthAnswer, recovLeft, hrvTrend, hrvTrendAnswer, lowCause, lowNightsLine, LOWC, nightAnswer, respAt, respTrend, respAnswer, WT, weightSeries, syncWeight, weightTrend, weightAnswer }, get data() { return RC.data; }, get days() { return RC.days; }, open: openRecup, hm, clock };
 
 // ------------------------------------------------------------------ Démarrage
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() !== "recup") return; $("title").textContent = "Ma récupération"; if (RC.data) renderRecup(); });

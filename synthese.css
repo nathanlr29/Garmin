@@ -107,3 +107,5 @@
 .sywxd span:last-child{color:var(--muted)}
 @media (max-width:420px){.sywxd,.sywxday>.sywxd{grid-template-columns:auto 1fr auto}.sywxd span:last-child{grid-column:2}.sywxday>.sywxd::after{grid-column:3;grid-row:1}}
 .syreleve .crvar b{white-space:normal;overflow-wrap:anywhere}
+.syrib{margin-top:4px}
+#syProg .meth{margin-top:4px}

@@ -298,3 +298,20 @@ html.bm-open{overflow:hidden}
 /* note des séances fondatrices, dans « Mes disponibilités » */
 #plan .avail .design{margin-top:14px;padding:10px 12px}
 #plan .today{align-self:start}
+/* semaine en une bande (design v2) : 7 mini-profils colorés par zone */
+#plan .wstrip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:4px 0 12px}
+#plan .wscell{display:grid;gap:4px;justify-items:stretch;text-align:center;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:default}
+#plan button.wscell{cursor:pointer}
+#plan .wsd{font:600 11.5px/1 var(--font-ui);color:var(--muted)}
+#plan .wsc{display:block;height:44px;background:var(--raised);border-radius:var(--r-sm);padding:4px 3px 0;overflow:hidden}
+#plan .wsc svg{display:block;width:100%;height:100%}
+#plan .wsc.miss{opacity:.4}
+#plan .wscell.now .wsc{outline:2px solid var(--accent);outline-offset:1px}
+#plan .wscell.now .wsd{color:var(--accent-ink)}
+#plan .wsl{font-size:11px;line-height:1.2;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;min-height:2.4em}
+#plan button.wscell:hover .wsc{background:var(--line)}
+/* bilan : blocs durs (design v2) */
+.bm-blk th{font-size:11.5px;font-weight:600;color:var(--muted);text-align:left;padding:0 6px 6px 0}
+.bm-blk td b{font:700 16px/1 var(--font-num)}
+.bm-blk td small{margin-left:3px;color:var(--muted);font-size:11.5px}
+.bm-bn{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ink);color:var(--card);font:700 11px/1 var(--font-ui)}

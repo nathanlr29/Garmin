@@ -187,4 +187,19 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
   assert.match(W.weightAnswer(null, 230, null), /Pas de pesée dans Garmin/);
   assert.equal(W.weightTrend([]), null);
 }
+// ------------------------------------------------------------------ 7) Creux de VFC expliqués (design v2)
+{
+  const win = await load([], { days: {}, profile: {} }), R = win.Recup._;
+  const day = (d, hrv, sl) => ({ d, dt: parseLocal(d), hrv, hrvLo: 88, hrvUp: 118, sl });
+  const days = Array.from({ length: 12 }, (_, k) => day(`2026-11-${String(k + 1).padStart(2, "0")}`, 100, 8 * 3600));
+  days[8] = day("2026-11-09", 73, 8 * 3600); days[10] = day("2026-11-11", 80, 6 * 3600); days[11] = day("2026-11-12", 85, 8 * 3600);
+  const acts = [{ ...ride("2026-11-08", 6 * 3600, 170), t: "Ride", m: 158000 }];
+  assert.equal(R.lowCause(days, 0, acts), null, "nuit dans la zone : pas de cause");
+  const c1 = R.lowCause(days, 8, acts); assert.equal(c1.k, "load"); assert.match(c1.short, /lendemain des 158 km/);
+  assert.equal(R.lowCause(days, 10, acts).k, "sleep", "2 h sous la médiane");
+  assert.equal(R.lowCause(days, 11, acts).k, "none");
+  const L = [8, 10, 11].map(i => ({ d: days[i], c: R.lowCause(days, i, acts) }));
+  assert.match(R.lowNightsLine(L), /3 nuits sous ta zone sur la période, dont 1 le lendemain d'une grosse journée ; la dernière, le 12 nov\. : pas de cause visible/);
+  assert.match(R.lowNightsLine([]), /Aucune nuit/);
+}
 console.log("recup : ok");

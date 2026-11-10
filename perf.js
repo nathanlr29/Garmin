@@ -7,6 +7,9 @@
   const WIN = 90;               // fenêtre des records récents (jours), comparée aux 90 jours d'avant
   const STABLE = 3;             // ±3 % : « stable »
   const OUT_KM = 40;            // sorties dehors retenues pour la vitesse moyenne
+  // modèle de puissance critique (design v2) : travail = W' + CP × durée, sur les records de 2 à 20 min des 90 derniers jours
+  // (Garmin donne 5 et 20 min, et 2 et 10 min pour les sorties récentes) ; FTP de travail à ±3 % de CP = « cohérente »
+  const CPD = [120, 180, 300, 600, 1200], CP_OK = 3;
   // repères de classement (mêmes tables que plan.js)
   const ZWIFT = [[0, 0], [1.5, 2], [2, 6], [2.5, 13], [3.2, 42], [4, 85], [4.6, 95], [5.2, 99], [6.5, 100]];  // % cumulé des coureurs
   const AFY = { "<30": [4.95, 5.77], "30-39": [4.3, 5.59], "40-49": [4, 4.88], "50-59": [3.63, 4.38], "60+": [3.23, 4.18] };  // médiane, top 10 % (hommes)
@@ -48,6 +51,25 @@
     const dir = med > STABLE ? "up" : med < -STABLE ? "down" : "flat";
     const ref = dir === "flat" ? 0 : med, pick = C.reduce((a, b) => (Math.abs(b.pct - ref) <= Math.abs(a.pct - ref) + 1e-9 ? b : a));   // à égalité, la plus longue durée
     return { dir, med, pick, n: C.length };
+  }
+  function cpModel(acts, now) {
+    const N = ms(now) + 1, R = rides(acts), from = N - WIN * DAY;
+    const P = CPD.map(d => { const b = bestIn(R, String(d), from, N); return b ? { s: d, v: b.v } : null; }).filter(Boolean);
+    if (P.length < 2) return null;
+    const n = P.length, X = P.map(p => p.s), Yw = P.map(p => p.v * p.s), mx = X.reduce((a, b) => a + b) / n, my = Yw.reduce((a, b) => a + b) / n;
+    const sxx = X.reduce((a, x) => a + (x - mx) ** 2, 0), cp = X.reduce((a, x, i) => a + (x - mx) * (Yw[i] - my), 0) / sxx, wp = my - cp * mx;
+    if (!(cp > 0 && wp > 0)) return null;
+    const ss = Yw.reduce((a, w, i) => a + (w - (wp + cp * X[i])) ** 2, 0), st = Yw.reduce((a, w) => a + (w - my) ** 2, 0);
+    return { cp, wp, n, r2: n > 2 && st > 0 ? 1 - ss / st : null, pts: P };
+  }
+  function cpLine(m, ftp, kg) {
+    if (!m) return "";
+    const d = ftp > 0 ? (ftp / m.cp - 1) * 100 : null;
+    const verdict = d == null ? "" : Math.abs(d) < CP_OK ? ` Ta FTP de travail (${fmt(ftp)} W) est cohérente avec tes efforts.`
+      : d > 0 ? ` Ta FTP de travail (${fmt(ftp)} W) est ${fmt(d)} % au-dessus : le test 20 min tranchera.` : ` Ta FTP de travail (${fmt(ftp)} W) est ${fmt(-d)} % en dessous : tu peux la remonter.`;
+    const dur = m.pts.map(p => p.s >= 60 ? `${p.s / 60} min` : `${p.s} s`).join(", ");
+    return `<p class="pf-cp">Puissance critique <b>${fmt(m.cp)} W</b>${kg ? ` (${fmt(m.cp / kg, 2)} W/kg)` : ""} et réserve au-dessus <b>${fmt(m.wp / 1000, 1)} kJ</b>.${verdict}</p>
+      <div class="meth"><span>modèle à 2 paramètres · records ${dur} des 90 j</span><span>n = ${m.n}${m.r2 != null ? ` · r² = ${fmt(m.r2, 3)}` : " · ajustement exact"}</span></div>`;
   }
   const wkg = (w, kg) => (w > 0 && kg > 0 ? w / kg : null);
   // phrase-réponse de la carte
@@ -165,7 +187,7 @@
     const now = ms(opt.now), acts = opt.acts || (typeof S !== "undefined" ? S.all : []) || [], profile = opt.profile || {}, goal = opt.goal || {};
     const kg = opt.kg != null ? +opt.kg || 0 : +ls("bwWeight") || 0, age = opt.age || ls("bwAge") || "30-39";
     const ftp = opt.ftp || profile.ftp || 0, recs = records(acts, now);
-    M = { recs, kg, curve: curve(recs) };
+    M = { recs, kg, curve: curve(recs), cp: cpModel(acts, now) };
     const parts = {
       ftp: ftpTile(ftp, kg, goal), vo2: vo2Tile(profile, now, goal), vol: volume(acts, now), spd: outSpeed(acts, now), lng: longest(acts, now),
     };
@@ -176,7 +198,7 @@
     ${tilesHtml(parts)}
     <div class="pg-grid pf-grid">
       <div class="pg-box"><h4>Records de puissance <small>meilleur des 90 derniers jours, sur home trainer</small></h4>${recsHtml(recs, kg)}</div>
-      <div class="pg-box"><h4>Courbe de puissance <small>90 derniers jours contre les 90 d'avant</small></h4>${hasCurve ? `<div class="pf-curve" id="pfCurve"></div>` : `<p class="note">Il faut au moins deux durées mesurées pour tracer la courbe.</p>`}</div>
+      <div class="pg-box"><h4>Courbe de puissance <small>90 derniers jours contre les 90 d'avant</small></h4>${hasCurve ? `<div class="pf-curve" id="pfCurve"></div>${cpLine(M.cp, ftp, kg)}` : `<p class="note">Il faut au moins deux durées mesurées pour tracer la courbe.</p>`}</div>
     </div>
     ${rk ? `<p class="note pf-rank">Repère : à ${fmt(rk.wkg, 2)} W/kg, tu serais dans le top ${rk.zwift} % des coureurs d'une course Zwift ${rk.lab >= 90 ? `, mais sous la plupart des hommes de ${rk.ageTxt} testés en laboratoire` : ` et le top ${rk.lab} % des hommes de ${rk.ageTxt} testés en laboratoire`} (populations plus entraînées que la moyenne).</p>` : ""}
     <div class="rkform pf-form"><label>Poids <input id="pKg" type="number" min="35" max="150" step="0.1" value="${kg || ""}" placeholder="kg"> kg</label>
@@ -198,6 +220,11 @@
     DUR.filter(([k]) => +k >= s0 && +k <= s1).forEach(([k, l]) => s += `<text x="${x(+k).toFixed(1)}" y="${H - 6}" text-anchor="middle">${l}</text>`);
     s += "</g>";
     const line = (P, col, w, dash) => P.length >= 2 ? `<path d="${P.map((p, i) => (i ? "L" : "M") + x(p.s).toFixed(1) + "," + y(p.v).toFixed(1)).join("")}" fill="none" stroke="${col}" stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linejoin="round"/>` : "";
+    // modèle de puissance critique : courbe CP + W'/t (de 1 min au bout de l'axe) et droite CP
+    if (M.cp) { const C = M.cp, T = []; for (let t = Math.max(60, s0); t <= s1 * 1.0001; t *= 1.1) { const v = C.cp + C.wp / t; if (v <= hi && v >= lo) T.push({ s: t, v }); }
+      s += line(T, "var(--ink)", 1.4, "2 3");
+      if (T.length) s += `<text x="${(x(T[0].s) + 6).toFixed(1)}" y="${(y(T[0].v) + 4).toFixed(1)}" font-size="11" fill="var(--ink)">modèle</text>`;
+      if (C.cp >= lo && C.cp <= hi) s += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(C.cp).toFixed(1)}" y2="${y(C.cp).toFixed(1)}" stroke="var(--accent)" stroke-width="1" opacity=".55"/><text x="${m.l + 4}" y="${(y(C.cp) + 13).toFixed(1)}" font-size="11" font-weight="700" fill="var(--accent-ink)">CP ${fmt(C.cp)} W</text>`; }
     s += line(prev, "var(--muted)", 1.6, "5 4") + line(cur, "var(--accent)", 2.4);
     const dotsOf = (P, col, w) => P.map(p => `<circle cx="${x(p.s).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4" fill="${col}" stroke="var(--card)" stroke-width="1.5" data-w="${w}" data-s="${p.s}"/>`).join("");
     s += dotsOf(prev, "var(--muted)", "prev") + dotsOf(cur, "var(--accent)", "cur");
@@ -228,5 +255,5 @@
     }
   }
 
-  window.Perf = { html, bind, _: { DUR, WIN, STABLE, OUT_KM, ZWIFT, AFY, rides, bestIn, records, trend, headline, valAt, vo2Tile, ftpTile, volume, outSpeed, longest, rank, cdfPts, curve } };
+  window.Perf = { html, bind, _: { DUR, WIN, STABLE, OUT_KM, CPD, cpModel, cpLine, ZWIFT, AFY, rides, bestIn, records, trend, headline, valAt, vo2Tile, ftpTile, volume, outSpeed, longest, rank, cdfPts, curve } };
 })();

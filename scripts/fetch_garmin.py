@@ -227,7 +227,7 @@ def kind(type_key):
     return type_key or "other"
 
 
-PC_DUR = (5, 60, 300, 1200, 3600)  # meilleures puissances (s) pour la FTP détectée
+PC_DUR = (5, 60, 120, 300, 600, 1200, 3600)  # meilleures puissances (s) : FTP détectée, modèle de puissance critique (2 et 10 min)
 
 
 def power_curve(a):
