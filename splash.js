@@ -1,17 +1,40 @@
-// Animation de démarrage (2,6 s, une fois par session d'onglet) : le cercle de départ du logo apparaît en Finistère,
-// le tracé fait le tour de la Bretagne (nord puis sud), une étoile scintille sur Rennes et devient le point blanc,
-// on passe sur la vraie icône (icon-512.png) puis la plaque orange se pose sur l'icône de la barre d'application.
+// Animation de démarrage (2,8 s, la première ouverture du jour sur chaque appareil) : le cercle de départ du logo apparaît
+// en Finistère, le tracé fait le tour de la Bretagne (nord puis sud), une étoile scintille sur Rennes et devient le point
+// blanc, on passe sur la vraie icône (icon-512.png) puis la plaque orange se pose sur l'icône de la barre d'application.
+// Sous le logo : la date du jour et la durée du jour à Rennes (lever, coucher, écart avec hier), calculées sans réseau.
 // Un clic ou une touche passe directement à la fin. Rien si « réduire les animations » est demandé.
 (() => {
   "use strict";
-  const KEY = "splashSeen";
-  try { if (sessionStorage.getItem(KEY)) return; sessionStorage.setItem(KEY, "1"); } catch (e) {}
+  // Une fois par jour et par appareil (localStorage, jamais synchronisé) ; sans localStorage, une fois par onglet
+  const KEY = "splashDay", now0 = new Date(), pad = n => String(n).padStart(2, "0");
+  const today = `${now0.getFullYear()}-${pad(now0.getMonth() + 1)}-${pad(now0.getDate())}`;
+  const seen = st => { try { if (st.getItem(KEY) === today) return true; st.setItem(KEY, today); return false; } catch (e) { return null; } };
+  const r0 = seen(localStorage);
+  if (r0 || (r0 === null && seen(sessionStorage))) return;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   // Tracé repris de icon-512.png (repère 512 × 512), départ au cercle du Finistère, sens des aiguilles d'une montre
   const COAST = "M61.0 199.5 L61.5 197.0 L66.0 194.5 L76.0 192.5 L79.5 189.0 L81.0 185.5 L95.0 182.5 L102.0 177.5 L106.0 177.5 L113.0 180.5 L116.0 179.5 L120.0 175.5 L130.0 175.5 L137.0 172.5 L141.0 169.5 L142.5 170.0 L143.5 175.0 L146.0 177.5 L149.0 178.5 L153.0 177.5 L159.0 172.5 L160.0 173.5 L175.0 173.5 L178.0 174.5 L181.0 173.5 L184.5 170.0 L185.5 167.0 L184.5 159.0 L188.0 156.5 L191.0 152.5 L196.0 153.5 L201.0 156.5 L211.0 151.5 L219.0 150.5 L222.0 147.5 L228.0 149.5 L235.0 146.5 L239.0 152.5 L244.5 154.0 L245.5 160.0 L249.0 163.5 L251.0 163.5 L252.5 165.0 L253.5 171.0 L264.5 181.0 L265.5 189.0 L270.0 193.5 L275.0 195.5 L278.0 199.5 L281.0 200.5 L285.0 199.5 L293.0 190.5 L298.0 188.5 L300.5 186.0 L302.0 181.5 L306.0 181.5 L307.0 182.5 L319.0 177.5 L328.0 187.5 L331.0 188.5 L334.0 187.5 L337.0 183.5 L341.0 183.5 L348.0 181.5 L353.0 176.5 L357.0 174.5 L364.0 173.5 L368.5 176.0 L366.5 181.0 L367.5 184.0 L370.0 186.5 L375.0 188.5 L383.0 187.5 L384.0 186.5 L389.0 186.5 L390.0 185.5 L396.0 185.5 L397.0 184.5 L402.5 193.0 L402.5 196.0 L401.5 197.0 L404.5 204.0 L407.0 206.5 L409.0 206.5 L413.0 210.5 L416.0 211.5 L419.0 210.5 L429.0 199.5 L432.0 198.5 L438.0 198.5 L450.0 203.5 L449.5 218.0 L450.5 219.0 L452.5 233.0 L448.5 239.0 L447.5 247.0 L448.5 248.0 L451.5 266.0 L455.5 275.0 L455.5 284.0 L454.0 285.5 L446.0 286.5 L441.5 290.0 L432.5 318.0 L430.0 319.5 L426.0 317.5 L420.0 316.5 L416.0 312.5 L413.0 311.5 L410.0 312.5 L407.0 315.5 L395.0 320.5 L390.5 325.0 L389.5 328.0 L387.0 330.5 L384.0 331.5 L372.0 331.5 L371.0 330.5 L368.0 330.5 L361.0 333.5 L357.0 336.5 L356.0 335.5 L349.0 336.5 L342.5 341.0 L341.5 344.0 L341.5 357.0 L335.5 362.0 L334.0 364.5 L328.0 363.5 L321.0 365.5 L318.0 369.5 L313.0 369.5 L312.0 370.5 L306.0 369.5 L302.0 371.5 L299.5 370.0 L298.5 365.0 L295.0 361.5 L285.0 360.5 L280.0 363.5 L277.0 363.5 L276.0 362.5 L269.0 365.5 L266.0 365.5 L263.0 364.5 L252.0 352.5 L249.0 351.5 L248.0 352.5 L245.0 352.5 L241.0 350.5 L237.0 351.5 L233.5 355.0 L232.5 359.0 L235.5 366.0 L232.0 367.5 L230.5 365.0 L230.5 352.0 L229.5 349.0 L215.0 331.5 L207.0 330.5 L201.0 332.5 L199.0 331.5 L198.0 332.5 L190.0 322.5 L183.0 320.5 L173.0 319.5 L170.0 316.5 L167.0 315.5 L163.0 317.5 L158.0 317.5 L153.0 313.5 L148.0 307.5 L145.0 306.5 L139.0 308.5 L135.0 308.5 L133.0 306.5 L129.0 305.5 L126.0 306.5 L123.5 309.0 L120.0 315.5 L102.0 316.5 L100.5 315.0 L100.5 312.0 L102.5 307.0 L95.5 291.0 L87.0 284.5 L79.0 283.5 L72.0 279.5 L66.0 279.5 L64.5 275.0 L66.0 273.5 L74.0 272.5 L79.0 270.5 L88.0 269.5 L89.0 268.5 L98.0 267.5 L99.0 266.5 L101.0 267.5 L106.0 266.5 L108.5 264.0 L109.5 261.0 L107.5 255.0 L104.0 251.5 L91.0 246.5 L88.0 247.5 L84.5 251.0 L82.5 255.0 L80.5 256.0 L80.5 249.0 L79.5 246.0 L76.5 243.0 L79.5 237.0 L78.5 234.0 L75.0 230.5 L72.5 230.0 L75.5 222.0 L75.5 215.0 L73.5 209.0 L66.0 201.5 Z";
   const DOT = [386, 265.5, 12.8], START = [55.5, 218.6, 17.5];
-  const T = { pop: [0, 220], draw: [120, 1300], star: [1080, 1520], morph: [1520, 1780], png: [1720, 1880], fly: [1880, 2520], end: 2560 };
+  const T = { pop: [0, 220], draw: [120, 1300], txt: [420, 760], star: [1080, 1520], morph: [1520, 1780], png: [1720, 1880], fly: [2080, 2720], end: 2760 };
+
+  // Lever et coucher du soleil (algorithme simplifié de la NOAA, à la minute près) au centre de la ville de config.json
+  const LAT = 48.1173, LON = -1.6778, RAD = Math.PI / 180;
+  function sun(d) {
+    const n = Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5 + 2440587.5) - 2451545 - LON / 360;
+    const M = (357.5291 + .98560028 * n) % 360, Mr = M * RAD;
+    const lam = (M + 1.9148 * Math.sin(Mr) + .02 * Math.sin(2 * Mr) + .0003 * Math.sin(3 * Mr) + 282.9372) % 360 * RAD;
+    const jt = 2451545 + n + .0053 * Math.sin(Mr) - .0069 * Math.sin(2 * lam);
+    const dec = Math.asin(Math.sin(lam) * Math.sin(23.44 * RAD)), phi = LAT * RAD;
+    const w = Math.acos((Math.sin(-.833 * RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec))) / RAD;
+    const at = j => new Date((j - 2440587.5) * 864e5);
+    return { rise: at(jt - w / 360), set: at(jt + w / 360) };
+  }
+  const hm = d => `${d.getHours()}:${pad(d.getMinutes())}`;
+  const len = d => { const s = sun(d); return Math.round(s.set / 6e4) - Math.round(s.rise / 6e4); };   // comme les heures affichées
+  const S0 = sun(now0), L0 = len(now0), dL = L0 - len(new Date(now0.getTime() - 864e5));
+  const DATE = now0.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const SUNL = `<span>lever ${hm(S0.rise)} · coucher ${hm(S0.set)}</span> <span>${Math.floor(L0 / 60)} h ${pad(L0 % 60)} de jour (${dL > 0 ? "+" : dL < 0 ? "−" : "±"}${Math.abs(dL)} min)</span>`;
 
   const el = document.createElement("div");
   el.id = "splash";
@@ -29,13 +52,14 @@
 <path class="sp-star" stroke="none" transform="scale(0)" d="M0 -44Q4 -4 44 0Q4 4 0 44Q-4 4 -44 0Q-4 -4 0 -44Z"/>
 <path class="sp-star2" stroke="none" transform="scale(0)" d="M0 -22Q2 -2 22 0Q2 2 0 22Q-2 2 -22 0Q-2 -2 0 -22Z"/>
 <circle class="sp-dot" stroke="none" r="0"/></g></g>
-<image class="sp-png" href="icon-512.png" width="512" height="512" opacity="0"/></svg></div>`;
+<image class="sp-png" href="icon-512.png" width="512" height="512" opacity="0"/></svg>
+<div class="sp-txt"><div class="sp-date">${DATE}</div><div class="sp-sun">${SUNL}</div></div></div>`;
   document.body.appendChild(el);
 
   const q = s => el.querySelector(s);
   const bg = q(".sp-bg"), plate = q(".sp-plate"), svg = q("svg"), vec = q(".sp-vec"), png = q(".sp-png"),
         coast = q(".sp-coast"), head = q(".sp-head"), start = q(".sp-start"), star = q(".sp-star"), star2 = q(".sp-star2"),
-        dot = q(".sp-dot"), glow = q(".sp-glow"), rays = q(".sp-rays");
+        dot = q(".sp-dot"), glow = q(".sp-glow"), rays = q(".sp-rays"), txt = q(".sp-txt");
   const L = coast.getTotalLength();
   coast.style.strokeDasharray = L; coast.style.strokeDashoffset = L;
   const RAY = [];
@@ -90,6 +114,9 @@
     plate.style.cssText = `left:${lerp(0, tg.x, f)}px;top:${lerp(0, tg.y, f)}px;width:${pw}px;height:${ph}px;border-radius:${Math.min(pw, ph) * .21 * fs}px`;
     const ls = lerp(Math.min(W, H) * .92, tg.w, fs);
     svg.style.cssText = `width:${ls}px;height:${ls}px;left:${(pw - ls) / 2}px;top:${(ph - ls) / 2}px`;
+    // Date et soleil sous le logo : montent pendant le tracé, partent au début du passage vers la barre
+    const tk = oCubic(seg(t, T.txt)), tout = seg(t, [T.fly[0], T.fly[0] + 220]);
+    txt.style.cssText = `top:${(ph - ls) / 2 + ls * .76}px;opacity:${tk * (1 - tout)};transform:translateY(${(1 - tk) * 10}px)`;
     bg.style.opacity = 1 - f;
     if (tg.fade) plate.style.opacity = 1 - f;
   }
