@@ -1,6 +1,10 @@
-/* Animation de démarrage (splash.js) : plaque orange plein écran qui devient l'icône de la barre d'application */
+/* Animation de démarrage (splash.js), une fois par jour et par appareil : plaque orange plein écran qui devient l'icône de la barre d'application */
 #splash{position:fixed;inset:0;z-index:100;cursor:pointer;-webkit-tap-highlight-color:transparent}
 #splash .sp-bg{position:absolute;inset:0;background:var(--bg)}
 #splash .sp-plate{position:absolute;left:0;top:0;width:100%;height:100%;background:var(--logo);overflow:hidden}
 #splash svg{position:absolute;display:block}
 #splash .sp-vec{fill:#fff;stroke:#fff}   /* blanc du logo */
+#splash .sp-txt{position:absolute;left:0;right:0;padding:0 16px;text-align:center;color:#fff;pointer-events:none}
+#splash .sp-date{font:italic 800 clamp(30px,7vw,52px)/1 var(--font-num);letter-spacing:-.01em}
+#splash .sp-sun{margin-top:10px;font:400 12px/1.4 var(--font-mono);opacity:.85}
+#splash .sp-sun span{display:inline-block;white-space:nowrap;margin:0 .4em}
