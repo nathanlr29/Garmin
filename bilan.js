@@ -461,9 +461,9 @@ function blocksAnswer(B0) {
 }
 function blocksHtml(B) {
   if (B.length < 2 || !blocksAnswer(B)) return "";
-  const rows = B.map((b, k) => `<tr><td><span class="bm-bn">${k + 1}</span></td><td>${hms(b.d)}</td><td><b>${nf(b.w)} W</b></td><td>${b.h ? `${nf(b.h)}<small>moy.</small>` : "–"}</td><td>${b.hmax ? `${nf(b.hmax)}<small>max</small>` : "–"}</td></tr>`).join("");
+  const rows = B.map((b, k) => `<tr><td><span class="bm-bn">${k + 1}</span></td><td>${hms(b.d)}</td><td><b>${nf(b.w)} W</b></td><td>${b.h ? nf(b.h) : "–"}</td><td>${b.hmax ? nf(b.hmax) : "–"}</td></tr>`).join("");
   return `<section class="bm-sec"><h4>Blocs durs <small>repérés tout seuls, numérotés sur le graphe</small></h4><p class="bm-p">${blocksAnswer(B)}</p>
-    <table class="bm-tab bm-blk"><thead><tr><th>bloc</th><th>durée</th><th>puissance</th><th>cardio</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="bm-tab bm-blk"><thead><tr><th>bloc</th><th>durée</th><th>puissance</th><th>cardio moy.</th><th>cardio max</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="meth"><span>moyenne 60 s ≥ ${Math.round(BLK.thr * 100)} % de FTP (${nf(ftpNow())} W), 2 min au moins</span><span>n = ${B.length}</span></div></section>`;
 }
 function chart(box, st, cmp, blk) {

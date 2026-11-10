@@ -222,7 +222,8 @@
     const line = (P, col, w, dash) => P.length >= 2 ? `<path d="${P.map((p, i) => (i ? "L" : "M") + x(p.s).toFixed(1) + "," + y(p.v).toFixed(1)).join("")}" fill="none" stroke="${col}" stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ""} stroke-linejoin="round"/>` : "";
     // modèle de puissance critique : courbe CP + W'/t (de 1 min au bout de l'axe) et droite CP
     if (M.cp) { const C = M.cp, T = []; for (let t = Math.max(60, s0); t <= s1 * 1.0001; t *= 1.1) { const v = C.cp + C.wp / t; if (v <= hi && v >= lo) T.push({ s: t, v }); }
-      s += line(T, "var(--ink)", 1.2, "3 3");
+      s += line(T, "var(--ink)", 1.4, "2 3");
+      if (T.length) s += `<text x="${(x(T[0].s) + 6).toFixed(1)}" y="${(y(T[0].v) + 4).toFixed(1)}" font-size="11" fill="var(--ink)">modèle</text>`;
       if (C.cp >= lo && C.cp <= hi) s += `<line x1="${m.l}" x2="${m.l + iw}" y1="${y(C.cp).toFixed(1)}" y2="${y(C.cp).toFixed(1)}" stroke="var(--accent)" stroke-width="1" opacity=".55"/><text x="${m.l + 4}" y="${(y(C.cp) + 13).toFixed(1)}" font-size="11" font-weight="700" fill="var(--accent-ink)">CP ${fmt(C.cp)} W</text>`; }
     s += line(prev, "var(--muted)", 1.6, "5 4") + line(cur, "var(--accent)", 2.4);
     const dotsOf = (P, col, w) => P.map(p => `<circle cx="${x(p.s).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4" fill="${col}" stroke="var(--card)" stroke-width="1.5" data-w="${w}" data-s="${p.s}"/>`).join("");
