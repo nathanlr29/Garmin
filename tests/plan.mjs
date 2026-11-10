@@ -650,3 +650,16 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   }
   console.log("ok plan (muscu choisie) : gardée, pas de doublon, vélo recalculé autour, valeur inconnue ignorée");
 }
+
+// ---- 7. pas de muscu le matin qui suit une grosse journée (Récup, « Après une grosse journée », 10/11/2026)
+{
+  const { Plan } = load({ acts: [] }), c = Plan._cfg(), s = SIT.frais, mon = monday(1);
+  const calm = Plan._gen(mon, c, { ...s, prev: PREV[0] }), big = Plan._gen(mon, c, { ...s, prev: { hardSun: true } });
+  assert.ok(calm.items[0].muscu, "sans gros dimanche : muscu le lundi matin (config par défaut)");
+  assert.equal(big.items[0].muscu, null, "gros dimanche : pas de muscu le lundi matin, déplacée");
+  assert.equal(big.items.filter(i => i.muscu).length, calm.items.filter(i => i.muscu).length, "même nombre de séances de muscu");
+  // seulement 4 matins possibles : la muscu reste (on ne retire jamais une séance)
+  const g = Plan._gen(mon, CFGS.groupe, { ...s, prev: { hardSun: true } });
+  assert.equal(g.items.filter(i => i.muscu).length, 4, "4 matins pour 4 séances : rien n'est retiré");
+  console.log("ok plan (lendemain de grosse journée) : muscu déplacée quand c'est possible, jamais retirée");
+}

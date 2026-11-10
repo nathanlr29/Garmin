@@ -202,4 +202,46 @@ const ride = (d, mt, w) => ({ id: d, d: d + "T18:00:00", t: "VirtualRide", m: 30
   assert.match(R.lowNightsLine(L), /3 nuits sous ta zone sur la période, dont 1 le lendemain d'une grosse journée ; la dernière, le 12 nov\. : pas de cause visible/);
   assert.match(R.lowNightsLine([]), /Aucune nuit/);
 }
+// ------------------------------------------------------------------ 8) Après une grosse journée (10/11/2026)
+{
+  // 16 semaines : nuits normales (VFC 100, 7 h 30, endormi 22 h 30, lever 6 h), grosse sortie chaque dimanche (3 à 6 h),
+  // nuit suivante : VFC qui baisse avec la charge, endormi 1 h plus tard une semaine sur deux (nuit courte), 2e nuit : 102, 3e : 106.
+  const pad = n => String(n).padStart(2, "0"), key = t => `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+  const days = {}, acts = [];
+  for (let k = 0; k < 16 * 7; k++) { const t = new Date(2026, 6, 1 + k), d = key(t), p = new Date(t); p.setDate(p.getDate() - 1);
+    days[d] = { d, f: 1, bed: `${key(p)}T22:30`, wake: `${d}T06:00`, sl: 7.5 * 3600, awake: 300, deep: 5400, hrv: 100, hrvLo: 85, hrvUp: 120 }; }
+  let w = 0;
+  for (let k = 0; k < 16 * 7; k++) { const t = new Date(2026, 6, 1 + k); if (t.getDay() !== 0 || k < 35) continue;
+    const d = key(t), h = 3 + (w % 4), n = [1, 2, 3].map(i => { const x = new Date(t); x.setDate(x.getDate() + i); return key(x); });
+    acts.push({ ...ride(d, h * 3600, 184), t: "Ride", m: h * 30000, km: h * 30 });
+    if (!days[n[2]]) break;
+    const short = w % 2 === 1;
+    Object.assign(days[n[0]], { hrv: 100 - 5 * h - (short ? 8 : 0), bed: `${d}T${short ? "23:30" : "22:40"}`, sl: (short ? 6.5 : 7.4) * 3600, awake: 1500, deep: 3600 });
+    days[n[1]].hrv = 102; days[n[2]].hrv = 106; w++; }
+  const win = await load(acts, { days, profile: {} }), R = win.Recup._, D = win.Recup.days;
+  const r = R.reactions(D, acts);
+  assert.ok(r.n >= R.BIG.min, `assez de grosses journées (${r.n})`);
+  assert.ok(r.avg[0] <= -15 && r.avg[0] >= -35, `VFC de la nuit suivante en baisse (${r.avg[0]})`);
+  assert.equal(r.back, 2, "de retour dès la 2e nuit");
+  assert.ok(r.fit.b < 0, "plus la charge est grosse, plus la VFC baisse");
+  assert.ok(r.short && r.short.dev < r.short.okDev, "une nuit courte aggrave la baisse");
+  assert.ok(r.sleep.awake >= 12 && r.sleep.awake <= 20, `éveil en plus (${r.sleep.awake} min ; la moyenne de référence contient les grosses nuits d'avant)`);
+  assert.ok(r.sleep.deep <= -20, `moins de profond (${r.sleep.deep})`);
+  assert.ok(r.sleep.bed >= 10, "endormi plus tard");
+  const a = R.bigAnswer(r).replace(/<[^>]+>/g, "");
+  assert.match(a, /revient à ta normale dès la 2e nuit/); assert.match(a, /par tranche de 100 de charge/); assert.match(a, /Une nuit courte aggrave tout/);
+  assert.match(R.bigSleepLine(r), /min de plus éveillé/);
+  assert.match(R.lastBigLine(r), /^Dernière en date, dimanche/);
+  assert.match(R.bigAnswer({ rows: [], n: 3 }), /3 sur 8/, "pas assez de données");
+  assert.equal(R.bigPredict(null, 300), null);
+  assert.ok(R.bigPredict(r, 400) < R.bigPredict(r, 200), "prévision : plus de charge, plus de baisse");
+  // heure d'endormissement : lever 6 h − (sommeil médian des 30 nuits + éveil en plus), arrondie à 5 min
+  const last = D[D.length - 1].d, nx = (() => { const t = parseLocal(last); t.setDate(t.getDate() + 1); return key(t); })();
+  const bt = R.bedTarget(D, r, nx), want = Math.round((360 - 450 - r.sleep.awake) / 5) * 5 + 1440;
+  assert.equal(bt.at, want); assert.equal(bt.wakeTxt, "6 h 00");
+  const h = R.aheadHtml(r, { k: last, load: 300, label: "Sortie longue", dur: 240 }, bt).replace(/<[^>]+>/g, "");
+  assert.match(h, /Ta prochaine grosse journée : .*Sortie longue de 4 h 00 \(≈ 300 de charge\)/i); assert.ok(h.includes(`endormi vers ${bt.txt}`));
+  assert.match(R.aheadHtml(r, null, null), /Aucune grosse journée/);
+  assert.equal(R.muscuMornings(D, acts), null, "sans muscu : rien");
+}
 console.log("recup : ok");

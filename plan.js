@@ -202,6 +202,7 @@ function bikeScore(ko, K, longS, ph, prev) {
   if (ko.keys.length < K) sc -= 30 * (K - ko.keys.length);
   return sc;
 }
+const MUS_AFTER_BIG = 14;
 function muscuScore(mo, ko, longS, bikeDays, ph, prev) {
   const key = new Set(ko.keys.map(s => s.day)), long = longS ? longS.day : -9, testDay = (ph.test || ph.final) && ko.keys.length ? ko.keys[0].day : null;
   let sc = 0; const at = {};
@@ -213,10 +214,13 @@ function muscuScore(mo, ko, longS, bikeDays, ph, prev) {
     if (d + 1 === long) sc -= 45;                // veille de la sortie longue
     if (d === long) sc -= 100;
     if (testDay != null && d + 2 === testDay) sc -= 15;
-    if (key.has(d - 1) || d - 1 === long || (d === 0 && prev && prev.hardSun)) sc += 10;  // on enchaîne la fatigue, puis récupération
+    if (key.has(d - 1)) sc += 10;               // on enchaîne la fatigue, puis récupération
     if (!bikeDays.has(d + 1)) sc += 3;
     if (d === 6) sc -= 2;                        // le lundi suivant sera contraint
   }
+  // pas de muscu le matin qui suit une grosse journée (sortie longue, gros dimanche) : nuit déjà courte et hachée, et un matin de muscu
+  // te lève ~1 h plus tôt (Récup, « Après une grosse journée », 10/11/2026)
+  mo.forEach(x => { if (x.day === long + 1 || (x.day === 0 && prev && prev.hardSun)) sc -= MUS_AFTER_BIG; });
   for (let d = 0; d < 6; d++) { const a = at[d], b = at[d + 1]; if (a && b) { const p = [a, b].sort().join(); if (p === "push,upper" || p === "pull,upper") sc -= 8; } }  // mêmes muscles deux matins de suite
   if (prev && prev.musSun && at[0]) { const p = [prev.musSun, at[0]].sort().join(); if (p === "push,upper" || p === "pull,upper") sc -= 8; }
   const seq = mo.slice().sort((a, b) => a.day - b.day).map(x => MORDER.indexOf(x.s));
