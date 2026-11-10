@@ -91,4 +91,11 @@ assert.ok(RR.length >= 4 && RR.every(x => x.year.v >= (x.cur ? x.cur.v : 0) && x
 assert.ok(TT && ["up", "flat", "down"].includes(TT.dir));
 const v2 = P.vo2Tile(prof, NOW, { vo2: 65 }); assert.ok(v2.v > 40 && v2.v < 90);
 const sp2 = P.outSpeed(acts, NOW); assert.ok(sp2.vy > 20 && sp2.vy < 40, "vitesse dehors plausible");
+// modèle de puissance critique : CP 200 W et W' 20 kJ exacts sur 3 durées → retrouvés ; 1 seule durée → pas de modèle
+{ const mk = (k, v) => ({ id: k, t: "VirtualRide", n: "x", dt: new Date(NOW - 5 * 864e5), pc: { [k]: v } });
+  const m = P.cpModel([mk("180", 200 + 20000 / 180), mk("300", 200 + 20000 / 300), mk("1200", 200 + 20000 / 1200)].map(a => ({ ...a, pc: Object.fromEntries(Object.entries(a.pc).map(([k, v]) => [k, Math.round(v)])) })), NOW);
+  assert.ok(Math.abs(m.cp - 200) < 1.5 && Math.abs(m.wp - 20000) < 400 && m.n === 3 && m.r2 > .999, JSON.stringify(m));
+  assert.equal(P.cpModel([mk("300", 280)], NOW), null);
+  assert.match(P.cpLine(m, 230, 75), /15 % au-dessus/); assert.match(P.cpLine(m, 202, 75), /cohérente/); assert.match(P.cpLine(m, 180, 75), /en dessous/);
+  const mr = P.cpModel(acts, NOW); console.log("puissance critique réelle :", mr && `${Math.round(mr.cp)} W, W' ${Math.round(mr.wp)} J, n = ${mr.n}`); }
 console.log("perf : tous les tests passent");
