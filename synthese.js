@@ -405,7 +405,6 @@ const dLong = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", mon
 const dShort = t => new Date(t).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 const sgn = (v, d = 0) => Math.abs(v) < 5 * Math.pow(10, -d - 1) ? nf(0, d) : `${v < 0 ? "−" : "+"}${nf(Math.abs(v), d)}`;   // un écart qui arrondit à zéro s'écrit « 0 », sans signe
 const note = t => `<p class="note">${t}</p>`;
-const col = v => v >= 0 ? "var(--good)" : "var(--bad)";
 const esc_ = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 // bouton « ? » qui déplie une explication de 1 à 2 phrases
 const HELP = {
@@ -443,15 +442,29 @@ function spark(ser, color = "var(--accent)") {
   const W = 120, H = 34, t0 = ser[0].t, t1 = ser[ser.length - 1].t, lo = Math.min(...ser.map(p => p.v)), hi = Math.max(...ser.map(p => p.v)), r = hi - lo || 1;
   return `<svg viewBox="0 0 ${W} ${H}" class="crSpark" role="img" aria-label="Évolution"><path d="${ser.map((p, i) => (i ? "L" : "M") + (2 + (p.t - t0) / Math.max(1, t1 - t0) * (W - 4)).toFixed(1) + "," + (H - 3 - (p.v - lo) / r * (H - 6)).toFixed(1)).join("")}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
-// Mini-courbe du niveau (une seule courbe) avec le pic marqué et le point d'aujourd'hui
-function miniCurve(box, pts, pk) {
+// Mini-courbe du niveau avec le pic marqué et le point d'aujourd'hui ; dessous, le ruban de fraîcheur jour par jour (design v2)
+// coloré comme la jauge Fraîcheur (FRAIS), et la plus grosse journée de la période annotée (loads : charge par jour)
+const tsbColor = v => (FRAIS.segs.find(([hi]) => v <= hi) || FRAIS.segs[FRAIS.segs.length - 1])[1];
+function bigDay(pts, loads) {
+  if (!loads) return null; let best = null;
+  for (const p of pts) { const v = loads[ymd(new Date(p.t))] || 0; if (!best || v > best.v) best = { t: p.t, v }; }
+  return best && best.v >= 150 ? best : null;
+}
+function miniCurve(box, pts, pk, loads) {
   if (!box || pts.length < 2) return;
-  const W = Math.max(280, box.clientWidth || 340), H = 108, m = { l: 6, r: 10, t: 16, b: 18 }, iw = W - m.l - m.r, ih = H - m.t - m.b, t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const W = Math.max(280, box.clientWidth || 340), H = 138, m = { l: 6, r: 10, t: 16 }, cb = 84, rT = 104, rH = 13, iw = W - m.l - m.r, ih = cb - m.t, t0 = pts[0].t, t1 = pts[pts.length - 1].t;
   const lo = Math.min(...pts.map(p => p.ctl)), hi = Math.max(...pts.map(p => p.ctl)), r = hi - lo || 1;
   const x = t => m.l + (t - t0) / Math.max(1, t1 - t0) * iw, y = v => m.t + ih - (v - lo) / r * ih;
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Niveau d'entraînement sur 6 mois" class="symini"><g class="axis">`;
-  const d0 = new Date(t0); for (let k = 1; k < 9; k++) { const f = new Date(d0.getFullYear(), d0.getMonth() + k, 1); if (f.getTime() >= t1 - 10 * DAY) break; s += `<text x="${x(f.getTime())}" y="${H - 4}" text-anchor="middle">${MONTHS[f.getMonth()]}</text>`; }
-  s += `</g><path d="${pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + "," + y(p.ctl).toFixed(1)).join("")}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Niveau d'entraînement et fraîcheur jour par jour sur 6 mois" class="symini"><g class="axis">`;
+  const d0 = new Date(t0); for (let k = 1; k < 9; k++) { const f = new Date(d0.getFullYear(), d0.getMonth() + k, 1); if (f.getTime() >= t1 - 10 * DAY) break; s += `<text x="${x(f.getTime())}" y="${cb + 14}" text-anchor="middle">${MONTHS[f.getMonth()]}</text>`; }
+  const line = pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + "," + y(p.ctl).toFixed(1)).join("");
+  s += `</g><path d="${line}L${x(t1).toFixed(1)},${cb}L${x(t0).toFixed(1)},${cb}Z" fill="var(--accent)" fill-opacity=".13"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // ruban : une case par jour (les jours sans point, amorce, restent vides)
+  const bw = iw / Math.max(1, Math.round((t1 - t0) / DAY) + 1);
+  s += pts.map(p => `<rect x="${(x(p.t) - bw / 2).toFixed(1)}" y="${rT}" width="${Math.max(.6, bw - .5).toFixed(2)}" height="${rH}" fill="${tsbColor(p.tsb)}"><title>${dShort(p.t)} : fraîcheur ${p.tsb >= 0 ? "+" : ""}${nf(p.tsb)} (${formLabel(p.tsb)})</title></rect>`).join("");
+  const big = bigDay(pts, loads);
+  if (big) { const bx = x(big.t), anchor = bx > W - 70 ? "end" : bx < 70 ? "start" : "middle";
+    s += `<line x1="${bx}" x2="${bx}" y1="${rT - 3}" y2="${rT + rH + 3}" stroke="var(--ink)" stroke-width="1.2"/><text x="${bx}" y="${rT + rH + 15}" text-anchor="${anchor}" font-size="10.5" fill="var(--muted)">${dShort(big.t)} · plus grosse journée (${nf(big.v)} de charge)</text>`; }
   const last = pts[pts.length - 1];
   if (pk && pk.t >= t0 && pk.t < last.t) { const px = x(pk.t), anchor = px > W - 60 ? "end" : px < 60 ? "start" : "middle";
     s += `<circle cx="${px}" cy="${y(pk.v)}" r="4" fill="var(--card)" stroke="var(--accent)" stroke-width="2"/><text x="${px}" y="${Math.max(10, y(pk.v) - 8)}" text-anchor="${anchor}" font-size="11" font-weight="700" fill="var(--ink)">pic ${num(pk.v)}</text>`; }
@@ -474,12 +487,13 @@ const RECUPG = { min: 0, max: 100, segs: [[READY_LOW, RECUP_COL[3], "basse"], [6
 // ------------------------------------------------------------------ Rendu : les cinq blocs
 function blkProgress(D) {
   const P = D.prog; if (!P) return `<section class="card hud span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2>${note("Pas encore assez d'historique pour calculer ton niveau d'entraînement.")}</section>`;
-  const v = P.v30, arrow = !v ? "" : P.word === "en hausse" ? "↑" : P.word === "en baisse" ? "↓" : "→", c = P.word === "en hausse" ? "var(--good)" : P.word === "en baisse" ? "var(--bad)" : "var(--muted)";
-  const ref = v ? `<span class="syvar" style="color:${c}">${Math.abs(v.delta) < .5 ? "inchangé" : `${sgn(v.delta)} pt${Math.abs(v.delta) >= 1.5 ? "s" : ""}${v.pct == null ? "" : ` (${sgn(v.pct)} %)`}`} en 30 jours</span>` : `<span class="syvar">variation sur 30 jours : pas assez de recul</span>`;
+  const v = P.v30, arrow = !v ? "" : P.word === "en hausse" ? "↑" : P.word === "en baisse" ? "↓" : "→", cls = P.word === "en hausse" ? "good" : P.word === "en baisse" ? "bad" : "";
+  const ref = v ? `<span class="syvar"><span class="dpill ${cls}">${arrow} ${Math.abs(v.delta) < .5 ? "inchangé" : `${sgn(v.delta)} pt${Math.abs(v.delta) >= 1.5 ? "s" : ""}${v.pct == null ? "" : ` (${sgn(v.pct)} %)`}`}</span> en 30 jours</span>` : `<span class="syvar">variation sur 30 jours : pas assez de recul</span>`;
   const pk = P.peak ? `<small>${P.atPeak ? "ton plus haut de l'année" : `pic de l'année : ${nf(P.peak.v)} (${dayMonth(P.peak.t)}) · tu es à ${nf(P.share)} %`}</small>` : "";
   return `<section class="card hud span12 syblk" id="syProg"><h2>Est-ce que je progresse ?</h2><p class="syans">${P.text}</p>
     <div class="synum"><span class="crbig syctl">${nf(P.cur)}</span><div class="synumt"><span class="sylab">niveau d'entraînement ${q("niveau")}</span>${ref}${pk}</div></div>${helpP("niveau")}
-    <div id="syMini"></div>${D.pal ? `<p class="syobl">${D.pal} <a href="#plan" data-go="plan" role="button">Voir dans le Plan</a></p>` : ""}</section>`;
+    <div id="syMini"></div><div class="legend bm-leg syrib">${FRAIS.segs.slice().reverse().map(([, c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}<span>ruban : fraîcheur jour par jour</span></div>
+    <div class="meth"><span>charge 42 j / 7 j · fenêtre de ${FIT_DAYS} j, comme le Plan</span><span>6 derniers mois</span></div>${D.pal ? `<p class="syobl">${D.pal} <a href="#plan" data-go="plan" role="button">Voir dans le Plan</a></p>` : ""}</section>`;
 }
 function blkToday(D) {
   const A = D.adv, f = D.fit[D.fit.length - 1], rec = D.rec;
@@ -536,9 +550,15 @@ function blkGoals(D) {
       <div class="syobj"><div class="syoh"><b>Ultra : ${num(ULTRA.km)} km à ${num(ULTRA.kmh)} km/h</b>${O.ultra.ok ? `<span class="syverd" style="color:var(--good)">Prêt</span>` : ""}</div><p class="syobl">${O.ultra.text}</p></div></div>
     <p class="note">Objectifs au ${endLabel(G.date)} : ${num(G.ftp)} W et ${num(G.vo2, G.vo2 % 1 ? 1 : 0)} de VO2max. <a href="#plan" data-go="plan" role="button">Les modifier dans le Plan</a>. FTP mesurée : meilleur 20 min × 95 % ou meilleur 1 h.</p></section>`;
 }
+// alerte zone grise : la barre d'intensité des 4 dernières semaines (zones.js), vélo + course, seulement quand l'alerte est active
+function grayBar(D) {
+  if (!window.Zones || !Zones.zbar) return "";
+  const g = Zones._.agg(D.acts, "all", D.now - Zones._.WIN * DAY, D.now); if (!g.total) return "";
+  return Zones.zbar(g.sec) + `<div class="meth"><span>fréquence cardiaque · vélo + course · ${Zones._.WIN} j</span><span>n = ${g.n} séances</span></div>`;
+}
 function blkDet(D) {
   const rows = DETECTORS.filter(([k]) => D.det.res[k].active).map(([k, , , title]) => { const t = DET_TXT[k](D.det.res[k]);
-    return `<div class="sydet on"><div class="syd1"><span class="sydot2" style="background:var(--accent)"></span><b>${title}</b></div><p class="bm-p">${t.why}</p><p class="bm-p sytip">À faire : ${t.tip}</p></div>`; }).join("");
+    return `<div class="sydet on"><div class="syd1"><span class="sydot2" style="background:var(--accent)"></span><b>${title}</b></div><p class="bm-p">${t.why}</p>${k === "gray" ? grayBar(D) : ""}<p class="bm-p sytip">À faire : ${t.tip}</p></div>`; }).join("");
   const any = !!rows, nod = DETECTORS.every(([k]) => D.det.res[k].status === "nodata");
   return `<section class="card span12 syblk" id="syDet"><h2>Quelque chose cloche ?</h2><p class="syans ${any ? "" : "syokp"}">${any ? "" : nod ? "" : "✓ "}${detAnswer(D.det.res)}</p>${rows ? `<div class="sydets">${rows}</div>` : ""}</section>`;
 }
@@ -627,12 +647,13 @@ function plotWeeks(D) {
 function indic(D) {
   const tile = (go, l, v, u, sub, d, sp, c) => `<div class="tile crtile syind" role="button" tabindex="0" data-go="${go}" title="Ouvrir"><div class="l">${l}</div><div class="v"${c ? ` style="color:${c}"` : ""}>${v}<small>${u}</small></div>
     <div class="crd">${d}</div>${sp}<div class="s">${sub}</div></div>`;
-  const dv = (v, dg, unit = "") => v ? `<span>30 j <span style="color:${col(v.delta)}">${v.delta === 0 ? "=" : sgn(v.delta, dg)}${unit}</span></span>` : `<span>30 j –</span>`;
+  const pc = d => d > 0 ? "good" : d < 0 ? "bad" : "";   // FTP, VO2max, récup : plus haut = mieux
+  const dv = (v, dg, unit = "") => v ? `<span><span class="dpill ${pc(v.delta)}">${v.delta === 0 ? "=" : sgn(v.delta, dg)}${unit}</span> sur 30 j</span>` : `<span>30 j –</span>`;
   const T = [];
   T.push(tile("plan", "FTP", D.ftp.cur ? nf(D.ftp.cur) : "–", " W", `utilisée par le Plan${D.ftp.meas ? ` · mesurée ${nf(D.ftp.meas.v)} W` : ""}`, dv(D.ftp.v30, 0, " W"), spark(D.ftp.ser)));
   T.push(tile("plan", "VO2max", D.vo2.cur != null ? nf(D.vo2.cur, 1) : "–", "", D.vo2.date ? `mesurée le ${dLong(D.vo2.date)}` : "", dv(D.vo2.v30, 1), spark(D.vo2.ser)));
   T.push(tile("course", "Allure seuil", D.thr.pace ? window.paceTxt(D.thr.pace) : "–", D.thr.pace ? " /km" : "", D.thr.src, `<span>pas d'historique (seuil unique)</span>`, ""));
-  T.push(tile("recup", "Récup du jour", D.rec.score != null ? nf(D.rec.score) : "–", D.rec.score != null ? " /100" : "", D.rec.label || "pas de nuit enregistrée", D.rec.v ? `<span>vs 30 j <span style="color:${col(D.rec.v.delta)}">${D.rec.v.delta === 0 ? "=" : sgn(D.rec.v.delta, 0)}</span></span>` : `<span>vs 30 j –</span>`, spark(D.rec.ser, D.rec.color), D.rec.color));
+  T.push(tile("recup", "Récup du jour", D.rec.score != null ? nf(D.rec.score) : "–", D.rec.score != null ? " /100" : "", D.rec.label || "pas de nuit enregistrée", D.rec.v ? `<span><span class="dpill ${pc(Math.round(D.rec.v.delta))}">${Math.round(D.rec.v.delta) === 0 ? "=" : sgn(D.rec.v.delta, 0)}</span> vs ta moyenne 30 j</span>` : `<span>vs 30 j –</span>`, spark(D.rec.ser, D.rec.color), D.rec.color));
   return `<div class="crtiles syinds">${T.join("")}</div>`;
 }
 
@@ -752,7 +773,7 @@ function render() {
   if (!(typeof S !== "undefined" && S.all.length)) { box.innerHTML = `<div class="card empty"><b>Pas encore de données</b>Lance le workflow « Mise à jour Garmin » puis reviens ici.</div>`; return; }
   const D = S_.D = gather();
   box.innerHTML = `<div class="grid">${blkReleve(D)}${blkProgress(D)}${blkToday(D)}${blkWx()}${blkGoals(D)}${blkDet(D)}${blkWeek(D)}${detailsHtml(D)}</div>`;
-  if (D.prog) miniCurve(document.getElementById("syMini"), D.fit.slice(-CURVE_DAYS), D.prog.peak);
+  if (D.prog) miniCurve(document.getElementById("syMini"), D.fit.slice(-CURVE_DAYS), D.prog.peak, D.loads);
   const det = document.getElementById("syDetails"); if (det && det.open) plotDetails(D);
   bind(box);
   loadWx();
