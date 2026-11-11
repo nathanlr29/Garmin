@@ -579,8 +579,9 @@ function runAdjust(out, o) {
     else if (TYPES[r.t].hard) step(`rready-${ymd(now)}`, `Récupération à ${rd}/100 ce matin : « ${nm} » remplacée par un footing facile de ${fmtMin(r.dur)}.`, () => { r.t = "rfoot"; r.changed = true; });
   }
   // jauge de reprise en « risque élevé » : courses restantes de la semaine réduites à des footings de 20 min
+  // une course réglée à la main (durée ou type choisis dans le Plan) n'est jamais touchée : ton choix passe avant
   if (cur && run.zone === RUN_RISK_ZONE) {
-    const L = items.filter(x => x.day >= td && x.run && x.run.st === "plan" && !(x.run.t === "rfoot" && x.run.dur <= RUN_RISK_DUR));
+    const L = items.filter(x => x.day >= td && x.run && x.run.st === "plan" && !x.run.own && !(x.run.t === "rfoot" && x.run.dur <= RUN_RISK_DUR));
     if (L.length) step("rgauge", `Jauge de reprise à ${nf(run.ratio, 1)} (risque élevé au-delà de 1,5 : tu as couru bien plus ces 7 derniers jours que d'habitude) : ${L.length > 1 ? `les ${L.length} courses restantes passent` : "la course restante passe"} en footing${L.length > 1 ? "s" : ""} de ${RUN_RISK_DUR} min.`,
       () => L.forEach(x => { x.run.t = "rfoot"; x.run.dur = RUN_RISK_DUR; x.run.changed = true; delete x.run.cool; }));
   }

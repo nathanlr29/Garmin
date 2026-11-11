@@ -580,6 +580,11 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
     const ch = W.changes.find(x => x.id === "rgauge"); assert.ok(ch && /^Jauge de reprise à 1[.,]6\d* \(risque élevé au-delà de 1,5/.test(ch.text) && /les 2 courses restantes passent en footings de 20 min/.test(ch.text), ch && ch.text);
     h.store.set("planUndo:2026-11-02", JSON.stringify(["rgauge"])); assert.equal(runs(eff(h, 1, 8, { run: { zone: 3, ratio: 1.62 } })), "rthr/40/missed rfoot/40 - - rlong/50 - -", "annulable");
     for (const z of [0, 1, 2, null]) assert.equal(eff(setup(), 1, 8, { run: { zone: z, ratio: 1.4 } }).changes.filter(x => x.id === "rgauge").length, 0, `zone ${z} : rien`);
+    // course réglée à la main (durée choisie dans le Plan) : la jauge ne la ramène pas à 20 min
+    h = setup(); h.store.set("planOv:2026-11-02", JSON.stringify({ 4: { run: { t: "rfoot", dur: 45 } } }));
+    W = eff(h, 1, 8, { run: { zone: 3, ratio: 1.62 } });
+    assert.equal(runs(W), "rthr/40/missed rfoot/20 - - rfoot/45 - -", "vendredi réglé à 45 min : gardé");
+    assert.ok(/la course restante passe en footing de 20 min/.test(W.changes.find(x => x.id === "rgauge").text));
     // semaine passée : pas d'ajustement (la jauge est celle d'aujourd'hui)
     h = setup(); h.clock.t = new Date(2026, 10, 12, 8).getTime();
     const Wp = h.Plan._eff(MON, C5, { form: FORM5, ready: { today: 30, last: 30, avg3: 30 }, prev: PREV[0], rc: h.Plan._run.cfg(C5), run: runCtx({ prevMin: 120, zone: 3, ratio: 2 }) });
