@@ -788,8 +788,12 @@ function mountIA() {
   const T = sels => IA.textOf(sels);
   IA.mount(document.getElementById("syToday"), { kind: "question", title: "Demande à ton entraîneur", ask: true, placeholder: "Ex. : je peux faire 150 km aujourd'hui ?" });
   IA.mount(document.getElementById("syGoals"), { kind: "objectifs", title: "Point de l'entraîneur sur tes objectifs", button: "Faire le point",
+    about: () => `Point sur ses objectifs (FTP, VO2max, ultra), demandé ${IA.rel(new Date())}.`,
     ctx: () => T(["#syGoals", "#syProg"]) });
   IA.mount(document.getElementById("syWeek"), { kind: "semaine", title: "Bilan de l'entraîneur", button: "Bilan de la semaine",
+    about: () => { const now = new Date(), wd = (now.getDay() + 6) % 7;
+      return document.getElementById("syReleve") ? `Bilan de la semaine dernière (du lundi au dimanche, relevé affiché), demandé ${IA.rel(now)}, au début de la semaine suivante.`
+        : `Bilan de la semaine en cours, du lundi à ${IA.rel(now)}${wd < 6 ? ` : elle n'est pas finie, il reste ${6 - wd} jour${6 - wd > 1 ? "s" : ""} après aujourd'hui` : ", son dernier jour"}.`; },
     ctx: () => T(["#syReleve", "#syWeek", "#syProg .syans", "#syDet"]) });
 }
 function bind(box) {

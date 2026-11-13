@@ -278,7 +278,8 @@ footer{margin-top:28px;font-size:12.5px;color:var(--muted);text-align:center}
 .iabox .iaq{display:flex;gap:8px}
 .iabox .iaq input{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--raised);color:var(--ink);font:inherit}
 .iabox > .btn{justify-self:start}
-.iabox .iat{margin:0;white-space:pre-line;line-height:1.5;padding-left:10px;border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 10px;border-radius:0 var(--r-md) var(--r-md) 0}
+.iatx p{margin:0 0 8px}.iatx ul{margin:0 0 8px;padding-left:18px}.iatx li{margin:2px 0}.iatx > :last-child{margin-bottom:0}
+.iabox .iat{margin:0;line-height:1.5;padding-left:10px;border-left:3px solid var(--accent);background:var(--accent-soft);padding:8px 10px;border-radius:0 var(--r-md) var(--r-md) 0}
 .iabox .iam{margin:0}
 .iabtn{margin-left:auto;align-self:center;display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);
   border-radius:999px;padding:6px 12px;font:600 14px/1 var(--font-ui);cursor:pointer;flex:0 0 auto}
@@ -287,8 +288,8 @@ footer{margin-top:28px;font-size:12.5px;color:var(--muted);text-align:center}
 /* conversation avec l'entraîneur (fenêtre .bm de plan.css) */
 .iachat{width:min(680px,100%);display:flex;flex-direction:column}
 .iamsgs{display:flex;flex-direction:column;gap:10px;min-height:120px;max-height:min(60vh,560px);overflow-y:auto;padding:2px 0 8px}
-.iamsg{max-width:88%;white-space:pre-line;line-height:1.5;padding:9px 12px;border-radius:var(--r-md);font-size:15px;overflow-wrap:anywhere}
-.iamsg.me{align-self:flex-end;background:var(--raised);border:1px solid var(--line)}
+.iamsg{max-width:88%;line-height:1.5;padding:9px 12px;border-radius:var(--r-md);font-size:15px;overflow-wrap:anywhere}
+.iamsg.me{white-space:pre-line;align-self:flex-end;background:var(--raised);border:1px solid var(--line)}
 .iamsg.ia{align-self:flex-start;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 var(--r-md) var(--r-md) 0}
 .iamsg.busy{color:var(--muted)}
 .iasugg{flex-wrap:wrap;margin:6px 0 10px}

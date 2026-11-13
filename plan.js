@@ -1278,10 +1278,15 @@ function importLink() {
 // séance prévue un jour donné (pour le bilan) : rien avant la mise en route de ce plan.
 // sport "bike" : la séance vélo ou null ; "run" : la séance course ou null ; sans argument : la séance vélo (avec `run` si une course est prévue le même jour),
 // sinon la course seule (`sport: "run"`), sinon null
-function plannedFor(key, sport) {
+function planItem(key) {
   const since = store2.get("planSince"); if (!since || key < since) return null;
   const d = parseYmd(key), mon = mondayOf(d), form = fitness(), ready = readiness();
-  const W = withWorkouts(effective(mon, getCfg(), ctxFor(mon, form, ready))), it = W.items[dayIndex(d, mon)];
+  return withWorkouts(effective(mon, getCfg(), ctxFor(mon, form, ready))).items[dayIndex(d, mon)] || null;
+}
+// séance muscu placée ce jour-là (pour l'entraîneur IA) : { s, label, st } ou null
+function muscuOn(key) { const it = planItem(key), m = it && it.muscu; return m && MUSCU[m.s] ? { s: m.s, label: MUSCU[m.s].l, st: m.st } : null; }
+function plannedFor(key, sport) {
+  const it = planItem(key);
   if (!it) return null;
   const run = it.run ? { day: it.day, date: it.date, t: it.run.t, dur: it.run.dur, slot: it.run.slot, w: it.run.w, label: TYPES[it.run.t].l, sport: "run", st: it.run.st, acts: it.run.acts } : null;
   const bike = it.bike ? { day: it.day, date: it.date, t: it.bike.t, dur: it.bike.dur, place: it.bike.place, w: it.bike.w, label: TYPES[it.bike.t].l, ftp: profile().ftp, st: it.bike.st, acts: it.bike.acts } : null;
@@ -1304,7 +1309,7 @@ async function open() {
   if (!ok) return;
   render();
 }
-window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, muscuOn, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 migrateFtp();  // dès le chargement : la Synthèse et la charge lisent la même FTP que le Plan, même sans avoir ouvert le Plan
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));

@@ -199,7 +199,7 @@ async function openRun(a, body) {
   body.innerHTML = headerRun(a) + tilesRun(a, an) + verdictRun(a, an) + (st ? `<section class="bm-sec"><h4>Déroulé <small>allure${st.h ? ", cardio" : ""}${st.a ? " et altitude" : ""}</small></h4><div id="bmChart"></div></section>` : "")
     + zonesRunHtml(a, an) + enduRunHtml(an) + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
     + aiHtml(a) + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
-  aiBind(a, body);
+  aiBind(a, body, st);
   if (st) chartRun(document.getElementById("bmChart"), st, thr);
 }
 
@@ -303,46 +303,54 @@ async function open(id) {
     + blocksHtml(blk) + (co ? planTable(co) : "") + zonesHtml(a, an) + enduHtml(an) + (!isIndoor(a) && st && st.g ? `<section class="bm-sec" id="bmWind"><h4>Vent subi</h4><p class="note">Récupération de la météo du jour…</p></section>` : "")
     + (!st ? `<p class="note">${noStreamWhy(a)}</p>` : "")
     + aiHtml(a) + `<div class="bm-foot"><a href="https://connect.garmin.com/modern/activity/${a.id}" target="_blank" rel="noopener">Voir sur Garmin Connect ↗</a><button class="btn2" data-bmclose>Fermer</button></div>`;
-  aiBind(a, body);
+  aiBind(a, body, st);
   if (st) chart(document.getElementById("bmChart"), st, co ? { plan, shift: co.shift } : null, blk);
   if (!isIndoor(a) && st && st.g) { const w = await windFor(st).catch(() => null), box = document.getElementById("bmWind"); if (box) box.innerHTML = windHtml(a, w); }
 }
 // ------------------------------------------------------------------ Commentaire de l'entraîneur (IA, Gemini par l'Apps Script de synchro)
-// Demande de Nathan du 29/10/2026. À la demande seulement (bouton), jamais automatique. Le texte envoyé = ce que le bilan affiche
-// (tuiles, constat, zones, prévu/réalisé), sans le nom de la sortie (il peut contenir un lieu), plus toutes les données de
-// l'entraîneur (IA.data : profil, zones, nuits, séances des 14 jours, Plan). La phrase calculée du bilan reste en premier.
-// Gardé sur l'appareil (aiNote:<id>, 40 au plus) pour ne pas redemander.
-const K_AI = "aiNote:";
+// À la demande seulement (bouton), jamais automatique. Refonte du 13/11/2026 : l'IA complète le bilan au lieu de le redire.
+// Envoyé (IA.full) : le sujet (séance située par rapport à maintenant : « faite aujourd'hui à 18 h 22 ») ; ce que le bilan affiche
+// (tuiles, constat, zones, prévu / réalisé), sans le nom de la sortie (il peut contenir un lieu) ; ce qu'il n'affiche pas (déroulé
+// par tranches, séances comparables, nuit d'avant, séances du même jour et des 3 jours d'avant : IA.sessionExtra) ; puis les données
+// générales. Gardé sur l'appareil (aiNote:<id>, 40 au plus) avec sa date ; un commentaire d'avant la refonte (sans v) n'est plus montré.
+const K_AI = "aiNote:", AI_NOTE_V = 2;
 function aiHtml(a) {
   if (!window.Sync || !Sync.configured || !Sync.configured()) return "";
-  const c = LS.get(K_AI + a.id, null);
-  return `<section class="bm-sec" id="bmAi"><h4>Commentaire de l'entraîneur <small>IA (Gemini), à partir de ce bilan et de tes données</small></h4>
-    ${c && c.t ? `<p class="bm-p">${esc(c.t)}</p><button class="btn2" data-ai="1">Redemander</button>` : `<button class="btn2" data-ai="1">Demander un commentaire</button>`}<p class="note" id="bmAiMsg"></p></section>`;
+  let c = LS.get(K_AI + a.id, null); if (!c || c.v !== AI_NOTE_V || !c.t) c = null;
+  const txt = c ? (window.IA && IA.html ? IA.html(c.t) : `<p>${esc(c.t)}</p>`) : "";
+  return `<section class="bm-sec" id="bmAi"><h4>Commentaire de l'entraîneur <small>IA (Gemini) : ce que le bilan ne dit pas${c && window.IA && IA.stamp ? ` · demandé ${IA.stamp(c.at)}` : ""}</small></h4>
+    ${c ? `<div class="bm-p iatx">${txt}</div><button class="btn2" data-ai="1">Redemander</button>` : `<button class="btn2" data-ai="1">Demander un commentaire</button>`}<p class="note" id="bmAiMsg">${c && c.old ? esc(c.old) : ""}</p></section>`;
 }
-function aiCtx(a, body) {
+// texte du bilan affiché : libellés, valeurs et paragraphes séparés (le clone n'est pas affiché, textContent n'a pas de retours à la ligne)
+function aiPage(body) {
   const box = body.cloneNode(true);
-  box.querySelectorAll("h3, #bmChart, .bm-foot, #bmAi, .bm-x, svg").forEach(e => e.remove());
-  const P = window.Plan, goal = P && P._cfg && P._cfg().goal, ftp = P && P.ftp ? P.ftp() : null;
-  const extra = [`Sport : ${isRun(a) ? "course à pied" : "vélo"}.`, ftp ? `FTP de travail : ${Math.round(ftp)} W.` : "",
-    goal && goal.ftp ? `Objectif : FTP ${goal.ftp} W${goal.vo2 ? `, VO2max ${goal.vo2}` : ""}${goal.date ? ` pour le ${goal.date}` : ""}.` : ""].filter(Boolean).join(" ");
-  // le clone n'est pas affiché : textContent sans retours à la ligne, on sépare nous-mêmes libellés, valeurs et paragraphes
-  box.querySelectorAll(".tile .l, .tile .v").forEach(e => e.append(" : "));
-  box.querySelectorAll(".tile, p, h4, li, tr, .bm-sub, [title]").forEach(e => { if (e.title) e.append(` (${e.title})`); e.append("\n"); });
-  const seance = (extra + "\n" + box.textContent.replace(/[ \t]+/g, " ").replace(/ *\n[\s]*/g, "\n")).trim().slice(0, 5500);
-  return window.IA ? IA.full("Séance analysée :\n" + seance) : seance;
+  box.querySelectorAll(".bm-head, #bmChart, .bm-foot, #bmAi, svg, .bm-zbar, .bm-leg").forEach(e => e.remove());   // l'en-tête porte le nom de la sortie
+  box.querySelectorAll("*").forEach(e => e.append(" "));
+  box.querySelectorAll(".tile .l").forEach(e => e.append(" : "));
+  box.querySelectorAll(".tile .s").forEach(e => { const t = e.textContent.trim(); e.textContent = t ? ` (${t})` : ""; });
+  box.querySelectorAll(".bm-zleg span").forEach(e => e.append(" ; "));
+  box.querySelectorAll("h4").forEach(e => e.append(" : "));
+  box.querySelectorAll(".tile, p, h4, li, tr, .bm-zleg").forEach(e => e.append("\n"));
+  box.querySelectorAll("td, th").forEach(e => e.append(" | "));
+  return box.textContent.replace(/[ \t\u00a0]+/g, " ").replace(/ ([.,)])/g, "$1").replace(/\( /g, "(").replace(/ *\n[\s]*/g, "\n").replace(/ : :/g, " :").replace(/[;|:] *\n/g, "\n").trim().slice(0, 4200);
 }
-function aiBind(a, body) {
+function aiCtx(a, body, st) {
+  const page = aiPage(body);
+  if (!window.IA || !IA.full) return page;
+  return IA.full({ kind: "seance", about: IA.sessionAbout(a), page, extra: IA.sessionExtra(a, st), focus: a.id });
+}
+function aiBind(a, body, st) {
   const sec = body.querySelector("#bmAi"); if (!sec) return;
   sec.querySelector("[data-ai]").onclick = async e => {
     const btn = e.currentTarget, msg = sec.querySelector("#bmAiMsg");
     btn.disabled = true; msg.textContent = "L'entraîneur lit ton bilan…";
     if (window.IA) await IA.ready();
-    const ctx = aiCtx(a, body);
+    const ctx = aiCtx(a, body, st);
     try {
       const j = await Sync.ai({ kind: "seance", ctx });
-      try { localStorage.setItem(K_AI + a.id, JSON.stringify({ t: j.text, at: Date.now(), m: j.model }));
+      try { localStorage.setItem(K_AI + a.id, JSON.stringify({ t: j.text, at: Date.now(), m: j.model, v: AI_NOTE_V, old: window.IA && IA.stale ? IA.stale(j) : "" }));
         const ks = Object.keys(localStorage).filter(k => k.startsWith(K_AI)).sort((x, y) => (LS.get(x, {}).at || 0) - (LS.get(y, {}).at || 0)); ks.slice(0, Math.max(0, ks.length - 40)).forEach(k => localStorage.removeItem(k)); } catch (err) {}
-      sec.outerHTML = aiHtml(a); aiBind(a, body);
+      sec.outerHTML = aiHtml(a); aiBind(a, body, st);
     } catch (err) { msg.textContent = "Commentaire indisponible : " + err.message + "."; btn.disabled = false; }
   };
 }
