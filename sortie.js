@@ -485,6 +485,7 @@ async function compute() {
   renderProfile(res); renderClimbs(res); renderTips(res, wx); renderNutrition(res); renderTimeline(res, wx);
   // briefing de l'entraîneur (IA, à la demande) : lit l'analyse affichée au moment du clic (arrêts compris), jamais le nom ni le départ
   if (window.IA) IA.mount($("soVerdict"), { kind: "sortie", title: "Briefing de l'entraîneur", button: "Préparer le briefing",
+    about: () => { const d = startOf(settings()); return `Briefing d'une sortie vélo à venir, pas encore faite : départ prévu ${IA.rel(d)} à ${IA.hh(d)}.`; },
     ctx: () => IA.textOf(["#soTiles", "#soVerdict", "#soClimbs", "#soTips", "#soNut", "#soStops .stadv"]) });
   // points d'arrêt (OpenStreetMap) : en dernier, la sortie s'affiche même si le service ne répond pas
   if (window.Arrets && SO.res === res) Arrets.update({ P, r: res, map: SO.map, nut: SO.nut, route: SO.route,

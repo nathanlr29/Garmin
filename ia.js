@@ -1,12 +1,15 @@
 "use strict";
-// L'entraîneur IA (Gemini par l'Apps Script de synchro, Sync.ai). Demandes de Nathan des 30/10/2026 : « intègre Gemini partout »,
-// puis « que ce soit vraiment un assistant » : il reçoit les données brutes (profil, zones, forme, 14 dernières nuits, séances des
-// 14 derniers jours, Plan des 7 prochains jours) en plus de la page ouverte, analyse les causes et propose des séances précises.
+// L'entraîneur IA (Gemini par l'Apps Script de synchro, Sync.ai). Refonte du 13/11/2026 (demande de Nathan : commentaires incohérents,
+// un footing du jour appelé « d'hier soir », la séance du lendemain recopiée du Plan) : Gemini COMPLÈTE l'analyse de l'outil.
+// Le texte envoyé est rangé en blocs : le sujet ; ce que la page affiche déjà (à ne pas redire) ; ce que la page n'affiche pas
+// (déroulé par tranches, séances comparables, ce qui entoure la séance) ; les données générales. Chaque date porte son repère
+// (aujourd'hui, hier, il y a 3 j) et chaque mesure son verdict (sous la zone, chargé) : le modèle ne calcule ni jour ni seuil.
 // - IA.chat() : conversation (bouton « Entraîneur » de la barre du haut, et la question de la Synthèse) ;
-// - IA.mount() : encart à la demande dans une carte existante (récup, semaine, objectifs, sortie).
+// - IA.mount() : encart à la demande dans une carte existante (récup, semaine, objectifs, sortie) ;
+// - IA.full() : texte envoyé (aussi utilisé par le bilan de séance).
 // Jamais d'appel automatique ; le script plafonne à 60 demandes par jour. Ni nom de sortie, ni lieu, ni point de départ envoyés.
 (() => {
-const K = "aiBox:", KEEP = 60, K_CHAT = "aiChat", MAX_CTX = 13000, MAX_TURNS = 20;
+const K = "aiBox:", KEEP = 60, K_CHAT = "aiChat", MAX_CTX = 15000, MAX_TURNS = 20, AI_V = 2;
 const esc_ = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
@@ -16,59 +19,310 @@ function lsPut(k, v) {
   try { const ks = Object.keys(localStorage).filter(x => x.startsWith(K)).sort((a, b) => ((lsGet(a) || {}).at || 0) - ((lsGet(b) || {}).at || 0));
     ks.slice(0, Math.max(0, ks.length - KEEP)).forEach(x => localStorage.removeItem(x)); } catch (e) {}
 }
-const n = (v, d = 0) => v == null || !isFinite(v) ? "?" : (+v).toFixed(d).replace(".", ",");
-const hmn = s => { if (!(s > 0)) return "?"; const m = Math.round(s / 60); return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
-const ymd = d => window.Charge ? Charge.ymd(d) : d.toISOString().slice(0, 10);
-const day = d => new Date(d).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "numeric" });
+const n = (v, d = 0) => v == null || !isFinite(v) ? "?" : (+v).toFixed(d).replace(".", ",").replace("-", "−");
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const last = a => Array.isArray(a) && a.length ? a[a.length - 1][1] : null;
+const acts = () => (typeof S !== "undefined" && S && S.all) || [];
+const tss = a => { try { return Charge.tssOf(a) || 0; } catch (e) { return 0; } };
 
-// ------------------------------------------------------------------ données envoyées (texte compact, sans nom ni lieu)
-function data(now = new Date()) {
+// ------------------------------------------------------------------ repères de date et libellés (le modèle ne calcule aucun jour)
+const DAY = 864e5, WD = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const day0 = d => { const x = new Date(d); return new Date(x.getFullYear(), x.getMonth(), x.getDate()); };
+const addD = (d, k) => { const x = day0(d); x.setDate(x.getDate() + k); return x; };
+const fromYmd = s => { const p = String(s).slice(0, 10).split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); };
+const gap = (d, now) => Math.round((day0(d) - day0(now)) / DAY);   // jours de calendrier
+const dm = d => { d = new Date(d); return `${WD[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+function rel(d, now) {
+  const g = gap(d, now);
+  return `${g === 0 ? "aujourd'hui" : g === -1 ? "hier" : g === -2 ? "avant-hier" : g === 1 ? "demain" : g === 2 ? "après-demain" : g < 0 ? `il y a ${-g} j` : `dans ${g} j`} (${dm(d)})`;
+}
+const hh = d => { d = new Date(d); return `${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`; };
+const part = h => h < 5 ? "nuit" : h < 12 ? "matin" : h < 14 ? "midi" : h < 18 ? "après-midi" : h < 22 ? "soir" : "fin de soirée";
+const dur = s => { if (!(s > 0)) return "?"; const m = Math.round(s / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
+const paceS = p => `${Math.floor(Math.round(p) / 60)}:${String(Math.round(p) % 60).padStart(2, "0")} /km`;
+const pace = (m, s) => m > 0 && s > 0 ? paceS(s / (m / 1000)) : null;
+const meters = a => a.m > 0 ? a.m : (a.km || 0) * 1000;
+const sportOf = a => window.Charge && Charge.sportOf ? Charge.sportOf(a) : /run/i.test(a.t) ? "run" : /ride|cycl|bik/i.test(a.t) ? "bike" : /strength/.test(a.t) ? "strength" : "other";
+const indoor = a => sportOf(a) === "run" ? /treadmill|virtual/.test(a.t) : a.t === "VirtualRide" || a.tr === 1;
+const MUS = { push: "Push", pull: "Pull", legs: "Legs (jambes)", upper: "Upper" };
+function sportFr(a) {
+  const s = sportOf(a);
+  if (s === "run") return indoor(a) ? "course sur tapis" : "course à pied";
+  if (s === "bike") return indoor(a) ? "home trainer" : "vélo dehors";
+  if (s !== "strength") return String(a.tk || a.t || "autre").replace(/_/g, " ");
+  let l = (lsGet("muscuLbl") || {})[a.id];
+  if (!l) try { const m = Plan.muscuOn(ymd(a.dt)); if (m && m.st === "done") l = m.s; } catch (e) {}
+  return "muscu" + (MUS[l] ? " " + MUS[l] : "");
+}
+const ftpW = () => { try { return Math.round(Plan.ftp()) || null; } catch (e) { return null; } };
+const zonesTxt = a => { const t = (a.hz || []).reduce((s, x) => s + x, 0); return t ? a.hz.map((x, i) => [i, Math.round(x / t * 100)]).filter(z => z[1] > 0).map(z => `Z${z[0] + 1} ${z[1]} %`).join(", ") : ""; };
+const eff = a => sportOf(a) === "run" ? (a.hr && a.mt ? `${n(meters(a) / a.mt * 60 / a.hr, 2)} m par battement` : "") : (a.hr && (a.np || a.w) ? `${n((a.np || a.w) / a.hr, 2)} W par battement` : "");
+// une séance en une ligne lisible seule : repère de date, sport en clair, puis seulement ce qui a du sens pour ce sport
+function actLine(a, now, o = {}) {
+  const s = sportOf(a), P = [`${rel(a.dt, now)} à ${hh(a.dt)}`, sportFr(a)], ftp = ftpW(), m = meters(a);
+  if (s === "strength") P.push(dur(a.et || a.mt));
+  else {
+    const virt = s === "bike" && indoor(a);   // home trainer : km et dénivelé virtuels, sans intérêt
+    P.push(dur(a.mt)); if (m >= 500 && !virt) P.push(`${n(m / 1000, 1)} km`);
+    if (s === "run") { const p = pace(m, a.mt); if (p) P.push(p); }
+    else if (a.w > 0) P.push(`${a.w} W moyens${a.np ? `, ${a.np} W normalisés` : ""}${s === "bike" && ftp ? ` (${Math.round((a.np || a.w) / ftp * 100)} % de la FTP)` : ""}`);
+    if (a.el >= 20 && !virt) P.push(`D+ ${a.el} m`);
+    if (a.hr) P.push(`${a.hr} bpm moyens`);
+    const t = Math.round(tss(a)); if (t) P.push(`charge ${t}`);
+    if (o.eff && eff(a)) P.push(eff(a));
+    const z = o.zones === false ? "" : zonesTxt(a); if (z) P.push(`cardio ${z}`);
+  }
+  return "- " + P.join(" · ") + (o.mark ? `  ← ${o.mark}` : "");
+}
+const hrvWord = d => d.hrv == null || d.hrvLo == null ? "" : d.hrv < d.hrvLo ? "SOUS sa zone normale" : d.hrvUp != null && d.hrv > d.hrvUp ? "au-dessus de sa zone normale" : "dans sa zone normale";
+const recoWord = s => s < 45 ? "bas" : s <= 65 ? "moyen" : "bon";
+const formWord = t => t > 5 ? "frais" : t > -10 ? "équilibré" : t > -25 ? "chargé" : "très chargé";
+// une nuit en une ligne, datée du matin du réveil ; les champs absents sont omis
+function nightLine(d, now) {
+  const t = s => s ? s.slice(11, 16) : "?", mn = s => Math.round(s / 60) + " min", P = [];
+  if (d.sl) P.push(`couché ${t(d.bed)}, levé ${t(d.wake)}, ${dur(d.sl)} dormies${d.deep ? ` (profond ${mn(d.deep)}${d.rem ? `, paradoxal ${mn(d.rem)}` : ""}${d.awake ? `, éveillé ${mn(d.awake)}` : ""})` : ""}${d.score != null ? `, score sommeil ${d.score}` : ""}`);
+  if (d.hrv != null) P.push(`VFC ${d.hrv} ms${d.hrvLo != null ? `, ${hrvWord(d)} (${d.hrvLo}-${d.hrvUp}${d.hrv7 != null ? `, moyenne 7 nuits ${d.hrv7}` : ""})` : ""}`);
+  const rhr = d.rhr ?? d.srhr; if (rhr != null) P.push(`cœur au repos ${rhr} bpm`);
+  const rs = d.rx ?? d.resp; if (rs != null) P.push(`respiration ${n(rs, 1)} /min`);
+  if (d.stress != null) P.push(`stress de la veille ${d.stress}`);
+  if (d.wx && d.wx.tAvg != null) P.push(`nuit à ${n(d.wx.tAvg, 1)} °C dehors`);
+  if (d.tr != null) P.push(`Garmin : prêt à l'entraînement ${d.tr}${d.trLvl ? ` (${d.trLvl})` : ""}${d.recov > 0 ? `, ${dur(d.recov * 60)} de récupération restantes au réveil` : d.recov === 0 ? ", plus de récupération à faire au réveil" : ""}`);
+  let sc = null; try { sc = Recup.recoScore(d).score; } catch (e) {}
+  if (sc != null) P.push(`score de récup de l'outil ${sc} (${recoWord(sc)})`);
+  return `- réveil ${rel(fromYmd(d.d), now)} : ${P.join(" ; ")}`;
+}
+
+// ------------------------------------------------------------------ données envoyées (texte, sans nom ni lieu)
+// o = { nights, days, weeks, plan: [de, à] en jours autour d'aujourd'hui (« week » = depuis le lundi), focus: id de la séance analysée }
+const KIND = {
+  chat: { nights: 10, days: 14, weeks: 6, plan: [0, 6], goal: 1 }, question: { nights: 10, days: 14, weeks: 6, plan: [0, 6], goal: 1 },   // goal : le but de chaque séance du Plan (une phrase)
+  seance: { nights: 4, days: 14, weeks: 4, plan: [0, 5] }, recup: { nights: 14, days: 7, weeks: 3, plan: [0, 3] },
+  semaine: { nights: 7, days: 14, weeks: 6, plan: ["week", 7] }, objectifs: { nights: 3, days: 10, weeks: 10, plan: [0, 7] },
+  sortie: { nights: 3, days: 7, weeks: 3, plan: [0, 6] } };   // sans goal : l'usage n'a pas à décrire les séances du Plan, il n'en reçoit que le titre
+function secWhen(now) {
+  const L = [`Nous sommes ${now.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}, c'est le ${part(now.getHours())}.`, `Heure : ${hh(now)}.`];
+  const td = acts().filter(a => a.dt <= now && gap(a.dt, now) === 0).sort((a, b) => a.dt - b.dt);
+  L.push(td.length ? `Déjà fait aujourd'hui : ${td.map(a => `${sportFr(a)} à ${hh(a.dt)} (${dur(sportOf(a) === "strength" ? a.et || a.mt : a.mt)})`).join(", ")}.` : "Aucune séance enregistrée aujourd'hui pour l'instant.");
+  return L;
+}
+function secProfile(now) {
   const L = [], P = window.Plan, R = window.Recup && Recup.data, prof = (R && R.profile) || {}, hz = prof.hrZones || {};
-  L.push(`Maintenant : ${now.toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`);
-  // profil et zones
-  let ftp = null; try { ftp = P && P.ftp ? Math.round(P.ftp()) : null; } catch (e) {}
-  const kg = +(lsGet("bwWeight")) || null, age = +(lsGet("bwAge")) || null, fl = hz.floors || [];
+  const ftp = ftpW(), kg = +(lsGet("bwWeight")) || null, age = +(lsGet("bwAge")) || null, fl = hz.floors || [];
   const zones = fl.length >= 5 ? ` ; zones cardio : Z1 ${fl[0]}-${fl[1] - 1}, Z2 ${fl[1]}-${fl[2] - 1}, Z3 ${fl[2]}-${fl[3] - 1}, Z4 ${fl[3]}-${fl[4] - 1}, Z5 ≥ ${fl[4]} bpm` : "";
-  const run = prof.run || {}, lt = run.lt || {}, pace = lt.pace ? `${Math.floor(lt.pace / 60)}:${String(Math.round(lt.pace % 60)).padStart(2, "0")}/km` : null;
-  L.push(`Profil : FTP de travail ${ftp || "?"} W${prof.ftp ? ` (FTP estimée par Garmin ${prof.ftp} W, souvent trop haute ; les séances se calent sur la FTP de travail)` : ""}${kg ? `, ${n(kg, kg % 1 ? 1 : 0)} kg` : ""}${age ? `, ${age} ans` : ""} ; `
-    + `FC max ${hz.max || "?"}, FC au seuil ${hz.lthr || "?"}, FC repos ${hz.rest || "?"} bpm${zones} ; VO2max ${n(last(prof.vo2), 1)}${pace ? ` ; course : allure seuil ${pace}, FC seuil ${lt.hr || "?"}` : ""}.`);
+  const run = prof.run || {}, lt = run.lt || {}, V = (prof.vo2 || []).filter(r => r && r[1] != null);
+  const V30 = V.filter(x => x[0] >= ymd(addD(now, -30))).map(x => x[1]), rv = last((run.vo2 || []).filter(r => r && r[1] != null));
+  // la série VO2max de Garmin change selon le sport de la dernière activité (vélo ≈ 61-63, course ≈ 58-60) : on donne la fourchette, pas une tendance
+  const vo2 = V.length ? `VO2max Garmin ${n(last(V), 1)}${V30.length > 1 ? ` (de ${n(Math.min(...V30), 1)} à ${n(Math.max(...V30), 1)} sur 30 jours : la valeur change selon que la dernière séance est du vélo ou de la course, un écart d'un jour à l'autre ne veut rien dire)` : ""}${rv != null ? `, VO2max course ${n(rv, 1)}` : ""}` : "VO2max ?";
+  L.push(`Profil : FTP de travail ${ftp || "?"} W (celle du Plan ; la FTP estimée par Garmin${prof.ftp ? `, ${prof.ftp} W,` : ""} est trop haute, ne t'en sers pas)${kg ? `, ${n(kg, kg % 1 ? 1 : 0)} kg` : ""}${age ? `, ${age} ans` : ""} ; `
+    + `FC max ${hz.max || "?"}, FC au seuil ${hz.lthr || "?"}, FC repos ${hz.rest || "?"} bpm${zones} ; ${vo2}`
+    + `${lt.pace ? ` ; course : allure seuil ${paceS(lt.pace)}, FC seuil ${lt.hr || "?"}` : ""}.`);
   try { const g = P && P._cfg && P._cfg().goal; if (g) L.push(`Objectifs du Plan : FTP ${g.ftp || "?"} W, VO2max ${g.vo2 || "?"}${g.date ? `, pour le ${g.date}` : ""} ; ultra de 250 km à 28 km/h.`); } catch (e) {}
-  // forme
-  try { const f = Charge.fitness(); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)} (frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}
-  // nuits
-  const days = (window.Recup && Recup.days) || [];
-  const nights = days.filter(d => d.sl || d.hrv).slice(-14).reverse();
-  if (nights.length) {
-    L.push("Nuits (la plus récente d'abord) : date | coucher → lever | sommeil (profond / léger / paradoxal / éveillé) | score sommeil | VFC nuit (zone normale, moyenne 7 nuits) | cœur repos | respiration | stress sommeil | stress journée veille | température nuit | prêt à l'entraînement Garmin | récup Garmin restante au réveil | score récup du site");
-    nights.forEach(d => {
-      let sc = null; try { sc = Recup.recoScore(d).score; } catch (e) {}
-      const t = s => s ? s.slice(11, 16) : "?", m = s => s ? Math.round(s / 60) + " min" : "?";
-      L.push(`- ${d.d} | ${t(d.bed)} → ${t(d.wake)} | ${hmn(d.sl)} (${m(d.deep)} / ${m(d.light)} / ${m(d.rem)} / ${m(d.awake)}) | ${d.score ?? "?"} | ${d.hrv ?? "?"} ms (${d.hrvLo ?? "?"}-${d.hrvUp ?? "?"}, 7 nuits ${d.hrv7 ?? "?"}) | ${d.rhr ?? d.srhr ?? "?"} bpm | ${n(d.rx ?? d.resp, 1)} /min | ${d.sstress ?? "?"} | ${d.stress ?? "?"} | ${d.wx ? n(d.wx.tAvg, 1) + " °C" : "?"} | ${d.tr ?? "?"}${d.trLvl ? " " + d.trLvl : ""} | ${d.recov != null ? hmn(d.recov * 60) : "?"} | ${sc ?? "?"}`);
-    });
+  // course : programme de reprise (reprise.js) et volume récent (course.js)
+  try { const X = window.Reprise._, Pg = X.progress(acts(), new Date(now));
+    if (Pg.started) L.push("Course à pied : reprise après une blessure au tibia (périostite, arrêt en juin), en complément du vélo. Programme par paliers d'une semaine : footings faciles seulement (où il peut parler, sous 150 bpm environ), pas de fractionné, foulée courte. "
+      + X.answer(Pg, X.week(Pg.k, X.weekRuns(acts(), X.mondayOf(+now)), X.longCap(acts(), +now)), +now)); } catch (e) {}
+  try { const G = window.Course._.gauge(acts(), +now);
+    if (G.acute || G.chronic) L.push(`Volume de course : ${n(G.acute, 1)} km sur les 7 derniers jours, ${n(G.chronic, 1)} km par semaine en moyenne sur les 28 jours d'avant${G.zone != null ? ` (rapport ${n(G.ratio, 2)} : ${["sous-charge", "zone sûre", "vigilance", "risque élevé"][G.zone]})` : ""}.`); } catch (e) {}
+  try { const f = Charge.fitness(now); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)}, soit « ${formWord(f.tsb)} » (la fraîcheur est la forme moins la fatigue, pas une température ; échelle de l'outil : frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}
+  return L;
+}
+function secNights(now, k) {
+  const N = ((window.Recup && Recup.days) || []).filter(d => d.sl || d.hrv).slice(-k).reverse();
+  return N.length ? ["Nuits, chacune datée du matin du réveil (la plus récente d'abord) :", ...N.map(d => nightLine(d, now))] : [];
+}
+function secActs(now, k, focus) {
+  const A = acts().filter(a => a.dt <= now && gap(a.dt, now) > -k && (sportOf(a) === "strength" || a.mt >= 300)).sort((a, b) => b.dt - a.dt);
+  return A.length ? [`Séances des ${k} derniers jours (la plus récente d'abord) :`, ...A.map(a => actLine(a, now, { mark: a.id === focus ? "la séance analysée" : "" }))] : [];
+}
+// une ligne par semaine (lundi → dimanche) : volume, charge, part de chaque sport, répartition du cardio
+function secWeeks(now, k) {
+  const mon0 = addD(now, -((day0(now).getDay() + 6) % 7)), out = [];
+  for (let i = 0; i < k; i++) {
+    const a0 = addD(mon0, -7 * i), a1 = addD(a0, 7), A = acts().filter(a => a.dt >= a0 && a.dt < a1 && a.dt <= now); if (!A.length && i) continue;
+    const by = s => A.filter(a => sportOf(a) === s), B = by("bike"), R = by("run"), M = by("strength"), sum = (L, f) => L.reduce((s, a) => s + (f(a) || 0), 0);
+    const Z = [0, 0, 0]; B.concat(R).forEach(a => (a.hz || []).forEach((x, j) => { Z[j < 2 ? 0 : j === 2 ? 1 : 2] += x || 0; })); const zt = Z[0] + Z[1] + Z[2];
+    const out_ = B.filter(a => !indoor(a)), long = Math.max(0, ...out_.map(a => meters(a) / 1000));
+    out.push(`- semaine du ${dm(a0)}${i ? "" : ` (en cours, jusqu'à aujourd'hui ${WD[now.getDay()]})`} : ${dur(sum(B.concat(R), a => a.mt))} de vélo et course, charge ${Math.round(sum(A, tss))}`
+      + ` ; vélo ${B.length ? `${dur(sum(B, a => a.mt))}${out_.length ? `, dont ${n(sum(out_, a => meters(a) / 1000))} km dehors (plus longue sortie ${n(long)} km)` : ", tout sur home trainer"}` : "aucun"}`
+      + ` ; course ${R.length ? `${dur(sum(R, a => a.mt))}, ${n(sum(R, a => meters(a) / 1000), 1)} km en ${R.length} sortie${R.length > 1 ? "s" : ""}` : "aucune"} ; muscu ${M.length}`
+      + (zt ? ` ; cardio : ${Math.round(Z[0] / zt * 100)} % en Z1-Z2, ${Math.round(Z[1] / zt * 100)} % en Z3, ${Math.round(Z[2] / zt * 100)} % en Z4-Z5` : ""));
   }
-  // séances des 14 derniers jours
-  const A = ((typeof S !== "undefined" && S.all) || []).filter(a => now - a.dt < 14 * 864e5 && a.dt <= now).sort((a, b) => b.dt - a.dt);
-  if (A.length) {
-    L.push("Séances des 14 derniers jours (la plus récente d'abord) : date heure | sport | durée | distance | D+ | puissance moy. / normalisée | cardio moy. | charge | effet aérobie Garmin | temps en zones cardio Z1-Z5");
-    A.forEach(a => {
-      const tot = (a.hz || []).reduce((s, x) => s + x, 0), Z = tot ? a.hz.map(x => Math.round(x / tot * 100) + " %").join(" ") : "?";
-      let tss = null; try { tss = Math.round(Charge.tssOf(a)); } catch (e) {}
-      L.push(`- ${a.d.slice(0, 16).replace("T", " ")} | ${a.tk || a.t} | ${hmn(a.mt)} | ${a.km ? n(a.km, 1) + " km" : "-"} | ${a.el || 0} m | ${a.w ? a.w + " W" : "-"} / ${a.np ? a.np + " W" : "-"} | ${a.hr || "?"} bpm | ${tss ?? "?"} | ${a.te ? n(a.te, 1) : "?"} | ${Z}`);
-    });
+  return out.length ? ["Semaines (lundi → dimanche, la plus récente d'abord) :", ...out] : [];
+}
+// le Plan fait foi pour ce qui vient : séances vélo, course et muscu de chaque jour, avec leur état pour les jours passés et aujourd'hui
+function secPlan(now, from, to, goal) {
+  const P = window.Plan; if (!P || !P.plannedFor) return [];
+  if (from === "week") { const wd = (day0(now).getDay() + 6) % 7; from = -wd - (wd <= 1 ? 7 : 0); }   // lundi et mardi : la semaine dernière aussi (relevé du lundi)
+  const out = [];
+  for (let i = from; i <= to; i++) {
+    const d = addD(now, i), key = ymd(d); let p = null, m = null; try { p = P.plannedFor(key); } catch (e) {} try { m = P.muscuOn ? P.muscuOn(key) : null; } catch (e) {}
+    const st = x => x.st === "done" ? ", faite" : x.st === "missed" ? ", non faite" : i < 0 ? "" : i === 0 ? ", reste à faire" : "";
+    const one = x => { const ti = (x.w && x.w.title) || x.label || "", g = x.w && x.w.goal ? String(x.w.goal).split(/(?<=[.!?])\s/)[0].replace(/\.$/, "") : "";   // le but : sa première phrase seulement
+      return `${ti}${x.dur && !/\d\s?min/.test(ti) ? ` ${x.dur} min` : ""}${x.place === "out" ? " dehors" : x.place === "mw" ? " sur home trainer" : ""}${x.w && x.w.tss ? `, charge prévue ${Math.round(x.w.tss)}` : ""}${st(x)}${g && goal ? ` (${g.slice(0, 130)})` : ""}`; };
+    const bike = p && p.sport !== "run" ? p : null, run = p ? (p.sport === "run" ? p : p.run) : null, B = [];
+    if (m) B.push(`muscu ${MUS[m.s] || m.label || ""} le matin${st(m)}`);
+    if (bike) B.push("vélo : " + one(bike)); if (run) B.push("course : " + one(run));
+    if (B.length || (i >= 0 && out.length)) out.push(`- ${rel(d, now)} : ${B.join(" ; ") || "rien de prévu"}`);
   }
-  // Plan des 7 prochains jours
-  if (P && P.plannedFor) {
-    const out = [], d0 = new Date(now.toDateString());
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(d0); d.setDate(d.getDate() + i); let p = null; try { p = P.plannedFor(ymd(d)); } catch (e) {}
-      if (!p) continue;
-      const one = x => x ? `${(x.w && x.w.title) || x.label}${x.dur ? ` ${x.dur} min` : ""}${x.place === "out" ? " dehors" : x.place === "mw" ? " home trainer" : ""}${x.st === "done" ? " (faite)" : x.st === "missed" ? " (non faite)" : ""}${x.w && x.w.goal ? ` : ${x.w.goal}` : ""}` : "";
-      out.push(`- ${i ? day(d) : "aujourd'hui"} : ${[one(p.sport === "run" ? null : p), p.sport === "run" ? "course " + one(p) : p.run ? "course " + one(p.run) : ""].filter(Boolean).join(" + ") || "repos"}`);
+  return out.length ? ["Plan (il fait foi pour les séances à venir ; Nathan a déjà le détail de chacune sous les yeux) :", ...out] : [];
+}
+function data(now = new Date(), o = KIND.chat) {
+  // le Plan avant les listes : si le texte est coupé, ce sont les semaines les plus anciennes qui sautent
+  return [...secWhen(now), ...secProfile(now), ...secPlan(now, o.plan[0], o.plan[1], !!o.goal), ...secNights(now, o.nights), ...secActs(now, o.days, o.focus), ...secWeeks(now, o.weeks)].join("\n");
+}
+
+// ------------------------------------------------------------------ ce que le bilan d'une séance n'affiche pas
+// tranches égales du flux (dt, v en km/h × 10, h, c, a, p) : moyennes de vitesse (hors arrêts), cardio, cadence, watts, et dénivelé au seuil de 1 m
+function segs(st, run, k) {
+  const N = st && (st.h || st.v || st.p || []).length, dt = st && st.dt, out = []; if (!N || !(dt > 0)) return out;
+  let ref = null;
+  for (let s = 0; s < k; s++) {
+    const i0 = Math.round(s * N / k), i1 = Math.round((s + 1) * N / k);
+    const avg = (arr, ok) => { if (!arr) return null; let t = 0, c = 0; for (let i = i0; i < i1; i++) { const v = arr[i]; if (v != null && ok(v)) { t += v; c++; } } return c ? t / c : null; };
+    let up = 0, dn = 0; if (st.a) for (let i = i0; i < i1; i++) { const a = st.a[i]; if (a == null) continue; if (ref == null) ref = a; else if (a - ref >= 1) { up += a - ref; ref = a; } else if (ref - a >= 1) { dn += ref - a; ref = a; } }
+    out.push({ t0: Math.round(i0 * dt / 60), t1: Math.round(i1 * dt / 60), v: avg(st.v, x => x / 10 >= (run ? 3 : 5)), h: avg(st.h, x => x > 0), c: avg(st.c, x => x > 0), p: run || !st.p ? null : avg(st.p, x => x >= 0), up, dn, alt: !!st.a });
+  }
+  return out;
+}
+// déroulé par tranches : 4 à 10 tranches égales, d'environ 6 min si la séance est courte (rien sous 15 min)
+function splits(st, run, virt) {
+  const N = st && (st.h || st.v || st.p || []).length, dt = st && st.dt; if (!N || !(dt > 0) || N * dt < 900) return [];
+  return segs(st, run, Math.max(4, Math.min(10, Math.round(N * dt / 360)))).map(g => {
+    const P = [];
+    if (g.p != null) P.push(`${Math.round(g.p)} W`);
+    if (g.v != null && !virt) P.push(run ? paceS(36000 / g.v) : `${n(g.v / 10, 1)} km/h`);
+    if (g.h != null) P.push(`${Math.round(g.h)} bpm`);
+    if (g.c != null) P.push(`${Math.round(g.c)} ${run ? "pas/min" : "tr/min"}`);
+    if (g.alt && !virt && (g.up >= 2 || g.dn >= 2)) P.push(`+${Math.round(g.up)} m / −${Math.round(g.dn)} m`);
+    return P.length ? `- ${g.t0} à ${g.t1} min : ${P.join(", ")}` : "";
+  }).filter(Boolean);
+}
+// Repères calculés : les comparaisons sont faites ici, en clair (Flash-Lite se trompe sur « 145 dépasse 150 ») : moitiés de la séance,
+// place parmi les séances comparables, repère cardio de la reprise, fraîcheur de la journée
+const effNum = a => sportOf(a) === "run" ? (a.hr && a.mt ? meters(a) / a.mt * 60 / a.hr : null) : (a.hr && (a.np || a.w) ? (a.np || a.w) / a.hr : null);
+const med = L => { const s = L.slice().sort((x, y) => x - y), k = s.length; return k ? (k % 2 ? s[(k - 1) / 2] : (s[k / 2 - 1] + s[k / 2]) / 2) : null; };
+function facts(a, st, sim, now = new Date()) {
+  const run = sportOf(a) === "run", virt = !run && indoor(a), L = [], N = st && (st.h || st.v || st.p || []).length;
+  if (N && st.dt > 0 && N * st.dt >= 1200) {
+    const [A, B] = segs(st, run, 2);
+    if (A.h != null && B.h != null) {
+      const dh = Math.round(B.h) - Math.round(A.h), hw = `le cardio moyen passe de ${Math.round(A.h)} à ${Math.round(B.h)} bpm (${dh > 0 ? "+" : dh < 0 ? "−" : ""}${Math.abs(dh)} bpm)`;
+      if (run && A.v && B.v) { const d = (B.v - A.v) / A.v; L.push(`Entre la 1re et la 2e moitié, l'allure est ${Math.abs(d) < .015 ? "la même" : d > 0 ? "plus rapide" : "plus lente"} (${paceS(36000 / A.v)} puis ${paceS(36000 / B.v)}) et ${hw}.`); }
+      else if (!run && A.p != null && B.p != null) { const d = A.p ? (B.p - A.p) / A.p : 0; L.push(`Entre la 1re et la 2e moitié, la puissance moyenne est ${Math.abs(d) < .03 ? "la même" : d > 0 ? "plus haute" : "plus basse"} (${Math.round(A.p)} puis ${Math.round(B.p)} W) et ${hw}.`); }
+      else L.push(`Entre la 1re et la 2e moitié, ${hw}.`);
+      if (A.alt && !virt && A.up + B.up >= 20) L.push(`Dénivelé : +${Math.round(A.up)} m sur la 1re moitié, +${Math.round(B.up)} m sur la 2e${Math.abs(B.up - A.up) < 8 ? " (à peu près autant)" : B.up > A.up ? " (la 2e monte plus)" : " (la 1re monte plus)"}.`);
     }
-    if (out.length) L.push("Plan des 7 prochains jours :", ...out);
+    // footing (reprise en cours ou footing prévu au Plan) : chaque moitié contre sa zone 2, d'où le seul repère chiffré donné pour la prochaine fois
+    const fl = ((window.Recup && Recup.data && Recup.data.profile || {}).hrZones || {}).floors || [];
+    let foot = false; try { foot = !!(window.Reprise && Reprise._.progress(acts(), new Date(now)).started); } catch (e) {}
+    if (!foot) try { const p = Plan.plannedFor(ymd(new Date(a.dt)), "run"); foot = !!(p && p.t === "rfoot"); } catch (e) {}
+    if (run && foot && fl.length >= 3 && A.h != null && B.h != null) { const top = fl[2] - 1, o = [A, B].map(g => Math.round(g.h) > top);
+      L.push(`Footing facile = zone 2 (${fl[1]} à ${top} bpm) : la 1re moitié (${Math.round(A.h)} bpm) ${o[0] ? "en sort" : "y est"}, la 2e (${Math.round(B.h)} bpm) ${o[1] ? "en sort" : "y est"}.`
+        + (o[0] || o[1] ? ` Repère pour le prochain footing : rester à ${top} bpm ou moins${o[1] && !o[0] ? " aussi sur la 2e moitié" : ""}, quitte à ralentir dans les montées.` : ""));
+    }
+    if (run && window.Reprise) try { if (Reprise._.progress(acts(), new Date(now)).started) { const T = segs(st, true, Math.max(4, Math.min(10, Math.round(N * st.dt / 360)))).filter(g => g.h != null), top = T.sort((x, y) => y.h - x.h)[0];
+      if (top) L.push(`Tranche la plus haute en cardio : ${Math.round(top.h)} bpm (${top.t0} à ${top.t1} min), ${top.h < 150 ? "sous" : "au-dessus de"} le repère de 150 bpm du programme de reprise.`); } } catch (e) {}
   }
+  const e = effNum(a), E = sim.map(effNum).filter(x => x != null), unit = run ? "m par battement" : "W par battement";
+  if (e != null && E.length >= 3) { const m = med(E), d = (e - m) / m;
+    L.push(`Efficacité (${unit}) : ${n(e, 2)} pour cette séance, médiane de ses ${E.length} séances comparables ${n(m, 2)} (de ${n(Math.min(...E), 2)} à ${n(Math.max(...E), 2)}) : ${Math.abs(d) < .03 ? "dans sa norme" : d > 0 ? `meilleure que sa norme (+${Math.round(d * 100)} %)` : `moins bonne que sa norme (−${Math.round(-d * 100)} %)`}${run ? "" : " ; à lire seulement entre séances de watts proches"}.`); }
+  const nt = ((window.Recup && Recup.days) || []).find(d => d.d === ymd(new Date(a.dt)));
+  if (nt && nt.wx && nt.wx.tAvg != null && !indoor(a)) L.push(nt.wx.tAvg < 12 ? `Température : ${n(nt.wx.tAvg, 1)} °C dehors la nuit précédente, il faisait froid : la chaleur n'explique pas une hausse du cardio.` : nt.wx.tAvg >= 18 ? `Température : ${n(nt.wx.tAvg, 1)} °C dehors la nuit précédente, il faisait chaud : la chaleur a pu faire monter le cardio.` : "");
+  return L.filter(Boolean);
+}
+// séances du même genre (même sport, dehors ou dedans, durée proche) des 10 semaines d'avant, la plus récente d'abord
+function similar(a, k = 5) {
+  const s = sportOf(a), ind = indoor(a);
+  return acts().filter(b => b.id !== a.id && b.dt < a.dt && a.dt - b.dt < 70 * DAY && sportOf(b) === s && indoor(b) === ind && b.mt >= a.mt * .6 && b.mt <= a.mt * 1.6).sort((x, y) => y.dt - x.dt).slice(0, k);
+}
+// ce qui entoure la séance (repères de date par rapport à aujourd'hui, comme partout)
+function around(a, now = new Date()) {
+  const L = [], key = ymd(a.dt), s = sportOf(a);
+  const nt = ((window.Recup && Recup.days) || []).find(d => d.d === key);
+  if (nt) L.push("Nuit d'avant la séance : " + nightLine(nt, now).slice(2));
+  const same = acts().filter(b => b.id !== a.id && ymd(b.dt) === key).sort((x, y) => x.dt - y.dt), bef = same.filter(b => b.dt < a.dt), aft = same.filter(b => b.dt > a.dt);
+  const short = b => `${sportFr(b)} à ${hh(b.dt)} (${dur(sportOf(b) === "strength" ? b.et || b.mt : b.mt)}${Math.round(tss(b)) ? `, charge ${Math.round(tss(b))}` : ""})`;
+  L.push(bef.length ? `Plus tôt le même jour : ${bef.map(short).join(", ")}.` : "Rien d'autre plus tôt le même jour.");
+  if (aft.length) L.push(`Plus tard le même jour : ${aft.map(short).join(", ")}.`);
+  const prev = [1, 2, 3].map(i => { const d = addD(a.dt, -i), A = acts().filter(b => ymd(b.dt) === ymd(d)).sort((x, y) => x.dt - y.dt);
+    return `${rel(d, now)} ${A.length ? `charge ${Math.round(A.reduce((t, b) => t + tss(b), 0))} (${A.map(b => `${sportFr(b)} ${dur(sportOf(b) === "strength" ? b.et || b.mt : b.mt)}`).join(", ")})` : "repos"}`; });
+  L.push(`Les 3 jours d'avant : ${prev.join(" ; ")}.`);
+  try { const f = Charge.fitness(addD(a.dt, -1)); L.push(`Forme la veille au soir : niveau d'entraînement ${n(f.ctl)}, fraîcheur ${n(f.tsb)} (« ${formWord(f.tsb)} »).`); } catch (e) {}
+  try { const p = Plan.plannedFor(key, s === "run" ? "run" : "bike");
+    if (s === "run" || s === "bike") L.push(p ? `Prévu au Plan ce jour-là en ${s === "run" ? "course" : "vélo"} : ${(p.w && p.w.title) || p.label}${p.dur ? ` ${p.dur} min` : ""}${p.w && p.w.goal ? ` (${String(p.w.goal).split(/(?<=[.!?])\s/)[0].slice(0, 160)})` : ""}` : `Rien de prévu au Plan ce jour-là en ${s === "run" ? "course" : "vélo"}.`); } catch (e) {}
+  return L;
+}
+// la suite du Plan en une ligne (le modèle mélangeait les jours en la cherchant dans la liste) : les 2 prochaines séances à faire,
+// et la prochaine du même sport que la séance commentée
+function nextPlanned(a, now = new Date()) {
+  const P = window.Plan; if (!P || !P.plannedFor) return "";
+  const L = [], sp = !a ? null : sportOf(a) === "run" ? "run" : "bike", word = { run: "course", bike: "vélo" }; let same = "";
+  for (let i = 0; i <= 6 && (L.length < 2 || (sp && !same)); i++) {
+    const d = addD(now, i); let p = null; try { p = P.plannedFor(ymd(d)); } catch (e) {}
+    if (!p) continue;
+    [["bike", p.sport !== "run" ? p : null], ["run", p.sport === "run" ? p : p.run]].forEach(([k, x]) => {
+      if (!x || x.st === "done" || x.st === "missed") return;
+      const t = `${rel(d, now)}, ${word[k]} « ${(x.w && x.w.title) || x.label} »${i === 0 ? ", reste à faire" : ""}`;
+      if (L.length < 2) L.push(t); if (k === sp && !same) same = t; });
+  }
+  if (!L.length) return "";
+  return `Suite du Plan : ${L.join(" ; puis ")}.` + (!sp ? "" : same && !L.includes(same) ? ` Prochaine séance de ${word[sp]} : ${same}.` : !same ? ` Aucune séance de ${word[sp]} au Plan dans les 7 jours.` : "");
+}
+const durOf = b => dur(sportOf(b) === "strength" ? b.et || b.mt : b.mt), endOf = b => new Date(+b.dt + (b.et || b.mt || 0) * 1000);
+const onDay = d => acts().filter(b => ymd(new Date(b.dt)) === ymd(d)).sort((x, y) => x.dt - y.dt);
+// Récup : ce qui précède la nuit regardée (key = date du réveil), séparé de ce qui la suit : une séance faite après le réveil n'explique pas la nuit
+function morningExtra(key, now = new Date()) {
+  const L = [], d = fromYmd(key), nt = ((window.Recup && Recup.days) || []).find(x => x.d === key), eve = addD(d, -1), E = onDay(eve);
+  L.push(E.length ? `La veille de cette nuit, ${rel(eve, now)} : ${E.map(b => `${sportFr(b)} à ${hh(b.dt)} (${durOf(b)}${Math.round(tss(b)) ? `, charge ${Math.round(tss(b))}` : ""}, finie à ${hh(endOf(b))})`).join(" ; ")}.`
+    : `La veille de cette nuit, ${rel(eve, now)} : repos, aucune séance.`);
+  if (E.length && nt && nt.bed) { const g = Math.round((new Date(nt.bed) - endOf(E[E.length - 1])) / 60000);
+    if (g > 0 && g < 600) L.push(`Dernière séance de la veille finie ${dur(g * 60)} avant le coucher (${nt.bed.slice(11, 16)})${g < 180 ? " : moins de 3 h, ce qui peut retarder l'endormissement" : " : assez tôt pour ne pas gêner l'endormissement"}.`); }
+  const load = x => onDay(x).reduce((t, b) => t + tss(b), 0), sum4 = [1, 2, 3, 4].reduce((t, i) => t + load(addD(d, -i)), 0);
+  let ref = 0; for (let i = 5; i <= 32; i++) ref += load(addD(d, -i)); ref = ref / 28 * 4;   // 4 jours habituels = moyenne des 28 jours d'avant
+  const q = ref > 0 ? sum4 / ref : null;
+  L.push(`Charge des 4 jours d'avant cette nuit : ${[1, 2, 3, 4].map(i => { const x = addD(d, -i), v = Math.round(load(x)); return `${rel(x, now)} ${v || "repos"}`; }).join(" ; ")}`
+    + ` ; total ${Math.round(sum4)}${q != null ? `, soit ${n(q, 1)} fois sa charge habituelle sur 4 jours : ${q < .7 ? "charge légère" : q <= 1.3 ? "charge habituelle" : "charge lourde"}` : ""}.`);
+  const A = onDay(d).filter(b => b.dt <= now);
+  if (A.length) L.push(`Séances faites APRÈS ce réveil (elles n'expliquent donc pas cette nuit) : ${A.map(b => `${sportFr(b)} à ${hh(b.dt)} (${durOf(b)})`).join(", ")}.`);
+  const nx = nextPlanned(null, now); if (nx) L.push(nx);
   return L.join("\n");
+}
+// Semaine : prévu contre fait au Plan, nuits de la semaine, part de zone 3 (semaine en cours, ou la précédente si last)
+function weekExtra(last, now = new Date()) {
+  const L = [], wd = (day0(now).getDay() + 6) % 7, mon = addD(now, -wd - (last ? 7 : 0)), end = last ? 6 : wd, P = window.Plan;
+  const cnt = { done: [], missed: [], left: [] };
+  if (P && P.plannedFor) for (let i = 0; i <= 6; i++) { const d = addD(mon, i); let p = null; try { p = P.plannedFor(ymd(d)); } catch (e) {}
+    if (!p) continue;
+    [["vélo", p.sport !== "run" ? p : null], ["course", p.sport === "run" ? p : p.run]].forEach(([w, x]) => { if (!x) return;
+      const t = `${w} « ${(x.w && x.w.title) || x.label} » ${WD[d.getDay()]}`; (x.st === "done" ? cnt.done : x.st === "missed" || i < end ? cnt.missed : cnt.left).push(t); }); }
+  if (cnt.done.length + cnt.missed.length + cnt.left.length) L.push(`Plan de la semaine (vélo et course) : ${cnt.done.length} séance${cnt.done.length > 1 ? "s" : ""} faite${cnt.done.length > 1 ? "s" : ""}${cnt.done.length ? ` (${cnt.done.join(", ")})` : ""} ; `
+    + `${cnt.missed.length ? `${cnt.missed.length} non faite${cnt.missed.length > 1 ? "s" : ""} (${cnt.missed.join(", ")})` : "aucune non faite"}${last ? "" : ` ; ${cnt.left.length ? `${cnt.left.length} à venir (${cnt.left.join(", ")})` : "aucune à venir"}`}.`);
+  const A = acts().filter(a => a.dt >= mon && a.dt < addD(mon, 7) && a.dt <= now && sportOf(a) !== "strength"), Z = [0, 0];
+  const FL = ((window.Recup && Recup.data && Recup.data.profile || {}).hrZones || {}).floors || [];
+  A.forEach(a => (a.hz || []).forEach((x, j) => { Z[1] += x || 0; if (j === 2) Z[0] += x || 0; }));
+  if (Z[1] > 600) { const z3 = Math.round(Z[0] / Z[1] * 100); L.push(`Part du cardio en zone 3 cette semaine-là : ${z3} %, ${z3 > 20 ? "au-dessus du" : "sous le"} repère de 20 % de l'outil (au-dessus : trop de « zone grise », ni facile ni dur)${z3 > 20 && FL.length >= 3 ? ` ; le remède porte sur les séances faciles seulement (endurance, récupération, footings : rester à ${FL[2] - 1} bpm ou moins), les séances dures du Plan ne changent pas` : ""}.`); }
+  const N = ((window.Recup && Recup.days) || []).filter(x => x.d >= ymd(mon) && x.d <= ymd(addD(mon, end)) && (x.sl || x.hrv));
+  if (N.length >= 2) { const sl = N.filter(x => x.sl), low = N.filter(x => x.hrv != null && x.hrvLo != null && x.hrv < x.hrvLo).length; let sc = []; N.forEach(x => { try { const v = Recup.recoScore(x).score; if (v != null) sc.push(v); } catch (e) {} });
+    L.push(`Nuits de la semaine (${N.length}) : ${sl.length ? `${dur(sl.reduce((t, x) => t + x.sl, 0) / sl.length)} de sommeil en moyenne ; ` : ""}VFC sous sa zone normale ${low} nuit${low > 1 ? "s" : ""} sur ${N.length}${sc.length ? ` ; score de récup moyen ${Math.round(sc.reduce((t, v) => t + v, 0) / sc.length)} (${recoWord(sc.reduce((t, v) => t + v, 0) / sc.length)})` : ""}.`); }
+  const nx = nextPlanned(null, now); if (nx) L.push(nx);
+  return L.join("\n");
+}
+// blocs « en plus » du bilan d'une séance : déroulé, séances comparables, contexte
+function sessionExtra(a, st, now = new Date()) {
+  const run = sportOf(a) === "run", L = [], sp = splits(st, run, !run && indoor(a)), sim = similar(a), F = facts(a, st, sim, now);
+  if (F.length) L.push("Repères calculés (comparaisons déjà faites, fiables : pars de là) :", ...F.map(x => "- " + x));
+  if (sp.length) L.push("Déroulé par tranches (le bilan n'en montre que le graphique) :", ...sp);
+  if (sim.length) L.push("Séances comparables d'avant (même sport, durée proche), pour situer celle-ci :", actLine(a, now, { eff: 1, zones: false, mark: "la séance analysée" }), ...sim.map(b => actLine(b, now, { eff: 1, zones: false })));
+  else L.push("Aucune séance comparable dans les 10 semaines d'avant.");
+  L.push("Ce qui entoure la séance :", ...around(a, now).map(x => "- " + x));
+  const nx = nextPlanned(a, now); if (nx) L.push(nx);
+  return L.join("\n");
+}
+// phrase qui situe la séance par rapport à maintenant
+function sessionAbout(a, now = new Date()) {
+  const g = gap(a.dt, now), end = new Date(+a.dt + (a.et || a.mt || 0) * 1000), ago = Math.round((now - end) / 60000);
+  return `Commentaire de la séance de ${sportFr(a)} faite ${rel(a.dt, now)}, commencée à ${hh(a.dt)} (${part(new Date(a.dt).getHours())})${g === 0 && ago >= 0 ? `, finie il y a ${ago < 90 ? ago + " min" : dur(ago * 60)}` : ""}. `
+    + (g <= -2 ? "Nathan relit cette séance après coup : ce qui concerne la suite part d'aujourd'hui, pas du lendemain de la séance." : "Les repères de date (aujourd'hui, hier, demain) sont ceux écrits dans les données.");
 }
 
 // texte lisible des éléments affichés (sélecteurs CSS) : libellés, valeurs et paragraphes séparés, sans graphiques ni boutons
@@ -77,25 +331,52 @@ function textOf(sels, root = document) {
   sels.forEach(sel => root.querySelectorAll(sel).forEach(el => {
     const c = el.cloneNode(true);
     c.querySelectorAll("svg, canvas, button, input, select, script, style, .iabox, .leaflet-container, [hidden]").forEach(e => e.remove());
+    c.querySelectorAll("*").forEach(e => e.append(" "));   // « 100 » + « 8 h 25 dormies » ne se collent plus
     c.querySelectorAll(".tile .l, .tile .v").forEach(e => e.append(" : "));
     c.querySelectorAll(".tile, p, h2, h3, h4, li, tr, summary, div").forEach(e => e.append("\n"));
-    const t = c.textContent.replace(/[ \t ]+/g, " ").replace(/ *\n\s*/g, "\n").trim();
+    const t = c.textContent.replace(/[ \t\u00a0]+/g, " ").replace(/ ([.,)])/g, "$1").replace(/\( /g, "(").replace(/ *\n\s*/g, "\n").trim();
     if (t) out.push(t);
   }));
   return out.join("\n");
 }
 // ce que montre l'onglet ouvert (sans la carte, le nom du parcours ni le point de départ)
 const PAGE = { synthese: ["#synthese .syblk"], recup: ["#rMorning", "#recup .rans"], plan: ["#plan .card"], sortie: ["#soTiles", "#soVerdict", "#soClimbs", "#soTips", "#soNut", "#soStops .stadv"], activites: ["#app .card"] };
-function pageText() { const t = window.Nav && Nav.curTab ? Nav.curTab() : ""; return PAGE[t] ? textOf(PAGE[t]).slice(0, 4000) : ""; }
-function full(extra) {  // la page d'abord (courte), puis les données : si c'est trop long, ce sont les plus vieilles lignes qui sautent
-  const p = extra != null ? extra : pageText();
-  return ((p ? `Ce qu'affiche la page ouverte :\n${p}\n\n` : "") + "Tes données :\n" + data()).slice(0, MAX_CTX);
+function pageText() { const t = window.Nav && Nav.curTab ? Nav.curTab() : ""; return PAGE[t] ? textOf(PAGE[t]).slice(0, 3500) : ""; }
+// Le texte envoyé. o = { kind, about (le sujet), page (ce que l'outil affiche déjà), extra (ce qu'il n'affiche pas), focus, now }.
+// Trop long : on raccourcit d'abord les listes (nuits, séances, semaines les plus anciennes), jamais le Plan ni le sujet.
+function full(o = {}) {
+  const now = o.now || new Date(), base = KIND[o.kind] || KIND.chat, page = o.page != null ? o.page : pageText();
+  const head = (o.about ? `SUJET : ${o.about}\n\n` : "")
+    + (page ? `CE QUE BREIZH WATTS AFFICHE DÉJÀ À NATHAN (calculé par l'outil, il l'a sous les yeux : ne le lui redis pas) :\n${String(page).slice(0, 4200)}\n\n` : "")
+    + (o.extra ? `EN PLUS, CE QUE L'OUTIL N'AFFICHE PAS ICI (repères calculés, fiables : sers-t'en pour compléter son analyse) :\n${o.extra}\n\n` : "")
+    + "DONNÉES DE NATHAN (chaque date porte son repère : aujourd'hui, hier, il y a 3 j, demain) :\n";
+  let k = { ...base, focus: o.focus }, t = head + data(now, k);
+  for (let i = 0; i < 12 && t.length > MAX_CTX; i++) { k = { ...k, nights: Math.max(2, k.nights - 2), days: Math.max(4, k.days - 2), weeks: Math.max(2, k.weeks - 1) }; t = head + data(now, k); }
+  return t.slice(0, MAX_CTX);
 }
+// réponse de l'IA en HTML sûr : paragraphes, listes à tirets, intitulé en gras (« Pourquoi : … »), **gras** ; rien d'autre n'est interprété
+function html(t) {
+  const out = []; let ul = null;
+  const inl = s => esc_(s).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\*/g, "");
+  String(t || "").replace(/\r/g, "").split("\n").forEach(raw => {
+    let s = raw.trim().replace(/^#{1,4}\s*/, ""); if (!s) { ul = null; return; }
+    const li = /^(?:[-•–]|\*(?!\*)|\d+[.)])\s+/.exec(s);
+    if (li) { if (!ul) { ul = []; out.push(ul); } ul.push(inl(s.slice(li[0].length))); return; }
+    ul = null;
+    const lab = /^(?:\*\*)?([A-ZÀ-Ý][^\s:*]*(?:\s[^\s:*]+){0,3})\s?:(?:\*\*)?\s+(?=\S)/.exec(s);
+    out.push(lab && lab[1].length <= 30 ? `<b>${esc_(lab[1])} :</b> ${inl(s.slice(lab[0].length))}` : inl(s));
+  });
+  return out.map(x => Array.isArray(x) ? `<ul>${x.map(i => `<li>${i}</li>`).join("")}</ul>` : `<p>${x}</p>`).join("");
+}
+// script de synchro pas encore à jour (les consignes de l'entraîneur sont dans sync.gs) : une ligne le dit
+const stale = j => j && !(j.v >= AI_V) ? "Script de synchro ancien : colle la nouvelle version de sync.gs dans la Sheet (puis nouvelle version du déploiement) pour des commentaires plus justes." : "";
+const stamp = at => at ? `${rel(new Date(at), new Date())} à ${hh(at)}` : "";
 const avail = () => !!(window.Sync && Sync.configured && Sync.configured() && Sync.ai);
 async function ready() { if (!(window.Recup && Recup.data) && window.loadProfile) { try { await window.loadProfile(); } catch (e) {} } }
 
 // ------------------------------------------------------------------ encart à la demande dans une carte
-// o = { kind, title, button, ctx: () => texte de la page à joindre aux données }
+// o = { kind, title, button, ctx: () => texte de la page (ce que l'outil affiche déjà), about: () => le sujet en une phrase,
+//       extra: () => repères calculés que la page n'affiche pas (IA.morningExtra, IA.weekExtra) }
 function mount(el, o) {
   if (!el || !avail()) return;
   const old = el.querySelector(`.iabox[data-kind="${o.kind}"]`); if (old) old.remove();
@@ -107,16 +388,17 @@ function mount(el, o) {
     el.appendChild(box); return;
   }
   box.innerHTML = `<p class="iah"><b>${esc_(o.title)}</b> <small>IA (Gemini), à partir de tes données</small></p>
-    <button class="btn" type="button" data-ia>${esc_(o.button || "Demander")}</button><p class="iat" hidden></p><p class="note iam" hidden></p>`;
+    <button class="btn" type="button" data-ia>${esc_(o.button || "Demander")}</button><div class="iat iatx" hidden></div><p class="note iam" hidden></p>`;
   el.appendChild(box);
   const out = box.querySelector(".iat"), msg = box.querySelector(".iam"), btn = box.querySelector("[data-ia]");
-  const say = (t, err) => { const p = err ? msg : out; (err ? out : msg).hidden = true; p.hidden = !t; p.textContent = t || ""; };
+  const say = (t, err) => { const p = err ? msg : out; (err ? out : msg).hidden = true; p.hidden = !t; if (err) p.textContent = t || ""; else p.innerHTML = html(t); };
+  const note = t => { msg.hidden = !t; msg.textContent = t || ""; };   // sous la réponse : date de la réponse gardée, script ancien
   btn.onclick = async () => {
     btn.disabled = true; say("L'entraîneur analyse tes données…", true);
     await ready();
-    const ctx = full(o.ctx ? o.ctx() : ""), key = K + o.kind + ":" + hash(ctx.replace(/^Maintenant : .*$/m, ""));
-    const c = lsGet(key); if (c && c.t) { say(c.t); btn.disabled = false; return; }
-    try { const j = await Sync.ai({ kind: o.kind, ctx }); lsPut(key, { t: j.text, at: Date.now() }); say(j.text + left(j)); }
+    const ctx = full({ kind: o.kind, about: o.about ? o.about() : "", page: o.ctx ? o.ctx() : "", extra: o.extra ? o.extra() : "" }), key = K + o.kind + ":" + hash(ctx.replace(/^Heure : .*$/m, ""));
+    const c = lsGet(key); if (c && c.t) { say(c.t); note(`Réponse gardée (${stamp(c.at)}) : rien n'a changé depuis.`); btn.disabled = false; return; }
+    try { const j = await Sync.ai({ kind: o.kind, ctx }); lsPut(key, { t: j.text, at: Date.now() }); say(j.text + left(j)); note(stale(j)); }
     catch (err) { say("Indisponible : " + err.message + ".", true); }
     finally { btn.disabled = false; }
   };
@@ -131,7 +413,7 @@ function chatModal() {
   m = document.createElement("div"); m.id = "iaBack"; m.className = "bm-back"; m.hidden = true;
   m.innerHTML = `<div class="bm iachat" role="dialog" aria-modal="true" aria-labelledby="iaTitle">
     <header class="bm-head"><div><div class="bm-k">Assistant IA (Gemini)</div><h3 id="iaTitle">Ton entraîneur</h3>
-      <div class="bm-sub">Il lit ton profil, tes 14 dernières nuits, tes séances des 14 derniers jours, ton Plan de la semaine et la page ouverte.</div></div>
+      <div class="bm-sub">Il lit la page ouverte, ton profil, tes nuits, tes séances des 14 derniers jours, tes semaines et ton Plan. Il complète ce que la page calcule déjà.</div></div>
       <button class="bm-x" data-iaclose aria-label="Fermer">✕</button></header>
     <div class="iamsgs" id="iaMsgs" aria-live="polite"></div>
     <div class="chips iasugg" id="iaSugg">${SUGG.map(s => `<button class="chip" type="button">${esc_(s)}</button>`).join("")}</div>
@@ -152,7 +434,7 @@ function drawChat(busy, err) {
   clearInterval(tick);
   const m = chatModal(), C = chatState(), box = m.querySelector("#iaMsgs");
   box.innerHTML = (C.m.length ? "" : `<p class="note">Pose une question ou choisis une suggestion. Il répond avec tes données du jour.</p>`)
-    + C.m.map(x => `<div class="iamsg ${x.r === "u" ? "me" : "ia"}">${esc_(x.t)}</div>`).join("")
+    + C.m.map(x => x.r === "u" ? `<div class="iamsg me">${esc_(x.t)}</div>` : `<div class="iamsg ia iatx">${html(x.t)}</div>`).join("")
     + (busy ? `<div class="iamsg ia busy">L'entraîneur analyse tes données… <span class="iasec"></span></div>` : "") + (err ? `<p class="note iaerr">${esc_(err)}</p>` : "");
   m.querySelector("#iaSugg").hidden = C.m.length > 0;
   m.querySelectorAll("#iaForm button, #iaSugg .chip").forEach(b => b.disabled = !!busy);
@@ -164,7 +446,8 @@ async function send(q) {
   const C = chatState(); C.m.push({ r: "u", t: q }); C.m = C.m.slice(-MAX_TURNS); lsSet(K_CHAT, C); drawChat(true);
   if (!avail()) { drawChat(false, "L'entraîneur passe par la synchronisation : configure-la sur cet appareil (carte Chaîne, réglages)."); return; }
   await ready();
-  try { const j = await Sync.ai({ kind: "chat", ctx: full(page0), msgs: C.m.slice(-10) }); C.m.push({ r: "m", t: j.text + left(j) }); lsSet(K_CHAT, C); drawChat(); }
+  try { const j = await Sync.ai({ kind: "chat", ctx: full({ kind: "chat", about: "conversation avec Nathan ; sa question est dans son message.", page: page0 }), msgs: C.m.slice(-10) });
+    C.m.push({ r: "m", t: j.text + left(j) }); lsSet(K_CHAT, C); drawChat(false, stale(j)); }
   catch (e) { C.m.pop(); lsSet(K_CHAT, C); drawChat(false, "Indisponible : " + e.message + "."); const i = document.getElementById("iaIn"); if (i && !i.value) i.value = q; }
 }
 function chat(q) {
@@ -180,5 +463,6 @@ function addButton() {
   b.onclick = () => chat(); bar.appendChild(b);
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addButton); else addButton();
-window.IA = { mount, chat, data, textOf, full, ready };
+const relOf = (d, now = new Date()) => rel(typeof d === "string" ? fromYmd(d) : d, now);   // « aujourd'hui (ven. 13/11) » pour les sujets des encarts
+window.IA = { mount, chat, data, textOf, full, ready, html, stale, stamp, sessionExtra, sessionAbout, morningExtra, weekExtra, rel: relOf, hh, _: { rel, gap, splits, segs, facts, similar, around, nextPlanned, actLine, nightLine, KIND, AI_V } };
 })();

@@ -11,7 +11,7 @@
 //   { k: "<clé>", op: "sync", c: "<collection>", items: [{ id, ts, v }, …] }
 //   { k: "<clé>", op: "ai", kind: "seance|question|semaine|recup|sortie|objectifs", ctx: "<données en texte>", q?: "<question>" }
 //   { k: "<clé>", op: "ai", kind: "chat", ctx: "<données>", msgs: [{ r: "u"|"m", t }, …] }   (conversation, dernier message de Nathan en dernier)
-//     → { ok: true, text, model, left }   (left = demandes restantes aujourd'hui, plafond AI_DAY)
+//     → { ok: true, text, model, left, v }   (left = demandes restantes aujourd'hui, plafond AI_DAY ; v = version des consignes, AI_V)
 // Réponse : { ok: true, items: [...] } ou { ok: false, err: "...", msg? }.
 //
 // Commentaire IA (Google Gemini, palier gratuit) : la clé Gemini est dans les propriétés du script (GEMINI_KEY),
@@ -104,42 +104,94 @@ function out_(o) {
 }
 
 // ------------------------------------------------------------------ Commentaire IA (Gemini)
-var AI_MAX_CTX = 14000, AI_MAX_Q = 600, AI_MAX_MSGS = 10;
+var AI_MAX_CTX = 20000, AI_MAX_Q = 600, AI_MAX_MSGS = 10;
 var AI_DAY = 60;  // demandes par jour au plus (palier gratuit) ; jour du Pacifique, comme les quotas Google
-// Demande de Nathan du 30/10/2026 : un vrai assistant, pas une paraphrase de la page. Il reçoit les données brutes (profil, forme,
-// nuits, séances, Plan) et doit analyser, expliquer les causes et proposer des séances précises.
-var AI_WHO = "Tu es l'entraîneur personnel et l'assistant de Nathan, cycliste sur route en Bretagne (il court aussi et fait de la musculation), "
-  + "qui veut augmenter sa FTP et sa VO2max et préparer un ultra de 250 km. Tu reçois ses données (profil et zones, forme, nuits récentes, "
-  + "séances des derniers jours, Plan des prochains jours) et ce qu'affiche la page qu'il regarde. ";
-var AI_RULES = " Règles : appuie-toi sur ses données ; une mesure (VFC, sommeil, watts réalisés…) doit venir des données, n'en invente aucune, "
-  + "mais calcule à partir d'elles (watts depuis la FTP de travail, bpm depuis ses zones, durées) et propose des séances précises. "
-  + "Ne répète pas les phrases déjà affichées : analyse, explique les causes, tranche et propose. Sépare ce qui est sûr de ce qui est une hypothèse. "
-  + "Pas de diagnostic médical : si un signe peut annoncer une maladie, dis-le comme hypothèse et conseille de consulter si ça dure. "
-  + "En français, en le tutoyant, ton direct d'entraîneur, sans formule de politesse ni titre ; des tirets pour une liste si utile ; 170 mots au plus sauf s'il demande plus. "
+var AI_V = 2;     // version des consignes, renvoyée au site (il signale un script plus ancien)
+// Refonte du 13/11/2026 (demande de Nathan : commentaires incohérents, un footing du jour appelé « d'hier soir », la séance du lendemain
+// recopiée du Plan). L'entraîneur COMPLÈTE Breizh Watts : l'outil calcule (charge, forme, récup, verdicts, Plan), l'IA relie ces données
+// entre elles, explique et dit ce que ça change. Le site range le texte en blocs (SUJET, CE QUE BREIZH WATTS AFFICHE DÉJÀ, EN PLUS,
+// DONNÉES DE NATHAN), date chaque ligne en clair (aujourd'hui, hier, il y a 3 j) et écrit les verdicts (« sous sa zone normale »).
+var AI_WHO = "Tu es l'entraîneur de Nathan, cycliste sur route en Bretagne qui court aussi et fait de la musculation ; il veut monter sa FTP et sa VO2max "
+  + "et préparer un ultra de 250 km. Il utilise Breizh Watts, son tableau de bord, qui calcule déjà tout : charge, forme, score de récup, zones, "
+  + "verdict de chaque séance, Plan de la semaine. Ton rôle est de COMPLÉTER cet outil, jamais de le répéter : tu relies entre elles des données "
+  + "qu'il montre séparément (une séance, la nuit d'avant, la charge des jours précédents, ce qui est prévu ensuite), tu expliques la cause la plus "
+  + "probable de ce qui sort de l'ordinaire, et tu dis ce que ça change concrètement. Le message contient, dans l'ordre : le SUJET ; "
+  + "CE QUE BREIZH WATTS AFFICHE DÉJÀ (Nathan l'a sous les yeux) ; parfois EN PLUS, des données que l'outil n'affiche pas à cet endroit ; "
+  + "puis les DONNÉES DE NATHAN (profil, Plan, nuits, séances, semaines). ";
+var AI_RULES = " Règles de cohérence, toutes obligatoires. "
+  + "1) Dates : chaque ligne porte son repère (aujourd'hui, hier, avant-hier, il y a 3 j, demain). Reprends ces repères tels quels, ne recalcule jamais "
+  + "un jour toi-même, et n'écris « hier », « ce matin », « ce soir » ou « demain » que si les données le disent. Le SUJET dit quand a eu lieu ce que tu commentes. "
+  + "2) L'outil fait foi : ses chiffres, ses seuils et ses verdicts (« sous sa zone normale », « chargé », score de récup « moyen ») ne se recalculent pas "
+  + "et ne se recopient pas. Ne cite un chiffre déjà affiché que pour appuyer une idée qui n'est pas affichée. Si une conclusion de l'outil ne colle pas "
+  + "aux données, dis-le clairement et dis pourquoi : c'est exactement ce qu'on attend de toi. "
+  + "3) Le Plan fait foi pour les jours à venir : ne redécris pas une séance déjà prévue (il en a le détail) et n'en invente pas une autre. Dis seulement "
+  + "s'il faut la garder, l'alléger ou la déplacer, laquelle, quel jour et pourquoi. Ne détaille une séance (échauffement, blocs, récupérations) que s'il "
+  + "la demande ou si tu proposes d'en remplacer une. "
+  + "4) Reste dans le sport du sujet : une course à pied se lit en allure, cardio et cadence ; la « puissance Garmin » d'une course ne se compare jamais "
+  + "à la FTP vélo. Respecte les contraintes écrites dans les données (reprise de la course après blessure : footings faciles, pas de fractionné). "
+  + "5) Rien d'inventé ni de faux : avant d'écrire qu'une valeur dépasse ou reste sous une autre, vérifie les deux nombres ; préfère les comparaisons déjà "
+  + "écrites dans les données. Toute mesure vient des données ; un calcul à partir d'elles est permis (watts depuis la FTP de travail, bpm depuis ses zones). "
+  + "Ce qui n'est pas dans les données (repas, hydratation, alcool, stress au travail, météo de la séance, sensations) ne peut être qu'une hypothèse, "
+  + "annoncée comme telle, deux au plus. "
+  + "6) Pas de généralités ni de compliments (« écoute ton corps », « hydrate-toi bien », « belle séance », « tu es d'attaque ») : chaque phrase s'appuie "
+  + "sur une donnée précise de Nathan. Avant d'écrire qu'il est en forme ou reposé, vérifie la VFC contre sa zone, le score de récup et la fraîcheur : "
+  + "si l'un est mauvais, dis-le. "
+  + "7) Pas de diagnostic médical ; si un signe peut annoncer une maladie ou une blessure, dis-le comme hypothèse et conseille de consulter si ça dure. "
+  + "Forme : en français, tutoiement, ton direct d'entraîneur ; ni titre, ni salutation, ni astérisques, ni gras ; unités comme dans les données. "
   + "Sujets : entraînement, vélo, course, musculation, récupération, sommeil, alimentation du sportif ; pour tout autre sujet, dis seulement que tu ne traites que ceux-là.";
-var AI_SESSION = "Quand tu proposes une séance, donne : échauffement, blocs (durée, watts et % de FTP ou bpm), récupérations, retour au calme, durée totale, "
-  + "et une variante plus douce si sa récup est moyenne.";
-var AI_CHAT = "Réponds à ses messages comme son entraîneur. S'il demande quoi faire, propose la séance du jour adaptée à sa récup, sa fatigue et son Plan. "
-  + "S'il demande si une sortie est raisonnable (par exemple 150 km aujourd'hui), réponds d'abord oui, non ou oui à condition, explique avec ses données "
-  + "(nuit, VFC, fatigue, séances récentes, ce qui est prévu ensuite), puis donne les conditions : intensité maxi en watts ou bpm, durée, alimentation, "
-  + "et ce que ça change pour les jours suivants. " + AI_SESSION;
+var AI_FMT = " Réponds en trois courts paragraphes séparés par une ligne vide. Chaque paragraphe commence par son intitulé suivi de deux-points, puis ne contient "
+  + "que des faits et des chiffres de Nathan : ne recopie jamais le texte de ces consignes. Les trois paragraphes, dans l'ordre (intitulé → ce qu'il doit contenir) : ";
+var AI_SESSION = "Quand tu détailles une séance, donne : échauffement, blocs (durée, watts et % de FTP, ou bpm, ou allure), récupérations, retour au calme, "
+  + "durée totale, et une variante plus douce si sa récup est moyenne. ";
+var AI_CHAT = "Réponds à sa question, et seulement à elle : la réponse en une phrase d'abord, puis les raisons tirées de ses données, puis ce qu'il fait concrètement. "
+  + "S'il demande quoi faire aujourd'hui : pars de la séance prévue au Plan et de ce qu'il a déjà fait aujourd'hui, et dis s'il la garde, l'allège ou la "
+  + "remplace selon sa récup, sa fraîcheur et les jours précédents. S'il demande si une sortie est raisonnable (par exemple 150 km aujourd'hui) : réponds "
+  + "d'abord oui, non ou oui à condition, puis les conditions (intensité maxi en watts ou bpm, durée, alimentation) et ce que ça change pour les séances "
+  + "prévues ensuite. " + AI_SESSION + "170 mots au plus, sauf s'il demande plus ; des tirets pour une liste si utile.";
 var AI_SYS = {
   chat: AI_WHO + AI_CHAT + AI_RULES,
   question: AI_WHO + AI_CHAT + AI_RULES,
-  seance: AI_WHO + "On te donne le bilan d'une séance. Analyse ce qu'elle a vraiment travaillé, si elle colle au prévu et à son état du jour (nuit, fatigue), "
-    + "pourquoi elle a été dure ou facile, puis la séance précise à faire la prochaine fois. " + AI_SESSION + AI_RULES,
-  recup: AI_WHO + "Explique pourquoi sa récupération est ce qu'elle est ce jour-là : confronte la nuit (durée, phases, heure de coucher, réveils) à sa VFC "
-    + "et à son cœur au repos comparés à sa normale, à la charge et à l'intensité des 3 ou 4 jours précédents, au stress et à la température. "
-    + "Classe les causes les plus probables (par exemple une longue nuit avec une VFC basse : fatigue des grosses séances des jours d'avant, début d'infection, "
-    + "alcool ou repas tardif, chaleur), dis ce qui confirmerait chacune, puis ce qu'il doit faire aujourd'hui (séance précise ou repos). " + AI_SESSION + AI_RULES,
-  semaine: AI_WHO + "Fais le bilan de sa semaine : volume et intensité réels contre le Plan, effet sur sa récup, ce qui a marché, ce qui coince, "
-    + "et 2 ou 3 ajustements concrets pour la semaine qui vient." + AI_RULES,
-  sortie: AI_WHO + "On te donne l'analyse d'une sortie à venir. Fais le briefing : stratégie de rythme (watts ou cardio par portion, où appuyer, "
-    + "où s'économiser selon le vent et les montées), ravitaillement et hydratation minutés, tenue, et ce qu'il faut adapter à sa forme du jour." + AI_RULES,
-  objectifs: AI_WHO + "Fais le point sur ses objectifs : vitesse de progression réelle, ce qui freine (volume, intensité, récup, régularité), "
-    + "et un plan d'action concret pour les semaines qui viennent (séances clés, volume) qu'il pourra reporter dans son Plan." + AI_RULES
+  seance: AI_WHO + "On te donne le bilan d'une séance déjà faite : dis ce que ce bilan ne dit pas." + AI_FMT
+    + "intitulé « À retenir : » → le fait le plus utile que le bilan affiché ne dit pas. Pars des « Repères calculés » (moitiés de la séance, place parmi ses séances "
+    + "comparables : normale pour lui, meilleure, moins bonne), précise avec le déroulé par tranches où et quand ça change. "
+    + "intitulé « Explication : » → la cause la plus probable du point marquant, en confrontant la séance à ce qui l'entoure : dénivelé de chaque moitié, nuit d'avant, "
+    + "séance plus tôt le même jour, charge des 3 jours d'avant, heure. Dis ce que les données écartent (par exemple la chaleur un jour frais) : si une cause "
+    + "avancée par l'outil ne tient pas, écris-le. Une VFC basse ou une grosse charge la veille est un indice, pas une preuve : écris « probablement ». "
+    + "intitulé « Pour la suite : » → d'abord la prochaine séance, celle que donne la ligne « Suite du Plan » avec son jour : la garder, l'alléger ou la déplacer (son nom "
+    + "et son jour seulement, jamais ses watts, sa durée ni son contenu), en une phrase complète qui dit pourquoi. Ensuite, seulement si les Repères calculés donnent un "
+    + "« repère pour le prochain footing » ou un autre repère pour la prochaine fois, reprends-le ici, une seule fois dans toute la réponse. "
+    + "N'écris aucune cible chiffrée (allure, watts, bpm, cadence) qui n'est pas déjà écrite dans les données. "
+    + "140 mots au plus." + AI_RULES,
+  recup: AI_WHO + "On te donne le bilan de récupération d'un matin : le SUJET dit lequel (aujourd'hui ou un jour passé)." + AI_FMT
+    + "intitulé « Lecture : » → ce que la nuit et les mesures disent ensemble, au-delà du score : ce qui se contredit (longue nuit et VFC basse…), ce qui s'écarte de sa normale. "
+    + "intitulé « Causes : » → les causes probables classées, chacune appuyée sur une donnée d'AVANT cette nuit (la veille et sa dernière séance, la charge des 4 jours "
+    + "d'avant, l'heure de coucher, la durée, la température de la nuit, le stress de la veille : pars des repères calculés) ; une séance faite après le "
+    + "réveil ne peut jamais expliquer la nuit ; au plus deux hypothèses hors données (alcool, repas tardif, début d'infection), avec ce qui les confirmerait. "
+    + "intitulé « Aujourd'hui : » → si le matin regardé est aujourd'hui : garder, alléger ou remplacer la séance prévue au Plan (nomme-la), compte tenu de ce qui est déjà fait "
+    + "aujourd'hui, et l'heure de coucher à viser ce soir ; si c'est un jour passé, remplace cet intitulé par « À retenir : » et dis ce que ce matin-là apprend. "
+    + "150 mots au plus." + AI_RULES,
+  semaine: AI_WHO + "On te donne le bilan de sa semaine (le SUJET dit laquelle)." + AI_FMT
+    + "intitulé « Bilan : » → volume et intensité réels contre le Plan (séances faites, non faites) et contre ses semaines précédentes (tableau des semaines), en deux phrases. "
+    + "intitulé « Ce qui coince : » → le point le plus limitant, un seul, avec la donnée qui le montre (séance du Plan non faite, part de zone 3 au-dessus du repère, "
+    + "nuits, récup, volume en baisse) : pars des repères calculés ; si rien ne coince, dis-le. "
+    + "intitulé « La suite : » → deux ajustements concrets au plus pour les jours qui restent et la semaine qui vient, dits comme des changements à faire dans le Plan "
+    + "(quel jour, quelle séance, quoi changer), et qui découlent du point qui coince : n'allège ni ne retire une séance que si une donnée montre de la fatigue "
+    + "(récup basse, fraîcheur chargée, VFC sous sa zone plusieurs nuits) ; si le Plan prévu convient, dis-le et dis sur quelle séance mettre l'effort. 150 mots au plus." + AI_RULES,
+  sortie: AI_WHO + "On te donne l'analyse d'une sortie à venir (vent, montées, nutrition, arrêts déjà calculés par l'outil)." + AI_FMT
+    + "intitulé « Rythme : » → la stratégie par portion, en watts ou en bpm calculés depuis sa FTP de travail et ses zones : où appuyer, où s'économiser selon le vent et les montées affichés. "
+    + "intitulé « Point clé : » → le moment de la sortie où ça peut mal tourner (vent de face tardif, montée après 3 h, ravito trop loin) et quoi faire à ce moment-là ; "
+    + "ne recopie pas le plan nutrition ni la liste des arrêts. "
+    + "intitulé « À adapter : » → ce que sa forme change (fraîcheur, dernière nuit, séances des 2 derniers jours) et ce que la sortie change pour la séance prévue ensuite au Plan. "
+    + "150 mots au plus." + AI_RULES,
+  objectifs: AI_WHO + "On te donne le point sur ses objectifs (projections déjà calculées par l'outil)." + AI_FMT
+    + "intitulé « Rythme : » → si la projection de l'outil est crédible au vu de ses semaines récentes (volume, intensité, régularité du tableau des semaines). "
+    + "intitulé « Frein principal : » → un seul, le plus limitant (volume, intensité, régularité, récupération), démontré par le tableau des semaines ou les nuits. "
+    + "intitulé « Plan d'action : » → deux ou trois actions pour les 4 semaines qui viennent, à reporter dans son Plan (nombre de séances clés, volume par semaine, test), chiffrées. "
+    + "160 mots au plus." + AI_RULES
 };
-// Flash seulement si la propriété GEMINI_MODEL_FLASH le nomme : le 30/10/2026 il ne répondait pas (testChat tournait sans fin), Flash-Lite si.
+// Flash pour la conversation et la question seulement, et seulement si la propriété GEMINI_MODEL_FLASH le nomme : le 30/10/2026 il ne
+// répondait pas, et le 14/11/2026 tous les Flash de la clé répondaient 503 (saturés). Les encarts passent par Flash-Lite : leurs consignes
+// et les repères calculés du site ont été mis au point sur lui (essais réels du 14/11/2026).
 var AI_TIER = { chat: "flash", question: "flash" };
 
 // compteur du jour (propriétés du script, sous verrou) : faux si le plafond est atteint ; sinon le nombre restant après celle-ci
@@ -178,19 +230,31 @@ function ai_(req) {
   }
   var left = aiCount_();
   if (left === false) return { ok: false, err: "quota_ia" };
-  var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.5, maxOutputTokens: 2048 } };
-  var tiers = AI_TIER[req.kind] === "flash" && props.getProperty("GEMINI_MODEL_FLASH") ? ["flash", "lite"] : ["lite"], r = null;
-  for (var i = 0; i < tiers.length; i++) {
-    try { r = gemini_(key, props, tiers[i], body); }
-    catch (e) { if (i === tiers.length - 1) throw e; r = { code: 0 }; continue; }  // Flash trop lent (délai de 60 s d'UrlFetch) : Flash-Lite
-    if (!(r.code === 429 || r.code === 404 || r.code >= 500) || i === tiers.length - 1) break;  // Flash saturé, retiré ou en panne : Flash-Lite
+  var body = { systemInstruction: { parts: [{ text: sys }] }, contents: contents, generationConfig: { temperature: 0.3, maxOutputTokens: 2048 } };
+  var tiers = AI_TIER[req.kind] === "flash" && props.getProperty("GEMINI_MODEL_FLASH") ? ["flash", "lite"] : ["lite"], r = null, text = "", c = null;
+  // 2 essais au plus : une réponse qui recopie les consignes au lieu de répondre (vu avec Flash-Lite le 14/11/2026) est redemandée une fois
+  for (var n = 0; n < 2; n++) {
+    for (var i = 0; i < tiers.length; i++) {
+      try { r = gemini_(key, props, tiers[i], body); }
+      catch (e) { if (i === tiers.length - 1) throw e; r = { code: 0 }; continue; }  // Flash trop lent (délai de 60 s d'UrlFetch) : Flash-Lite
+      if (!(r.code === 429 || r.code === 404 || r.code >= 500) || i === tiers.length - 1) break;  // Flash saturé, retiré ou en panne : Flash-Lite
+    }
+    if (r.code === 429) return { ok: false, err: "quota_ia" };
+    if (r.code !== 200) return { ok: false, err: "ia", msg: String((r.j.error && r.j.error.message) || ("Gemini " + r.code)).slice(0, 200) };
+    c = r.j.candidates && r.j.candidates[0]; var parts = c && c.content && c.content.parts || [];
+    text = parts.filter(function (p) { return !p.thought; }).map(function (p) { return p.text || ""; }).join("").trim();
+    if (!text || !echo_(text, sys)) break;
+    body.generationConfig.temperature = 0.6;
   }
-  if (r.code === 429) return { ok: false, err: "quota_ia" };
-  if (r.code !== 200) return { ok: false, err: "ia", msg: String((r.j.error && r.j.error.message) || ("Gemini " + r.code)).slice(0, 200) };
-  var c = r.j.candidates && r.j.candidates[0], parts = c && c.content && c.content.parts || [];
-  var text = parts.filter(function (p) { return !p.thought; }).map(function (p) { return p.text || ""; }).join("").trim();
   if (!text) return { ok: false, err: "ia", msg: "réponse vide" + (c && c.finishReason ? " (" + c.finishReason + ")" : "") };
-  return { ok: true, text: text.slice(0, 4000), model: r.model, left: left };
+  if (echo_(text, sys)) return { ok: false, err: "ia", msg: "réponse inutilisable (le modèle a recopié ses consignes) : redemande" };
+  return { ok: true, text: text.slice(0, 4000), model: r.model, left: left, v: AI_V };
+}
+// vrai si la réponse reprend mot pour mot un passage des consignes (45 caractères de suite)
+function echo_(text, sys) {
+  var t = String(text).replace(/\s+/g, " "), s = String(sys).replace(/\s+/g, " ");
+  for (var i = 0; i + 45 <= t.length; i += 15) if (s.indexOf(t.substr(i, 45)) >= 0) return true;
+  return false;
 }
 // réflexion limitée : sans cela, un Flash récent peut « penser » plus d'une minute avant de répondre (Gemini 3 et plus : thinkingLevel,
 // Gemini 2.5 : thinkingBudget) ; si le modèle refuse ce réglage (400), on redemande sans.

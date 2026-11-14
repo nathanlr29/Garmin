@@ -91,6 +91,9 @@ function renderRecup() {
   renderSleep(P); renderReg(P); renderRhr(P); renderWeight(P); renderHrvTrend(P); renderBig(); renderResp(P); renderCmp(); renderFacts();
   // l'entraîneur (IA, à la demande) lit la nuit choisie et les tendances affichées
   if (window.IA) IA.mount($("rMorning").parentElement, { kind: "recup", title: "Lecture de l'entraîneur", button: "Que disent ma nuit et ma récup ?",
+    about: () => { const d = RC.pick[RC.sel]; if (!d) return ""; const r = IA.rel(d.d);
+      return /^aujourd/.test(r) ? `Bilan de récupération de ce matin : réveil ${r}.` : `Bilan de récupération d'un matin passé : réveil ${r}. Ce n'est pas ce matin : Nathan relit ce jour-là.`; },
+    extra: () => { const d = RC.pick[RC.sel]; return d ? IA.morningExtra(d.d) : ""; },
     ctx: () => IA.textOf(["#rMorning", "#rHmAns", "#rHm", "#rNightAns", "#rCtxAns", "#rHrAns", "#rHrvAns", "#rRegAns", "#rRhrAns", "#rKgAns", "#rHrvTAns", "#rBigAns", "#rBigSleep", "#rBigAhead", "#rRespAns", "#rCmpAns"]) });
 }
 function selectDay(i) {
