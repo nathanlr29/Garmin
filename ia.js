@@ -95,10 +95,10 @@ function nightLine(d, now) {
 // ------------------------------------------------------------------ données envoyées (texte, sans nom ni lieu)
 // o = { nights, days, weeks, plan: [de, à] en jours autour d'aujourd'hui (« week » = depuis le lundi), focus: id de la séance analysée }
 const KIND = {
-  chat: { nights: 10, days: 14, weeks: 6, plan: [0, 6] }, question: { nights: 10, days: 14, weeks: 6, plan: [0, 6] },
+  chat: { nights: 10, days: 14, weeks: 6, plan: [0, 6], goal: 1 }, question: { nights: 10, days: 14, weeks: 6, plan: [0, 6], goal: 1 },   // goal : le but de chaque séance du Plan (une phrase)
   seance: { nights: 4, days: 14, weeks: 4, plan: [0, 5] }, recup: { nights: 14, days: 7, weeks: 3, plan: [0, 3] },
   semaine: { nights: 7, days: 14, weeks: 6, plan: ["week", 7] }, objectifs: { nights: 3, days: 10, weeks: 10, plan: [0, 7] },
-  sortie: { nights: 3, days: 7, weeks: 3, plan: [0, 6] } };
+  sortie: { nights: 3, days: 7, weeks: 3, plan: [0, 6] } };   // sans goal : l'usage n'a pas à décrire les séances du Plan, il n'en reçoit que le titre
 function secWhen(now) {
   const L = [`Nous sommes ${now.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}, c'est le ${part(now.getHours())}.`, `Heure : ${hh(now)}.`];
   const td = acts().filter(a => a.dt <= now && gap(a.dt, now) === 0).sort((a, b) => a.dt - b.dt);
@@ -123,7 +123,7 @@ function secProfile(now) {
       + X.answer(Pg, X.week(Pg.k, X.weekRuns(acts(), X.mondayOf(+now)), X.longCap(acts(), +now)), +now)); } catch (e) {}
   try { const G = window.Course._.gauge(acts(), +now);
     if (G.acute || G.chronic) L.push(`Volume de course : ${n(G.acute, 1)} km sur les 7 derniers jours, ${n(G.chronic, 1)} km par semaine en moyenne sur les 28 jours d'avant${G.zone != null ? ` (rapport ${n(G.ratio, 2)} : ${["sous-charge", "zone sûre", "vigilance", "risque élevé"][G.zone]})` : ""}.`); } catch (e) {}
-  try { const f = Charge.fitness(now); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)}, soit « ${formWord(f.tsb)} » (échelle de l'outil : frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}
+  try { const f = Charge.fitness(now); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)}, soit « ${formWord(f.tsb)} » (la fraîcheur est la forme moins la fatigue, pas une température ; échelle de l'outil : frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}
   return L;
 }
 function secNights(now, k) {
@@ -150,7 +150,7 @@ function secWeeks(now, k) {
   return out.length ? ["Semaines (lundi → dimanche, la plus récente d'abord) :", ...out] : [];
 }
 // le Plan fait foi pour ce qui vient : séances vélo, course et muscu de chaque jour, avec leur état pour les jours passés et aujourd'hui
-function secPlan(now, from, to) {
+function secPlan(now, from, to, goal) {
   const P = window.Plan; if (!P || !P.plannedFor) return [];
   if (from === "week") { const wd = (day0(now).getDay() + 6) % 7; from = -wd - (wd <= 1 ? 7 : 0); }   // lundi et mardi : la semaine dernière aussi (relevé du lundi)
   const out = [];
@@ -158,39 +158,77 @@ function secPlan(now, from, to) {
     const d = addD(now, i), key = ymd(d); let p = null, m = null; try { p = P.plannedFor(key); } catch (e) {} try { m = P.muscuOn ? P.muscuOn(key) : null; } catch (e) {}
     const st = x => x.st === "done" ? ", faite" : x.st === "missed" ? ", non faite" : i < 0 ? "" : i === 0 ? ", reste à faire" : "";
     const one = x => { const ti = (x.w && x.w.title) || x.label || "", g = x.w && x.w.goal ? String(x.w.goal).split(/(?<=[.!?])\s/)[0].replace(/\.$/, "") : "";   // le but : sa première phrase seulement
-      return `${ti}${x.dur && !/\d\s?min/.test(ti) ? ` ${x.dur} min` : ""}${x.place === "out" ? " dehors" : x.place === "mw" ? " sur home trainer" : ""}${x.w && x.w.tss ? `, charge prévue ${Math.round(x.w.tss)}` : ""}${st(x)}${g ? ` (${g.slice(0, 130)})` : ""}`; };
+      return `${ti}${x.dur && !/\d\s?min/.test(ti) ? ` ${x.dur} min` : ""}${x.place === "out" ? " dehors" : x.place === "mw" ? " sur home trainer" : ""}${x.w && x.w.tss ? `, charge prévue ${Math.round(x.w.tss)}` : ""}${st(x)}${g && goal ? ` (${g.slice(0, 130)})` : ""}`; };
     const bike = p && p.sport !== "run" ? p : null, run = p ? (p.sport === "run" ? p : p.run) : null, B = [];
     if (m) B.push(`muscu ${MUS[m.s] || m.label || ""} le matin${st(m)}`);
     if (bike) B.push("vélo : " + one(bike)); if (run) B.push("course : " + one(run));
     if (B.length || (i >= 0 && out.length)) out.push(`- ${rel(d, now)} : ${B.join(" ; ") || "rien de prévu"}`);
   }
-  return out.length ? ["Plan (il fait foi pour les séances à venir ; elles sont déjà affichées à Nathan avec leur détail) :", ...out] : [];
+  return out.length ? ["Plan (il fait foi pour les séances à venir ; Nathan a déjà le détail de chacune sous les yeux) :", ...out] : [];
 }
 function data(now = new Date(), o = KIND.chat) {
   // le Plan avant les listes : si le texte est coupé, ce sont les semaines les plus anciennes qui sautent
-  return [...secWhen(now), ...secProfile(now), ...secPlan(now, o.plan[0], o.plan[1]), ...secNights(now, o.nights), ...secActs(now, o.days, o.focus), ...secWeeks(now, o.weeks)].join("\n");
+  return [...secWhen(now), ...secProfile(now), ...secPlan(now, o.plan[0], o.plan[1], !!o.goal), ...secNights(now, o.nights), ...secActs(now, o.days, o.focus), ...secWeeks(now, o.weeks)].join("\n");
 }
 
 // ------------------------------------------------------------------ ce que le bilan d'une séance n'affiche pas
-// déroulé par tranches à partir du flux (dt, v en km/h × 10, h, c, a, p) : 4 à 10 tranches égales, d'environ 6 min si la séance est courte
-function splits(st, run, virt) {
-  const N = st && (st.h || st.v || st.p || []).length, dt = st && st.dt; if (!N || !(dt > 0) || N * dt < 900) return [];
-  const k = Math.max(4, Math.min(10, Math.round(N * dt / 360))), out = [];
+// tranches égales du flux (dt, v en km/h × 10, h, c, a, p) : moyennes de vitesse (hors arrêts), cardio, cadence, watts, et dénivelé au seuil de 1 m
+function segs(st, run, k) {
+  const N = st && (st.h || st.v || st.p || []).length, dt = st && st.dt, out = []; if (!N || !(dt > 0)) return out;
   let ref = null;
   for (let s = 0; s < k; s++) {
     const i0 = Math.round(s * N / k), i1 = Math.round((s + 1) * N / k);
     const avg = (arr, ok) => { if (!arr) return null; let t = 0, c = 0; for (let i = i0; i < i1; i++) { const v = arr[i]; if (v != null && ok(v)) { t += v; c++; } } return c ? t / c : null; };
-    const v = avg(st.v, x => x / 10 >= (run ? 3 : 5)), h = avg(st.h, x => x > 0), c = avg(st.c, x => x > 0), p = run ? null : avg(st.p, x => x >= 0);
     let up = 0, dn = 0; if (st.a) for (let i = i0; i < i1; i++) { const a = st.a[i]; if (a == null) continue; if (ref == null) ref = a; else if (a - ref >= 1) { up += a - ref; ref = a; } else if (ref - a >= 1) { dn += ref - a; ref = a; } }
-    const P = [];
-    if (p != null && st.p) P.push(`${Math.round(p)} W`);
-    if (v != null && !virt) P.push(run ? paceS(36000 / v) : `${n(v / 10, 1)} km/h`);
-    if (h != null) P.push(`${Math.round(h)} bpm`);
-    if (c != null) P.push(`${Math.round(c)} ${run ? "pas/min" : "tr/min"}`);
-    if (st.a && !virt && (up >= 2 || dn >= 2)) P.push(`+${Math.round(up)} m / −${Math.round(dn)} m`);
-    if (P.length) out.push(`- ${Math.round(i0 * dt / 60)} à ${Math.round(i1 * dt / 60)} min : ${P.join(", ")}`);
+    out.push({ t0: Math.round(i0 * dt / 60), t1: Math.round(i1 * dt / 60), v: avg(st.v, x => x / 10 >= (run ? 3 : 5)), h: avg(st.h, x => x > 0), c: avg(st.c, x => x > 0), p: run || !st.p ? null : avg(st.p, x => x >= 0), up, dn, alt: !!st.a });
   }
   return out;
+}
+// déroulé par tranches : 4 à 10 tranches égales, d'environ 6 min si la séance est courte (rien sous 15 min)
+function splits(st, run, virt) {
+  const N = st && (st.h || st.v || st.p || []).length, dt = st && st.dt; if (!N || !(dt > 0) || N * dt < 900) return [];
+  return segs(st, run, Math.max(4, Math.min(10, Math.round(N * dt / 360)))).map(g => {
+    const P = [];
+    if (g.p != null) P.push(`${Math.round(g.p)} W`);
+    if (g.v != null && !virt) P.push(run ? paceS(36000 / g.v) : `${n(g.v / 10, 1)} km/h`);
+    if (g.h != null) P.push(`${Math.round(g.h)} bpm`);
+    if (g.c != null) P.push(`${Math.round(g.c)} ${run ? "pas/min" : "tr/min"}`);
+    if (g.alt && !virt && (g.up >= 2 || g.dn >= 2)) P.push(`+${Math.round(g.up)} m / −${Math.round(g.dn)} m`);
+    return P.length ? `- ${g.t0} à ${g.t1} min : ${P.join(", ")}` : "";
+  }).filter(Boolean);
+}
+// Repères calculés : les comparaisons sont faites ici, en clair (Flash-Lite se trompe sur « 145 dépasse 150 ») : moitiés de la séance,
+// place parmi les séances comparables, repère cardio de la reprise, fraîcheur de la journée
+const effNum = a => sportOf(a) === "run" ? (a.hr && a.mt ? meters(a) / a.mt * 60 / a.hr : null) : (a.hr && (a.np || a.w) ? (a.np || a.w) / a.hr : null);
+const med = L => { const s = L.slice().sort((x, y) => x - y), k = s.length; return k ? (k % 2 ? s[(k - 1) / 2] : (s[k / 2 - 1] + s[k / 2]) / 2) : null; };
+function facts(a, st, sim, now = new Date()) {
+  const run = sportOf(a) === "run", virt = !run && indoor(a), L = [], N = st && (st.h || st.v || st.p || []).length;
+  if (N && st.dt > 0 && N * st.dt >= 1200) {
+    const [A, B] = segs(st, run, 2);
+    if (A.h != null && B.h != null) {
+      const dh = Math.round(B.h) - Math.round(A.h), hw = `le cardio moyen passe de ${Math.round(A.h)} à ${Math.round(B.h)} bpm (${dh > 0 ? "+" : dh < 0 ? "−" : ""}${Math.abs(dh)} bpm)`;
+      if (run && A.v && B.v) { const d = (B.v - A.v) / A.v; L.push(`Entre la 1re et la 2e moitié, l'allure est ${Math.abs(d) < .015 ? "la même" : d > 0 ? "plus rapide" : "plus lente"} (${paceS(36000 / A.v)} puis ${paceS(36000 / B.v)}) et ${hw}.`); }
+      else if (!run && A.p != null && B.p != null) { const d = A.p ? (B.p - A.p) / A.p : 0; L.push(`Entre la 1re et la 2e moitié, la puissance moyenne est ${Math.abs(d) < .03 ? "la même" : d > 0 ? "plus haute" : "plus basse"} (${Math.round(A.p)} puis ${Math.round(B.p)} W) et ${hw}.`); }
+      else L.push(`Entre la 1re et la 2e moitié, ${hw}.`);
+      if (A.alt && !virt && A.up + B.up >= 20) L.push(`Dénivelé : +${Math.round(A.up)} m sur la 1re moitié, +${Math.round(B.up)} m sur la 2e${Math.abs(B.up - A.up) < 8 ? " (à peu près autant)" : B.up > A.up ? " (la 2e monte plus)" : " (la 1re monte plus)"}.`);
+    }
+    // footing (reprise en cours ou footing prévu au Plan) : chaque moitié contre sa zone 2, d'où le seul repère chiffré donné pour la prochaine fois
+    const fl = ((window.Recup && Recup.data && Recup.data.profile || {}).hrZones || {}).floors || [];
+    let foot = false; try { foot = !!(window.Reprise && Reprise._.progress(acts(), new Date(now)).started); } catch (e) {}
+    if (!foot) try { const p = Plan.plannedFor(ymd(new Date(a.dt)), "run"); foot = !!(p && p.t === "rfoot"); } catch (e) {}
+    if (run && foot && fl.length >= 3 && A.h != null && B.h != null) { const top = fl[2] - 1, o = [A, B].map(g => Math.round(g.h) > top);
+      L.push(`Footing facile = zone 2 (${fl[1]} à ${top} bpm) : la 1re moitié (${Math.round(A.h)} bpm) ${o[0] ? "en sort" : "y est"}, la 2e (${Math.round(B.h)} bpm) ${o[1] ? "en sort" : "y est"}.`
+        + (o[0] || o[1] ? ` Repère pour le prochain footing : rester à ${top} bpm ou moins${o[1] && !o[0] ? " aussi sur la 2e moitié" : ""}, quitte à ralentir dans les montées.` : ""));
+    }
+    if (run && window.Reprise) try { if (Reprise._.progress(acts(), new Date(now)).started) { const T = segs(st, true, Math.max(4, Math.min(10, Math.round(N * st.dt / 360)))).filter(g => g.h != null), top = T.sort((x, y) => y.h - x.h)[0];
+      if (top) L.push(`Tranche la plus haute en cardio : ${Math.round(top.h)} bpm (${top.t0} à ${top.t1} min), ${top.h < 150 ? "sous" : "au-dessus de"} le repère de 150 bpm du programme de reprise.`); } } catch (e) {}
+  }
+  const e = effNum(a), E = sim.map(effNum).filter(x => x != null), unit = run ? "m par battement" : "W par battement";
+  if (e != null && E.length >= 3) { const m = med(E), d = (e - m) / m;
+    L.push(`Efficacité (${unit}) : ${n(e, 2)} pour cette séance, médiane de ses ${E.length} séances comparables ${n(m, 2)} (de ${n(Math.min(...E), 2)} à ${n(Math.max(...E), 2)}) : ${Math.abs(d) < .03 ? "dans sa norme" : d > 0 ? `meilleure que sa norme (+${Math.round(d * 100)} %)` : `moins bonne que sa norme (−${Math.round(-d * 100)} %)`}${run ? "" : " ; à lire seulement entre séances de watts proches"}.`); }
+  const nt = ((window.Recup && Recup.days) || []).find(d => d.d === ymd(new Date(a.dt)));
+  if (nt && nt.wx && nt.wx.tAvg != null && !indoor(a)) L.push(nt.wx.tAvg < 12 ? `Température : ${n(nt.wx.tAvg, 1)} °C dehors la nuit précédente, il faisait froid : la chaleur n'explique pas une hausse du cardio.` : nt.wx.tAvg >= 18 ? `Température : ${n(nt.wx.tAvg, 1)} °C dehors la nuit précédente, il faisait chaud : la chaleur a pu faire monter le cardio.` : "");
+  return L.filter(Boolean);
 }
 // séances du même genre (même sport, dehors ou dedans, durée proche) des 10 semaines d'avant, la plus récente d'abord
 function similar(a, k = 5) {
@@ -214,13 +252,70 @@ function around(a, now = new Date()) {
     if (s === "run" || s === "bike") L.push(p ? `Prévu au Plan ce jour-là en ${s === "run" ? "course" : "vélo"} : ${(p.w && p.w.title) || p.label}${p.dur ? ` ${p.dur} min` : ""}${p.w && p.w.goal ? ` (${String(p.w.goal).split(/(?<=[.!?])\s/)[0].slice(0, 160)})` : ""}` : `Rien de prévu au Plan ce jour-là en ${s === "run" ? "course" : "vélo"}.`); } catch (e) {}
   return L;
 }
+// la suite du Plan en une ligne (le modèle mélangeait les jours en la cherchant dans la liste) : les 2 prochaines séances à faire,
+// et la prochaine du même sport que la séance commentée
+function nextPlanned(a, now = new Date()) {
+  const P = window.Plan; if (!P || !P.plannedFor) return "";
+  const L = [], sp = !a ? null : sportOf(a) === "run" ? "run" : "bike", word = { run: "course", bike: "vélo" }; let same = "";
+  for (let i = 0; i <= 6 && (L.length < 2 || (sp && !same)); i++) {
+    const d = addD(now, i); let p = null; try { p = P.plannedFor(ymd(d)); } catch (e) {}
+    if (!p) continue;
+    [["bike", p.sport !== "run" ? p : null], ["run", p.sport === "run" ? p : p.run]].forEach(([k, x]) => {
+      if (!x || x.st === "done" || x.st === "missed") return;
+      const t = `${rel(d, now)}, ${word[k]} « ${(x.w && x.w.title) || x.label} »${i === 0 ? ", reste à faire" : ""}`;
+      if (L.length < 2) L.push(t); if (k === sp && !same) same = t; });
+  }
+  if (!L.length) return "";
+  return `Suite du Plan : ${L.join(" ; puis ")}.` + (!sp ? "" : same && !L.includes(same) ? ` Prochaine séance de ${word[sp]} : ${same}.` : !same ? ` Aucune séance de ${word[sp]} au Plan dans les 7 jours.` : "");
+}
+const durOf = b => dur(sportOf(b) === "strength" ? b.et || b.mt : b.mt), endOf = b => new Date(+b.dt + (b.et || b.mt || 0) * 1000);
+const onDay = d => acts().filter(b => ymd(new Date(b.dt)) === ymd(d)).sort((x, y) => x.dt - y.dt);
+// Récup : ce qui précède la nuit regardée (key = date du réveil), séparé de ce qui la suit : une séance faite après le réveil n'explique pas la nuit
+function morningExtra(key, now = new Date()) {
+  const L = [], d = fromYmd(key), nt = ((window.Recup && Recup.days) || []).find(x => x.d === key), eve = addD(d, -1), E = onDay(eve);
+  L.push(E.length ? `La veille de cette nuit, ${rel(eve, now)} : ${E.map(b => `${sportFr(b)} à ${hh(b.dt)} (${durOf(b)}${Math.round(tss(b)) ? `, charge ${Math.round(tss(b))}` : ""}, finie à ${hh(endOf(b))})`).join(" ; ")}.`
+    : `La veille de cette nuit, ${rel(eve, now)} : repos, aucune séance.`);
+  if (E.length && nt && nt.bed) { const g = Math.round((new Date(nt.bed) - endOf(E[E.length - 1])) / 60000);
+    if (g > 0 && g < 600) L.push(`Dernière séance de la veille finie ${dur(g * 60)} avant le coucher (${nt.bed.slice(11, 16)})${g < 180 ? " : moins de 3 h, ce qui peut retarder l'endormissement" : " : assez tôt pour ne pas gêner l'endormissement"}.`); }
+  const load = x => onDay(x).reduce((t, b) => t + tss(b), 0), sum4 = [1, 2, 3, 4].reduce((t, i) => t + load(addD(d, -i)), 0);
+  let ref = 0; for (let i = 5; i <= 32; i++) ref += load(addD(d, -i)); ref = ref / 28 * 4;   // 4 jours habituels = moyenne des 28 jours d'avant
+  const q = ref > 0 ? sum4 / ref : null;
+  L.push(`Charge des 4 jours d'avant cette nuit : ${[1, 2, 3, 4].map(i => { const x = addD(d, -i), v = Math.round(load(x)); return `${rel(x, now)} ${v || "repos"}`; }).join(" ; ")}`
+    + ` ; total ${Math.round(sum4)}${q != null ? `, soit ${n(q, 1)} fois sa charge habituelle sur 4 jours : ${q < .7 ? "charge légère" : q <= 1.3 ? "charge habituelle" : "charge lourde"}` : ""}.`);
+  const A = onDay(d).filter(b => b.dt <= now);
+  if (A.length) L.push(`Séances faites APRÈS ce réveil (elles n'expliquent donc pas cette nuit) : ${A.map(b => `${sportFr(b)} à ${hh(b.dt)} (${durOf(b)})`).join(", ")}.`);
+  const nx = nextPlanned(null, now); if (nx) L.push(nx);
+  return L.join("\n");
+}
+// Semaine : prévu contre fait au Plan, nuits de la semaine, part de zone 3 (semaine en cours, ou la précédente si last)
+function weekExtra(last, now = new Date()) {
+  const L = [], wd = (day0(now).getDay() + 6) % 7, mon = addD(now, -wd - (last ? 7 : 0)), end = last ? 6 : wd, P = window.Plan;
+  const cnt = { done: [], missed: [], left: [] };
+  if (P && P.plannedFor) for (let i = 0; i <= 6; i++) { const d = addD(mon, i); let p = null; try { p = P.plannedFor(ymd(d)); } catch (e) {}
+    if (!p) continue;
+    [["vélo", p.sport !== "run" ? p : null], ["course", p.sport === "run" ? p : p.run]].forEach(([w, x]) => { if (!x) return;
+      const t = `${w} « ${(x.w && x.w.title) || x.label} » ${WD[d.getDay()]}`; (x.st === "done" ? cnt.done : x.st === "missed" || i < end ? cnt.missed : cnt.left).push(t); }); }
+  if (cnt.done.length + cnt.missed.length + cnt.left.length) L.push(`Plan de la semaine (vélo et course) : ${cnt.done.length} séance${cnt.done.length > 1 ? "s" : ""} faite${cnt.done.length > 1 ? "s" : ""}${cnt.done.length ? ` (${cnt.done.join(", ")})` : ""} ; `
+    + `${cnt.missed.length ? `${cnt.missed.length} non faite${cnt.missed.length > 1 ? "s" : ""} (${cnt.missed.join(", ")})` : "aucune non faite"}${last ? "" : ` ; ${cnt.left.length ? `${cnt.left.length} à venir (${cnt.left.join(", ")})` : "aucune à venir"}`}.`);
+  const A = acts().filter(a => a.dt >= mon && a.dt < addD(mon, 7) && a.dt <= now && sportOf(a) !== "strength"), Z = [0, 0];
+  const FL = ((window.Recup && Recup.data && Recup.data.profile || {}).hrZones || {}).floors || [];
+  A.forEach(a => (a.hz || []).forEach((x, j) => { Z[1] += x || 0; if (j === 2) Z[0] += x || 0; }));
+  if (Z[1] > 600) { const z3 = Math.round(Z[0] / Z[1] * 100); L.push(`Part du cardio en zone 3 cette semaine-là : ${z3} %, ${z3 > 20 ? "au-dessus du" : "sous le"} repère de 20 % de l'outil (au-dessus : trop de « zone grise », ni facile ni dur)${z3 > 20 && FL.length >= 3 ? ` ; le remède porte sur les séances faciles seulement (endurance, récupération, footings : rester à ${FL[2] - 1} bpm ou moins), les séances dures du Plan ne changent pas` : ""}.`); }
+  const N = ((window.Recup && Recup.days) || []).filter(x => x.d >= ymd(mon) && x.d <= ymd(addD(mon, end)) && (x.sl || x.hrv));
+  if (N.length >= 2) { const sl = N.filter(x => x.sl), low = N.filter(x => x.hrv != null && x.hrvLo != null && x.hrv < x.hrvLo).length; let sc = []; N.forEach(x => { try { const v = Recup.recoScore(x).score; if (v != null) sc.push(v); } catch (e) {} });
+    L.push(`Nuits de la semaine (${N.length}) : ${sl.length ? `${dur(sl.reduce((t, x) => t + x.sl, 0) / sl.length)} de sommeil en moyenne ; ` : ""}VFC sous sa zone normale ${low} nuit${low > 1 ? "s" : ""} sur ${N.length}${sc.length ? ` ; score de récup moyen ${Math.round(sc.reduce((t, v) => t + v, 0) / sc.length)} (${recoWord(sc.reduce((t, v) => t + v, 0) / sc.length)})` : ""}.`); }
+  const nx = nextPlanned(null, now); if (nx) L.push(nx);
+  return L.join("\n");
+}
 // blocs « en plus » du bilan d'une séance : déroulé, séances comparables, contexte
 function sessionExtra(a, st, now = new Date()) {
-  const run = sportOf(a) === "run", L = [], sp = splits(st, run, !run && indoor(a)), sim = similar(a);
+  const run = sportOf(a) === "run", L = [], sp = splits(st, run, !run && indoor(a)), sim = similar(a), F = facts(a, st, sim, now);
+  if (F.length) L.push("Repères calculés (comparaisons déjà faites, fiables : pars de là) :", ...F.map(x => "- " + x));
   if (sp.length) L.push("Déroulé par tranches (le bilan n'en montre que le graphique) :", ...sp);
   if (sim.length) L.push("Séances comparables d'avant (même sport, durée proche), pour situer celle-ci :", actLine(a, now, { eff: 1, zones: false, mark: "la séance analysée" }), ...sim.map(b => actLine(b, now, { eff: 1, zones: false })));
   else L.push("Aucune séance comparable dans les 10 semaines d'avant.");
   L.push("Ce qui entoure la séance :", ...around(a, now).map(x => "- " + x));
+  const nx = nextPlanned(a, now); if (nx) L.push(nx);
   return L.join("\n");
 }
 // phrase qui situe la séance par rapport à maintenant
@@ -253,7 +348,7 @@ function full(o = {}) {
   const now = o.now || new Date(), base = KIND[o.kind] || KIND.chat, page = o.page != null ? o.page : pageText();
   const head = (o.about ? `SUJET : ${o.about}\n\n` : "")
     + (page ? `CE QUE BREIZH WATTS AFFICHE DÉJÀ À NATHAN (calculé par l'outil, il l'a sous les yeux : ne le lui redis pas) :\n${String(page).slice(0, 4200)}\n\n` : "")
-    + (o.extra ? `EN PLUS, CE QUE L'OUTIL N'AFFICHE PAS ICI (sers-t'en pour compléter son analyse) :\n${o.extra}\n\n` : "")
+    + (o.extra ? `EN PLUS, CE QUE L'OUTIL N'AFFICHE PAS ICI (repères calculés, fiables : sers-t'en pour compléter son analyse) :\n${o.extra}\n\n` : "")
     + "DONNÉES DE NATHAN (chaque date porte son repère : aujourd'hui, hier, il y a 3 j, demain) :\n";
   let k = { ...base, focus: o.focus }, t = head + data(now, k);
   for (let i = 0; i < 12 && t.length > MAX_CTX; i++) { k = { ...k, nights: Math.max(2, k.nights - 2), days: Math.max(4, k.days - 2), weeks: Math.max(2, k.weeks - 1) }; t = head + data(now, k); }
@@ -280,7 +375,8 @@ const avail = () => !!(window.Sync && Sync.configured && Sync.configured() && Sy
 async function ready() { if (!(window.Recup && Recup.data) && window.loadProfile) { try { await window.loadProfile(); } catch (e) {} } }
 
 // ------------------------------------------------------------------ encart à la demande dans une carte
-// o = { kind, title, button, ctx: () => texte de la page (ce que l'outil affiche déjà), about: () => le sujet en une phrase }
+// o = { kind, title, button, ctx: () => texte de la page (ce que l'outil affiche déjà), about: () => le sujet en une phrase,
+//       extra: () => repères calculés que la page n'affiche pas (IA.morningExtra, IA.weekExtra) }
 function mount(el, o) {
   if (!el || !avail()) return;
   const old = el.querySelector(`.iabox[data-kind="${o.kind}"]`); if (old) old.remove();
@@ -300,7 +396,7 @@ function mount(el, o) {
   btn.onclick = async () => {
     btn.disabled = true; say("L'entraîneur analyse tes données…", true);
     await ready();
-    const ctx = full({ kind: o.kind, about: o.about ? o.about() : "", page: o.ctx ? o.ctx() : "" }), key = K + o.kind + ":" + hash(ctx.replace(/^Heure : .*$/m, ""));
+    const ctx = full({ kind: o.kind, about: o.about ? o.about() : "", page: o.ctx ? o.ctx() : "", extra: o.extra ? o.extra() : "" }), key = K + o.kind + ":" + hash(ctx.replace(/^Heure : .*$/m, ""));
     const c = lsGet(key); if (c && c.t) { say(c.t); note(`Réponse gardée (${stamp(c.at)}) : rien n'a changé depuis.`); btn.disabled = false; return; }
     try { const j = await Sync.ai({ kind: o.kind, ctx }); lsPut(key, { t: j.text, at: Date.now() }); say(j.text + left(j)); note(stale(j)); }
     catch (err) { say("Indisponible : " + err.message + ".", true); }
@@ -368,5 +464,5 @@ function addButton() {
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addButton); else addButton();
 const relOf = (d, now = new Date()) => rel(typeof d === "string" ? fromYmd(d) : d, now);   // « aujourd'hui (ven. 13/11) » pour les sujets des encarts
-window.IA = { mount, chat, data, textOf, full, ready, html, stale, stamp, sessionExtra, sessionAbout, rel: relOf, hh, _: { rel, gap, splits, similar, around, actLine, nightLine, KIND, AI_V } };
+window.IA = { mount, chat, data, textOf, full, ready, html, stale, stamp, sessionExtra, sessionAbout, morningExtra, weekExtra, rel: relOf, hh, _: { rel, gap, splits, segs, facts, similar, around, nextPlanned, actLine, nightLine, KIND, AI_V } };
 })();

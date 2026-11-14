@@ -37,7 +37,7 @@ assert.match(g1.url, /models\/gemini-3\.5-flash-lite:generateContent$/); assert.
 const SYS = sent.systemInstruction.parts[0].text;
 assert.match(SYS, /COMPLÉTER cet outil, jamais de le répéter/); assert.match(SYS, /Rien d'inventé/); assert.equal(sent.contents[0].parts[0].text, CTX);
 // consignes du bilan de séance (refonte du 13/11/2026) : trois intitulés, dates reprises telles quelles, le Plan n'est pas recopié
-for (const re of [/« À retenir : »/, /« Explication : »/, /« Pour la suite : »/, /ne recalcule jamais un jour/, /ne redécris pas une séance déjà prévue/, /ne se compare jamais à la FTP vélo/, /corrige-la/])
+for (const re of [/intitulé « À retenir : » →/, /intitulé « Explication : » →/, /intitulé « Pour la suite : » →/, /ne recalcule jamais un jour/, /ne redécris pas une séance déjà prévue/, /ne se compare jamais à la FTP vélo/, /Repères calculés/, /ne tient pas, écris-le/, /N.écris aucune cible chiffrée/, /vérifie les deux nombres/])
   assert.match(SYS, re);
 assert.ok(!/Quand tu détailles une séance, donne/.test(SYS), "bilan de séance : pas de séance détaillée d'office");
 assert.equal(r.v, 2, "version des consignes renvoyée au site"); assert.equal(sent.generationConfig.temperature, 0.3);
@@ -52,6 +52,13 @@ assert.equal(post({ op: "ping" }).ok, true, "la synchro marche toujours");
 const fetch0 = c2.UrlFetchApp.fetch; c2.UrlFetchApp.fetch = () => { throw new Error("You do not have permission to call UrlFetchApp.fetch"); };
 r = post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(r.err, "ia"); assert.match(r.msg, /permission/);
 c2.UrlFetchApp.fetch = fetch0; assert.equal(c2.testIA().ok, true, "testIA, à lancer depuis l'éditeur");
+// une réponse qui recopie les consignes est redemandée une fois (température relevée) ; deux fois de suite : erreur claire
+let ne = 0; gen = () => (++ne === 1 ? { code: 200, body: { candidates: [{ content: { parts: [{ text: "À retenir : " + SYS.slice(1500, 1620) }] } }] } } : { code: 200, body: { candidates: [{ content: { parts: [{ text: "À retenir : cardio +13 bpm à allure égale." }] } }] } });
+calls.length = 0; r = post({ op: "ai", kind: "seance", ctx: CTX }); assert.equal(r.text, "À retenir : cardio +13 bpm à allure égale.");
+assert.equal(calls.filter(x => /generateContent/.test(x.url)).length, 2); assert.equal(JSON.parse(calls.pop().o.payload).generationConfig.temperature, 0.6);
+gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: SYS.slice(900, 1100) }] } }] } }); r = post({ op: "ai", kind: "seance", ctx: CTX });
+assert.equal(r.err, "ia"); assert.match(r.msg, /recopié ses consignes/);
+gen = () => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: "ok" }] } }] } });
 // usages de l'encart IA : consigne propre à chaque usage, question ajoutée au contexte (300 caractères au plus), plafond du jour
 calls.length = 0; delete props.GEMINI_MODEL; props.GEMINI_MODEL_FLASH = "gemini-3.8-flash"; props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 0 });
 for (const kind of ["question", "semaine", "recup", "sortie", "objectifs"]) {
@@ -60,8 +67,8 @@ for (const kind of ["question", "semaine", "recup", "sortie", "objectifs"]) {
   assert.match(body.systemInstruction.parts[0].text, /Rien d'inventé/, kind); if (kind !== "question") assert.match(body.systemInstruction.parts[0].text, /trois courts paragraphes/, kind);
   if (kind === "question") { assert.match(body.contents[0].parts[0].text, /Question de Nathan : Suis-je prêt pour 250 km \?/); assert.ok(body.contents[0].parts[0].text.length < CTX.length + 640, "question tronquée"); assert.match(body.systemInstruction.parts[0].text, /ne traites que ceux-là/);
     assert.match(calls.filter(x => /generateContent/.test(x.url)).pop().url, /gemini-3\.8-flash:/, "question : modèle Flash"); }
-  if (kind === "recup") assert.match(body.systemInstruction.parts[0].text, /« Causes : » les causes probables classées/);
-  if (kind !== "question") assert.match(calls.filter(x => /generateContent/.test(x.url)).pop().url, /gemini-3\.8-flash:/, kind + " : Flash quand GEMINI_MODEL_FLASH le nomme");
+  if (kind === "recup") assert.match(body.systemInstruction.parts[0].text, /intitulé « Causes : » → les causes probables classées/);
+  if (kind !== "question") assert.match(calls.filter(x => /generateContent/.test(x.url)).pop().url, /gemini-3\.5-flash-lite:/, kind + " : les encarts restent sur Flash-Lite");
 }
 assert.equal(r.left, 55, "5 demandes faites sur 60");
 props.AI_COUNT = JSON.stringify({ d: "2026-10-30", n: 60 }); assert.equal(post({ op: "ai", kind: "recup", ctx: CTX }).err, "quota_ia", "plafond du jour");
@@ -117,7 +124,7 @@ c3.window.Plan = { ftp: () => 230, _cfg: () => ({ goal: { ftp: 300, vo2: 65, dat
   plannedFor: (d, sp) => d === "2026-10-31" && sp !== "run" ? { label: "Seuil", w: { title: "Seuil #2 · 3 × 8'", goal: goalTxt, tss: 62 }, dur: 75, place: "mw", st: "plan" }
     : d === "2026-10-30" && sp !== "bike" ? { sport: "run", label: "Footing", w: { title: "Footing", goal: "Footing facile." }, dur: 40, st: "done" } : null };
 c3.window.Recup = { data: { profile: { ftp: 262, vo2: [["2026-07-20", 60], ["2026-09-25", 59], ["2026-10-12", 62], ["2026-10-29", 58]], run: { lt: { pace: 252, hr: 178 } }, hrZones: { floors: [100, 119, 139, 159, 179], max: 199, lthr: 168, rest: 45 } } },
-  days: [day("2026-10-29", {}), day("2026-10-30", { hrv: 36, recov: 0, tr: 85, trLvl: "HIGH" })], recoScore: d => ({ score: d.d === "2026-10-30" ? 52 : 70 }) };
+  days: [day("2026-10-29", {}), day("2026-10-30", { hrv: 36, recov: 0, tr: 85, trLvl: "HIGH", bed: "2026-10-29T22:40" })], recoScore: d => ({ score: d.d === "2026-10-30" ? 52 : 70 }) };
 Object.assign(c3, { Charge: c3.window.Charge, Recup: c3.window.Recup, Plan: c3.window.Plan });
 vm.createContext(c3); vm.runInContext(readFileSync(new URL("../ia.js", import.meta.url), "utf8"), c3);
 const IA = c3.window.IA, D = IA.data(now);
@@ -161,9 +168,28 @@ for (const re of [/Déroulé par tranches/, /Séances comparables d'avant/, /←
   /- Forme la veille au soir : niveau d'entraînement 66, fraîcheur −19 \(« chargé »\)\./, /- Prévu au Plan ce jour-là en course : Footing 40 min \(Footing facile\.\)/])
   assert.match(X, re);
 assert.ok(!/Cesson/.test(X));
+// récup : ce qui précède la nuit, séparé de ce qui la suit ; semaine : zone 3 contre le repère
+const ME = IA.morningExtra("2026-10-30", now);
+for (const re of [/^La veille de cette nuit, hier \(jeu\. 29\/10\) : vélo dehors à 15 h 37 \(1 h 06, charge 64, finie à 16 h 42\)\.$/m, /Dernière séance de la veille finie 5 h 57 avant le coucher \(22:40\) : assez tôt/,
+  /Charge des 4 jours d'avant cette nuit : hier \(jeu\. 29\/10\) 64 ; avant-hier \(mer\. 28\/10\) 109 ; il y a 3 j \(mar\. 27\/10\) repos ; il y a 4 j \(lun\. 26\/10\) repos ; total 173, soit [\d,]+ fois sa charge habituelle sur 4 jours : charge lourde\./,
+  /Séances faites APRÈS ce réveil \(elles n'expliquent donc pas cette nuit\) : muscu Legs \(jambes\) à 6 h 25 \(45 min\), course à pied à 18 h 00 \(43 min\)\./, /Suite du Plan : demain \(sam\. 31\/10\), vélo « Seuil #2 · 3 × 8' »\.$/])
+  assert.match(ME, re);
+const WE = IA.weekExtra(false, now);
+assert.match(WE, /Plan de la semaine \(vélo et course\) : 1 séance faite \(course « Footing » ven\.\) ; aucune non faite ; 1 à venir \(vélo « Seuil #2 · 3 × 8' » sam\.\)\./);
+assert.match(WE, /Part du cardio en zone 3 cette semaine-là : \d+ %, au-dessus du repère de 20 %[^\n]*rester à 138 bpm ou moins\), les séances dures du Plan ne changent pas\./);
+assert.match(WE, /Nuits de la semaine \(2\) : 9 h 43 de sommeil en moyenne ; VFC sous sa zone normale 2 nuits sur 2 ; score de récup moyen 61 \(moyen\)\./);
+assert.match(X, /\nSuite du Plan : demain \(sam\. 31\/10\), vélo « Seuil #2 · 3 × 8' »\. Aucune séance de course au Plan dans les 7 jours\.$/, "la suite du Plan en une ligne, la course du jour déjà faite n'y est plus");
+// repères calculés : les comparaisons sont écrites en clair (moitiés, dénivelé, norme des séances comparables)
+const FA = Array.from(IA._.facts(A[3], st, IA._.similar(A[3]), now));
+assert.equal(FA[0], "Entre la 1re et la 2e moitié, l'allure est plus rapide (5:33 /km puis 5:00 /km) et le cardio moyen passe de 130 à 150 bpm (+20 bpm).");
+assert.match(FA[1], /^Dénivelé : \+0 m sur la 1re moitié, \+\d+ m sur la 2e \(la 2e monte plus\)\.$/);
+assert.ok(!FA.some(x => /Efficacité/.test(x)), "moins de 3 séances comparables : pas de norme");
+const sim3 = [run(11, 20, 8, { hr: 150 }), run(12, 18, 8, { hr: 152 }), run(13, 16, 8, { hr: 148 })];   // 1,17 / 1,15 / 1,18 m par battement
+assert.match(IA._.facts(A[3], null, sim3, now)[0], /^Efficacité \(m par battement\) : 1,31 pour cette séance, médiane de ses 3 séances comparables 1,17 \(de 1,15 à 1,18\) : meilleure que sa norme \(\+12 %\)\.$/);
+assert.match(IA._.facts(A[1], { dt: 5, p: Array(480).fill(200), h: Array.from({ length: 480 }, (_, i) => i < 240 ? 140 : 141) }, [], now)[0], /la puissance moyenne est la même \(200 puis 200 W\) et le cardio moyen passe de 140 à 141 bpm \(\+1 bpm\)/);
 // texte complet : sujet, déjà affiché, en plus, données ; trop long : les listes raccourcissent, le sujet et le Plan restent
 const F = IA.full({ kind: "seance", about: IA.sessionAbout(A[3], now), page: "Découplage 9,5 % : élevé.", extra: X, focus: 3, now });
-assert.match(F, /^SUJET : Commentaire de la séance de course à pied faite aujourd'hui[\s\S]*\n\nCE QUE BREIZH WATTS AFFICHE DÉJÀ À NATHAN[^\n]*\nDécouplage 9,5 % : élevé\.\n\nEN PLUS, CE QUE L'OUTIL N'AFFICHE PAS ICI[^\n]*\nDéroulé par tranches[\s\S]*\n\nDONNÉES DE NATHAN[^\n]*\nNous sommes vendredi/);
+assert.match(F, /^SUJET : Commentaire de la séance de course à pied faite aujourd'hui[\s\S]*\n\nCE QUE BREIZH WATTS AFFICHE DÉJÀ À NATHAN[^\n]*\nDécouplage 9,5 % : élevé\.\n\nEN PLUS, CE QUE L'OUTIL N'AFFICHE PAS ICI[^\n]*\nRepères calculés[\s\S]*\nDéroulé par tranches[\s\S]*\n\nDONNÉES DE NATHAN[^\n]*\nNous sommes vendredi/);
 assert.match(F, /charge 45 · cardio Z1 8 %, Z2 71 %, Z3 21 %  ← la séance analysée/);
 const big = IA.full({ kind: "seance", about: "sujet", page: "x".repeat(20000), extra: "y".repeat(9000), now });
 assert.ok(big.length <= 15000); assert.match(big, /^SUJET : sujet/); assert.match(big, /Plan \(il fait foi/, "le Plan survit à la coupe");

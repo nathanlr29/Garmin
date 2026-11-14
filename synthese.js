@@ -794,6 +794,7 @@ function mountIA() {
     about: () => { const now = new Date(), wd = (now.getDay() + 6) % 7;
       return document.getElementById("syReleve") ? `Bilan de la semaine dernière (du lundi au dimanche, relevé affiché), demandé ${IA.rel(now)}, au début de la semaine suivante.`
         : `Bilan de la semaine en cours, du lundi à ${IA.rel(now)}${wd < 6 ? ` : elle n'est pas finie, il reste ${6 - wd} jour${6 - wd > 1 ? "s" : ""} après aujourd'hui` : ", son dernier jour"}.`; },
+    extra: () => IA.weekExtra(!!document.getElementById("syReleve")),
     ctx: () => T(["#syReleve", "#syWeek", "#syProg .syans", "#syDet"]) });
 }
 function bind(box) {
