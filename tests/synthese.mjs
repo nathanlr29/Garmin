@@ -271,7 +271,8 @@ assert.equal(Y.objective(hist.slice(1), 200, 300, NOWT).bar, 0, "sous le départ
 ob = Y.objective(hist.slice(1), 310, 300, NOWT); assert.equal(ob.bar, 100); assert.equal(ob.reached, true);
 assert.equal(Y.objective([], 260, 300, NOWT), null); assert.equal(Y.objective(hist, null, 300, NOWT), null); assert.equal(Y.objective(Y.listSeries([["2027-01-01", 5]]), 6, 300, NOWT), null, "mesure future ignorée");
 const realFtp = Y.objective(Y.listSeries(profile.ftpHist), win.Recup.data.profile.ftp, 300, NOWT); assert.equal(realFtp.start, 209, "FTP de départ réel : 209 W");
-const real2 = Y.objective(Y.listSeries(profile.vo2), 63.2, 65, NOWT); assert.equal(real2.start, 57.3);
+// VO2max réelle : profile.vo2 ne porte que le vélo (première mesure vélo de l'année en mars, pas au 1er janvier) : départ = première valeur de l'année
+const real2 = Y.objective(Y.listSeries(profile.vo2), 63.2, 65, NOWT); assert.equal(real2.start, profile.vo2[0][1]); assert.ok(profile.vo2[0][0] >= "2026-01-01" && real2.start > 40 && real2.start < 65);
 // phrase sous la barre
 let pj = proj(lineSer(1)); assert.match(Y.objLine(pj, "W", 0), /^Au rythme actuel : ~\d+ W au 31\/12\. Il faudrait \+3,4 W\/semaine \(tu fais \+1,0\)\.$/);
 assert.equal(Y.objLine(proj(lineSer(0), 305), "W", 0), "Objectif atteint."); assert.match(Y.objLine(null, "W", 0), /Pas assez de mesures/);

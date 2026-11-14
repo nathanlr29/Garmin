@@ -465,17 +465,29 @@ def read_pr(resp):
     return out or None
 
 
-def read_vo2_run(mm):
-    """VO2max course : partie « generic » seulement (profile.vo2 reste celui du vélo, utilisé par le Plan)."""
+def _vo2(mm, key):
+    """VO2max d'une partie de get_max_metrics_range : [(date, valeur au dixième)]."""
     vo = {}
     for d in _walk(mm):
-        sub = d.get("generic")
+        sub = d.get(key)
         if isinstance(sub, dict):
             v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
             dt = _date(sub) or _date(d)
             if v and dt:
                 vo[dt] = round(v, 1)
     return sorted(vo.items())
+
+
+def read_vo2_run(mm):
+    """VO2max course (profile.run.vo2) : partie « generic » de Garmin, qui est la mesure de course à pied."""
+    return _vo2(mm, "generic")
+
+
+def read_vo2(mm):
+    """VO2max vélo (profile.vo2) : partie « cycling » seulement. Les jours sans valeur vélo ne sont PAS complétés
+    par « generic » (la course) : les deux mesures diffèrent de 3 à 5 points et la série sautait de l'une à l'autre.
+    Repli sur « generic » seulement si toute la réponse n'a aucune valeur vélo (compte sans vélo)."""
+    return _vo2(mm, "cycling") or _vo2(mm, "generic")
 
 
 def fetch_run_profile(api, start, today, mm=None):
@@ -557,19 +569,10 @@ def fetch_profile(api, start, today, prev=None):
         if v and dt:
             pts[dt] = round(v)
     p["ftpHist"] = sorted(pts.items())
-    # VO2max vélo (sinon générique)
+    # VO2max vélo seul (la course est dans run.vo2, voir read_vo2) ; série reconstruite à chaque passage
     mm = safe(api.get_max_metrics_range, start.isoformat(), today.isoformat())
     raw["vo2"] = _raw(mm, 1200)
-    vo = {}
-    for d in _walk(mm):
-        for key in ("cycling", "generic"):
-            sub = d.get(key)
-            if isinstance(sub, dict):
-                v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
-                dt = _date(sub) or _date(d)
-                if v and dt and (key == "cycling" or dt not in vo):
-                    vo[dt] = round(v, 1)
-    p["vo2"] = sorted(vo.items())
+    p["vo2"] = read_vo2(mm)
     # Zones cardio (profil vélo, sinon par défaut)
     zones = safe(api.get_heart_rate_zones) or []
     raw["zones"] = _raw(zones, 1500)

@@ -20,7 +20,8 @@ const n = (v, d = 0) => v == null || !isFinite(v) ? "?" : (+v).toFixed(d).replac
 const hmn = s => { if (!(s > 0)) return "?"; const m = Math.round(s / 60); return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
 const ymd = d => window.Charge ? Charge.ymd(d) : d.toISOString().slice(0, 10);
 const day = d => new Date(d).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "numeric" });
-const last = a => Array.isArray(a) && a.length ? a[a.length - 1][1] : null;
+// dernière mesure d'une série [[date, valeur]] : « VO2max vélo 61,0 (le 11/11) », "" sans mesure
+const lastOf = (l, a) => { const p = Array.isArray(a) && a.length ? a[a.length - 1] : null; return p && p[1] != null ? `${l} ${n(p[1], 1)} (le ${String(p[0]).slice(8, 10)}/${String(p[0]).slice(5, 7)})` : ""; };
 
 // ------------------------------------------------------------------ données envoyées (texte compact, sans nom ni lieu)
 function data(now = new Date()) {
@@ -31,8 +32,10 @@ function data(now = new Date()) {
   const kg = +(lsGet("bwWeight")) || null, age = +(lsGet("bwAge")) || null, fl = hz.floors || [];
   const zones = fl.length >= 5 ? ` ; zones cardio : Z1 ${fl[0]}-${fl[1] - 1}, Z2 ${fl[1]}-${fl[2] - 1}, Z3 ${fl[2]}-${fl[3] - 1}, Z4 ${fl[3]}-${fl[4] - 1}, Z5 ≥ ${fl[4]} bpm` : "";
   const run = prof.run || {}, lt = run.lt || {}, pace = lt.pace ? `${Math.floor(lt.pace / 60)}:${String(Math.round(lt.pace % 60)).padStart(2, "0")}/km` : null;
+  // VO2max : deux mesures Garmin distinctes (vélo = profile.vo2, course = profile.run.vo2), jamais mélangées
+  const vo2 = [lastOf("VO2max vélo", prof.vo2), lastOf("VO2max course", run.vo2)].filter(Boolean).join(" ; ") || "VO2max ?";
   L.push(`Profil : FTP de travail ${ftp || "?"} W${prof.ftp ? ` (FTP estimée par Garmin ${prof.ftp} W, souvent trop haute ; les séances se calent sur la FTP de travail)` : ""}${kg ? `, ${n(kg, kg % 1 ? 1 : 0)} kg` : ""}${age ? `, ${age} ans` : ""} ; `
-    + `FC max ${hz.max || "?"}, FC au seuil ${hz.lthr || "?"}, FC repos ${hz.rest || "?"} bpm${zones} ; VO2max ${n(last(prof.vo2), 1)}${pace ? ` ; course : allure seuil ${pace}, FC seuil ${lt.hr || "?"}` : ""}.`);
+    + `FC max ${hz.max || "?"}, FC au seuil ${hz.lthr || "?"}, FC repos ${hz.rest || "?"} bpm${zones} ; ${vo2}${pace ? ` ; course : allure seuil ${pace}, FC seuil ${lt.hr || "?"}` : ""}.`);
   try { const g = P && P._cfg && P._cfg().goal; if (g) L.push(`Objectifs du Plan : FTP ${g.ftp || "?"} W, VO2max ${g.vo2 || "?"}${g.date ? `, pour le ${g.date}` : ""} ; ultra de 250 km à 28 km/h.`); } catch (e) {}
   // forme
   try { const f = Charge.fitness(); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)} (frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}

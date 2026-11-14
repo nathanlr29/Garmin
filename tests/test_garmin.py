@@ -137,6 +137,30 @@ class Series(unittest.TestCase):
         for empty in (None, [], {}, [{"cycling": {"vo2MaxPreciseValue": 55}}]):
             self.assertEqual(rc.read_vo2_run(empty), [])
 
+    def test_vo2_velo_seulement_cycling(self):
+        """profile.vo2 : le vélo seul ; « generic » (la course) n'y entre jamais dès qu'il y a une valeur vélo."""
+        g = lambda dt, v: {"calendarDate": dt, "vo2MaxPreciseValue": v, "sport": "RUNNING"}
+        c = lambda dt, v: {"calendarDate": dt, "vo2MaxPreciseValue": v, "sport": "CYCLING"}
+        mm = [{"generic": None, "cycling": c("2026-10-28", 63.0)},                              # vélo seul
+              {"generic": g("2026-10-29", 60.1), "cycling": None},                                # course seule : pas dans la série vélo
+              {"generic": g("2026-11-06", 59.1), "cycling": c("2026-11-06", 62.0)},              # les deux le même jour : le vélo
+              {"generic": g("2026-11-13", 58.2), "cycling": None},
+              {"generic": None, "cycling": {"vo2MaxValue": 61}, "calendarDate": "2026-11-11"}]   # valeur entière, date sur le parent
+        self.assertEqual(rc.read_vo2(mm), [("2026-10-28", 63.0), ("2026-11-06", 62.0), ("2026-11-11", 61.0)])
+        self.assertEqual(rc.read_vo2_run(mm), [("2026-10-29", 60.1), ("2026-11-06", 59.1), ("2026-11-13", 58.2)])
+        # compte sans vélo : aucune valeur « cycling » dans toute la réponse, on garde l'ancien repli sur « generic »
+        run_only = [{"generic": g("2026-10-29", 60.1), "cycling": None}, {"generic": g("2026-11-02", 59.5), "cycling": {"vo2MaxPreciseValue": 5}}]
+        self.assertEqual(rc.read_vo2(run_only), [("2026-10-29", 60.1), ("2026-11-02", 59.5)])
+        for empty in (None, [], {}, [{"cycling": None, "generic": None}]):
+            self.assertEqual(rc.read_vo2(empty), [])
+
+    def test_profil_vo2_velo_et_course_separes(self):
+        mm = [{"generic": {"calendarDate": "2026-10-05", "vo2MaxPreciseValue": 59.5}, "cycling": None},
+              {"generic": None, "cycling": {"calendarDate": "2026-10-07", "vo2MaxPreciseValue": 63.0}}]
+        prof = rc.fetch_profile(_ProfileApi(FakeApi(), get_max_metrics_range=mm), date(2026, 1, 1), TODAY)
+        self.assertEqual(prof["vo2"], [("2026-10-07", 63.0)])
+        self.assertEqual(prof["run"]["vo2"], [("2026-10-05", 59.5)])
+
 
 # ---------------------------------------------------------------- fetch_run_profile : appels indépendants
 class FakeApi:
@@ -229,12 +253,12 @@ class Weight(unittest.TestCase):
 
 class _ProfileApi:
     """Les appels vélo de fetch_profile répondent vide ; les appels course sont ceux de l'API factice."""
-    def __init__(self, inner):
-        self.inner = inner
+    def __init__(self, inner, **answers):
+        self.inner, self.answers = inner, answers   # answers : réponse imposée à un appel vélo (get_max_metrics_range=…)
 
     def __getattr__(self, name):
         if name in ("get_cycling_ftp", "get_functional_threshold_power_range", "get_max_metrics_range", "get_heart_rate_zones"):
-            return lambda *a, **kw: None
+            return lambda *a, **kw: self.answers.get(name)
         return getattr(self.inner, name)
 
 

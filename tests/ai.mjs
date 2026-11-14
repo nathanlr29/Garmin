@@ -96,15 +96,20 @@ const c3 = { window: {}, document: { readyState: "complete", querySelector: () =
   S: { all: [{ id: 1, n: "Tour de Saint-Malo", t: "Ride", tk: "road_biking", d: "2026-10-29T15:37:21", dt: new Date(2026, 9, 29, 15, 37), m: 30465, km: 30.5, mt: 3956, el: 278, hr: 143, w: 0, np: 0, te: 3.2, hz: [58, 1150, 2031, 718, 0] }] } };
 c3.window.Charge = { ymd: d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, fitness: () => ({ ctl: 67.2, atl: 80.4, tsb: -13.2 }), tssOf: () => 64 };
 c3.window.Plan = { ftp: () => 230, _cfg: () => ({ goal: { ftp: 300, vo2: 65, date: "2026-12-31" } }), plannedFor: d => d === "2026-10-30" ? { label: "Seuil", w: { title: "Seuil #2", goal: "3 × 8 min à 95 %" }, dur: 75, place: "mw" } : null };
-c3.window.Recup = { data: { profile: { ftp: 262, vo2: [["2026-10-01", 58]], hrZones: { floors: [100, 119, 139, 159, 179], max: 199, lthr: 168, rest: 45 } } }, days: [day("2026-10-29", {}), day("2026-10-30", { hrv: 36 })], recoScore: () => ({ score: 52 }) };
+c3.window.Recup = { data: { profile: { ftp: 262, vo2: [["2026-09-20", 59], ["2026-10-01", 58]], run: { vo2: [["2026-10-20", 60.1]] }, hrZones: { floors: [100, 119, 139, 159, 179], max: 199, lthr: 168, rest: 45 } } }, days: [day("2026-10-29", {}), day("2026-10-30", { hrv: 36 })], recoScore: () => ({ score: 52 }) };
 Object.assign(c3, { Charge: c3.window.Charge, Recup: c3.window.Recup, Plan: c3.window.Plan });
 vm.createContext(c3); vm.runInContext(readFileSync(new URL("../ia.js", import.meta.url), "utf8"), c3);
 const D = c3.window.IA.data(now);
-for (const re of [/FTP de travail 230 W/, /Garmin 262 W/, /74 kg/, /Z2 119-138/, /VO2max 58/, /niveau d'entraînement 67/, /fraîcheur −?-?13/,
+for (const re of [/FTP de travail 230 W/, /Garmin 262 W/, /74 kg/, /Z2 119-138/, /VO2max vélo 58,0 \(le 01\/10\) ; VO2max course 60,1 \(le 20\/10\)\.$/m, /niveau d'entraînement 67/, /fraîcheur −?-?13/,
   /2026-10-30 \| 22:40 → 08:30 \| 9 h 43/, /36 ms \(45-60, 7 nuits 47\)/, /11,5 \/min/, /\| 52$/m, /2026-10-29 15:37 \| road_biking \| 1 h 06 \| 30,5 km \| 278 m/, /\| 3,2 \| 1 % 29 % 51 % 18 % 0 %/,
   /aujourd'hui : Seuil #2 75 min home trainer : 3 × 8 min à 95 %/, /ultra de 250 km/])
   assert.match(D, re);
 assert.ok(!/Saint-Malo/.test(D), "jamais le nom de la sortie");
+// VO2max : vélo (profile.vo2) et course (profile.run.vo2) sont deux mesures Garmin, envoyées séparément, chacune avec sa date
+{ const P0 = c3.window.Recup.data.profile, prof = v => { c3.window.Recup.data.profile = { ...P0, ...v }; const t = c3.window.IA.data(now); c3.window.Recup.data.profile = P0; return t; };
+  const solo = prof({ run: undefined }); assert.match(solo, /VO2max vélo 58,0 \(le 01\/10\)\.$/m); assert.ok(!/VO2max course/.test(solo), "sans course : le vélo seul");
+  const cap = prof({ vo2: [] }); assert.match(cap, /bpm.* ; VO2max course 60,1 \(le 20\/10\)\.$/m); assert.ok(!/VO2max vélo/.test(cap), "sans vélo : la course seule");
+  assert.match(prof({ vo2: undefined, run: {} }), /VO2max \?\.$/m, "aucune mesure"); }
 assert.ok(D.indexOf("2026-10-30 |") < D.indexOf("2026-10-29 |"), "la nuit la plus récente d'abord");
 const F = c3.window.IA.full("x".repeat(20000)); assert.equal(F.length, 13000); assert.match(F, /^Ce qu'affiche la page ouverte/);
 assert.match(c3.window.IA.full("Bilan."), /^Ce qu'affiche la page ouverte :\nBilan\.\n\nTes données :\nMaintenant/);
