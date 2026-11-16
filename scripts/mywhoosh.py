@@ -14,7 +14,8 @@ Ce que fait ce module, à chaque passage de la mise à jour :
   1. connexion à MyWhoosh (identifiants dans les secrets GitHub, jamais écrits ni affichés) ;
   2. liste des dernières séances, téléchargement du fichier FIT des nouvelles ;
   3. réécriture de l'en-tête du fichier (appli Tacx) ; puissance, cardio, cadence intacts ;
-  4. contrôle du fichier réécrit (mêmes points, même puissance), puis envoi sur Garmin Connect.
+  4. contrôle du fichier réécrit (mêmes points, même puissance), puis envoi sur Garmin Connect ;
+  5. attente de l'analyse Garmin (`wait_on_garmin`), pour que le même passage récupère la séance.
 
 Sécurité : les identifiants restent dans les secrets GitHub ; le jeton MyWhoosh ne vit qu'en mémoire ;
 le dépôt public ne contient que des empreintes
@@ -29,6 +30,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,7 @@ TACX, TACX_APP, TACX_UNIT, TACX_SW = 89, 20533, 1, 130   # appli Tacx Training (
 SOURCES = {0, 255, 331, 260, 32, 289, 294, 307}  # fabricants « applis » à remplacer (dont MyWhoosh = 331)
 API = "https://service14.mywhoosh.com/v2/rider/profile"
 MAX_PER_RUN, MAX_BYTES = 5, 25 * 1024 * 1024
+WAIT_S, WAIT_STEP = 120, 8   # attente de l'analyse Garmin après l'envoi (secondes)
 
 
 def _h(s):
@@ -264,28 +267,57 @@ def disguise(src, dst):
 
 
 # ------------------------------------------------------------------ Garmin : doublons
-def on_garmin(api, start_ms):
-    """Cherche une activité Garmin qui démarre à ±3 min : renvoie 'garmin' (Garmin ou envoyée par ce script), 'autre' ou None."""
-    try:
-        recent = api.get_activities(0, 30) or []
-    except Exception:
-        return None
-    for g in recent:
+def _near(acts, start_ms):
+    """Activité Garmin qui démarre à ±3 min de start_ms, sinon None."""
+    for g in acts:
         s = g.get("startTimeGMT")
         if not s:
             continue
         t = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp() * 1000
         if abs(t - start_ms) <= 180_000:
-            man = str(g.get("manufacturer") or "").upper()
-            return "garmin" if man in ("GARMIN", "TACX") else "autre"
+            return g
     return None
+
+
+def on_garmin(api, start_ms):
+    """Cherche une activité Garmin qui démarre à ±3 min : renvoie 'garmin' (Garmin ou envoyée par ce script), 'autre' ou None."""
+    try:
+        g = _near(api.get_activities(0, 30) or [], start_ms)
+    except Exception:
+        return None
+    if not g:
+        return None
+    man = str(g.get("manufacturer") or "").upper()
+    return "garmin" if man in ("GARMIN", "TACX") else "autre"
+
+
+def wait_on_garmin(api, starts, timeout=WAIT_S, step=WAIT_STEP, sleep=time.sleep, clock=time.monotonic):
+    """Attend que Garmin ait fini d'analyser les séances envoyées (il les traite en différé, quelques secondes
+    à une minute) : sans cela, la lecture des activités qui suit ne les voyait pas et il fallait relancer
+    la mise à jour. Prête = listée avec sa charge Garmin ; listée sans charge à l'échéance, on n'attend plus.
+    Renvoie le nombre de séances trouvées."""
+    if not starts:
+        return 0
+    end, found = clock() + timeout, set()
+    while True:
+        try:
+            recent = api.get_activities(0, 10) or []
+        except GarminConnectTooManyRequestsError:
+            raise
+        except Exception:
+            recent = []
+        hits = {s: _near(recent, s) for s in starts}
+        found = {s for s, g in hits.items() if g}
+        if all(g and g.get("activityTrainingLoad") for g in hits.values()) or clock() + step > end:
+            return len(found)
+        sleep(step)
 
 
 # ------------------------------------------------------------------ Point d'entrée
 def run(api):
     email, password = os.environ.get("MYWHOOSH_EMAIL", "").strip(), os.environ.get("MYWHOOSH_PASSWORD", "").strip()
     if not email or not password:
-        return
+        return []
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     done, fails = list(state.get("done", [])), dict(state.get("fails", {}))  # done : du plus ancien au plus récent
     token, wid = login(email, password)
@@ -295,13 +327,13 @@ def run(api):
                  "last": {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "msg": f"{len(acts)} séances existantes mémorisées"}}
         STATE.write_text(json.dumps(state, indent=1))
         print(f"MyWhoosh : {len(acts)} séances existantes mémorisées ; les prochaines partiront sur Garmin.")
-        return
+        return []
     new = [a for a in reversed(acts) if _h(a["activityFileId"]) not in done][:MAX_PER_RUN]
     if not new:
         print("MyWhoosh : rien de nouveau.")
-        return
+        return []
     tmp = Path(tempfile.mkdtemp())
-    msgs = []
+    msgs, sent = [], []
     for a in new:
         key, name = _h(a["activityFileId"]), str(a.get("name") or a.get("title") or "séance")[:60]
         try:
@@ -316,6 +348,8 @@ def run(api):
             else:
                 try:
                     api.upload_activity(str(fit))
+                    if start:
+                        sent.append(start)
                     msgs.append(f"« {name} » envoyée sur Garmin comme appli Tacx ({npts} points)")
                 except Exception as e:
                     if "409" not in str(e) and "uplicate" not in str(e):
@@ -344,3 +378,4 @@ def run(api):
     state["done"], state["fails"] = done[-300:], fails
     state["last"] = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "msg": " · ".join(msgs)}
     STATE.write_text(json.dumps(state, indent=1, ensure_ascii=False))
+    return sent

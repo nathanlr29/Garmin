@@ -499,7 +499,11 @@ def main():
         # MyWhoosh → Garmin (fichier présenté comme venant de l'appli Tacx) : avant la récupération des activités
         try:
             import mywhoosh
-            mywhoosh.run(api)
+            sent = mywhoosh.run(api)
+            if sent:  # Garmin analyse l'envoi en différé : on attend la séance pour l'avoir dès ce passage
+                t0 = time.monotonic()
+                n = mywhoosh.wait_on_garmin(api, sent)
+                print(f"MyWhoosh : {n} séance(s) sur {len(sent)} visible(s) sur Garmin après {time.monotonic() - t0:.0f} s.")
         except GarminConnectTooManyRequestsError:
             raise
         except Exception as e:

@@ -377,6 +377,51 @@ class MyWhooshIdentity(unittest.TestCase):
         self.assertEqual(h["session"]["avg_power"], round(sum(200 + i % 50 for i in range(600)) / 600))
 
 
+class MyWhooshWait(unittest.TestCase):
+    """Séance envoyée sur Garmin : on attend qu'elle soit analysée, pour la récupérer au même passage."""
+    T0 = datetime(2026, 11, 16, 18, 0, tzinfo=timezone.utc)
+
+    def run_wait(self, replies, timeout=120):
+        import mywhoosh as mw
+        calls, now = [], [0.0]
+
+        class Api:
+            def get_activities(self, start, n):
+                calls.append(n)
+                r = replies[min(len(calls), len(replies)) - 1]
+                if isinstance(r, Exception):
+                    raise r
+                return r
+
+        def sleep(s):
+            now[0] += s
+        n = mw.wait_on_garmin(Api(), [self.T0.timestamp() * 1000], timeout=timeout, step=8, sleep=sleep, clock=lambda: now[0])
+        return n, len(calls), now[0]
+
+    def act(self, minutes=1, tl=None):
+        t = (self.T0 + timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        return {"startTimeGMT": t, "manufacturer": "TACX", **({"activityTrainingLoad": tl} if tl else {})}
+
+    def test_attend_la_seance_et_sa_charge(self):
+        n, calls, waited = self.run_wait([[], [], [self.act()], [self.act(tl=85)]])
+        self.assertEqual((n, calls, waited), (1, 4, 24))
+
+    def test_erreur_reseau_puis_seance(self):
+        n, calls, _ = self.run_wait([ValueError("coupure"), [self.act(tl=60)]])
+        self.assertEqual((n, calls), (1, 2))
+
+    def test_abandon_a_l_echeance(self):
+        n, calls, waited = self.run_wait([[self.act(minutes=10, tl=50)]], timeout=40)   # autre séance, à 10 min
+        self.assertEqual(n, 0)
+        self.assertLessEqual(waited, 40)
+        n, _, _ = self.run_wait([[self.act()]], timeout=40)                               # listée sans charge
+        self.assertEqual(n, 1)
+
+    def test_rien_d_envoye(self):
+        import mywhoosh as mw
+        self.assertEqual(mw.wait_on_garmin(object(), []), 0)
+
+
 # ---------------------------------------------------------------- Confidentialité des traces publiées
 class Privacy(unittest.TestCase):
     HOME = (48.0, -1.7)
