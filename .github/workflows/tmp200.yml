@@ -1,0 +1,18 @@
+name: tmp200
+on:
+  push:
+    branches: [claude/project-thread-3e5w5u]
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tmp200/run.mjs
+      - run: |
+          git config user.name "github-actions" && git config user.email "actions@github.com"
+          git add -f tmp200/out.json && git commit -m "tmp200: résultats" && git push
