@@ -7,12 +7,12 @@ const BR = "https://brouter.de/brouter";
 const pr = await (await fetch(BR + "/profile", { method: "POST", body: BRF_STRICT, headers: UA })).json();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const R = [48.1173, -1.6778], A = [47.3655, -1.1770];
+const CG=[47.8286,-0.7030], SG=[47.6860,-0.8720];
 const V = {
-  aller_est: [R, [47.957, -1.499], [47.831, -1.317], [47.522, -1.185], A],          // Janzé, Martigné-Ferchaud, St-Mars-la-Jaille
-  aller_direct: [R, [47.957, -1.499], [47.72, -1.38], A],                             // Janzé, Châteaubriant
-  retour_ouest: [A, [47.499, -1.423], [47.566, -1.627], [47.845, -1.683], R],        // Joué-sur-Erdre, Nozay, Bain
-  retour_mid: [A, [47.468, -1.300], [47.70, -1.52], [47.845, -1.683], R],            // Riaillé, St-Aubin-des-Ch./Rougé?, Bain
-  retour_meme: [A, R],
+  cg_aller: [R,[47.957,-1.499],[47.913,-1.380],[47.848,-0.950],CG],
+  cg_retour: [CG,[47.945,-0.913],[47.942,-1.231],[48.070,-1.390],R],
+  sg_aller: [R,[47.957,-1.499],[47.831,-1.317],[47.740,-1.170],SG],
+  sg_retour: [SG,[47.848,-0.950],[47.942,-1.231],[48.046,-1.504],R],
 };
 const out = {};
 for (const [k, wps] of Object.entries(V)) {
@@ -24,4 +24,4 @@ for (const [k, wps] of Object.entries(V)) {
   }
   await sleep(800);
 }
-fs.writeFileSync("tmp2/out.json", JSON.stringify(out));
+fs.writeFileSync("tmp2/out2.json", JSON.stringify(out));

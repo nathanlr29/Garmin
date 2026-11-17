@@ -15,4 +15,4 @@ jobs:
       - run: node tmp2/run.mjs
       - run: |
           git config user.name "github-actions" && git config user.email "actions@github.com"
-          git add -f tmp2/out.json && git commit -m "tmp2: résultats" && git push
+          git add -f tmp2/out2.json && git commit -m "tmp2: résultats" && git push
