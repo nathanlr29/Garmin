@@ -668,3 +668,26 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   assert.equal(g.items.filter(i => i.muscu).length, 4, "4 matins pour 4 séances : rien n'est retiré");
   console.log("ok plan (lendemain de grosse journée) : muscu déplacée quand c'est possible, jamais retirée");
 }
+
+// ---- 8. séance faite autre que prévue (planOv[jour].ft / fk, 21/11/2026) : type et palier changés, durée de la sortie faite, ajustements inchangés
+{
+  const MON = new Date(2026, 10, 2), cfg = CFGS.cinq, ctx = { form: SIT.frais.form, ready: SIT.frais.ready, prev: PREV[0] };
+  const hb = load(); hb.clock.t = new Date(2026, 10, 2, 5).getTime(); const Wb = hb.Plan._eff(MON, cfg, ctx);
+  const d = Wb.items.findIndex(it => it.bike && !hb.Plan.isKey(it.bike.t) && it.bike.t !== "long");
+  const ride = { id: 9911, n: "MyWhoosh", t: "VirtualRide", dt: new Date(2026, 10, 2 + d, 18), d: `2026-11-0${2 + d}T18:00:00`, mt: 3720, km: 0, np: 210, w: 200, te: 3, hr: 150 };
+  const h = load({ acts: [ride] }); h.store.set("planWk:2026-11-02", hb.store.get("planWk:2026-11-02")); h.clock.t = new Date(2026, 10, 2 + d, 21).getTime();
+  const W0 = h.Plan._eff(MON, cfg, ctx);
+  assert.equal(W0.items[d].bike.st, "done");
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "ss" } }));
+  const W1 = h.Plan._eff(MON, cfg, ctx), b = W1.items[d].bike;
+  assert.equal(b.t, "ss"); assert.ok(b.relab); assert.equal(b.dur, 60, "durée = celle de la sortie (62 min → 60)"); assert.equal(b.k, undefined, "palier : celui du suivi");
+  same(W1.changes, W0.changes, "les ajustements ne voient pas le changement");
+  same(W1.items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), W0.items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), "le reste de la semaine ne bouge pas");
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "ss", fk: 2 } })); assert.equal(h.Plan._eff(MON, cfg, ctx).items[d].bike.k, 2, "palier choisi");
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "ss", fk: 99 } })); assert.equal(h.Plan._eff(MON, cfg, ctx).items[d].bike.k, undefined, "palier hors liste ignoré");
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "rfoot" } })); assert.equal(h.Plan._eff(MON, cfg, ctx).items[d].bike.t, W0.items[d].bike.t, "type de course ignoré");
+  h.clock.t = new Date(2026, 10, 2 + d, 10).getTime(); h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "ss" } }));
+  const h2 = load(); h2.store.set("planWk:2026-11-02", hb.store.get("planWk:2026-11-02")); h2.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { ft: "ss" } })); h2.clock.t = new Date(2026, 10, 2 + d, 10).getTime();
+  assert.equal(h2.Plan._eff(MON, cfg, ctx).items[d].bike.t, W0.items[d].bike.t, "séance pas encore faite : ft sans effet");
+  console.log("ok plan (séance faite autre que prévue) : type, palier, durée, reste de la semaine inchangé");
+}

@@ -679,6 +679,12 @@ function effective(mon, c, ctx) {
     step(`mmove-${m.s}-${m.from}`, `${MUSCU[m.s].l} non faite ${dl(m.from)} : reportée à ${dl(tgt)} matin.`, () => { items[tgt].muscu = { s: m.s, st: "plan", moved: m.from }; });
   });
   items.forEach(it => { if (it.bike && (it.bike.st === "plan" || it.bike.changed || it.bike.moved != null) && it.bike.t === "rec") it.bike.dur = Math.min(it.bike.dur, 60); });
+  // séance faite autre que prévue (planOv[jour].ft / fk, demande du 21/11/2026) : appliquée après les ajustements, qui ne la voient pas ;
+  // la durée devient celle de la sortie faite, pour que le bilan et le palier lisent la bonne séance
+  items.forEach(it => { const o = ov[it.day] || {}, b = it.bike;
+    if (!b || b.st !== "done" || !o.ft || !TYPES[o.ft] || TYPES[o.ft].sport || o.ft === b.t) return;
+    b.t = o.ft; b.relab = true; delete b.k; b.dur = Math.max(20, Math.round(b.acts.reduce((s, a) => s + a.mt, 0) / 300) * 5);
+    if (Number.isInteger(o.fk) && STEPS[b.t] && o.fk >= 0 && o.fk < STEPS[b.t].length) b.k = o.fk; });
   return out;
 }
 // ------------------------------------------------------------------ Contenu des séances vélo
@@ -963,11 +969,15 @@ function detailHtml(W, it, prof) {
     const w = Math.max(0, ...b.acts.map(a => (a.pc && a.pc["1200"]) || 0)), f = Math.round(w * TEST_F);
     if (w) h += `<p class="sg">Test 20 min : ${w} W de moyenne → <b>FTP ≈ ${f} W</b> (${Math.round(TEST_F * 100)} %).${f !== prof.ftp ? ` <button class="btn2" data-setftp="${f}">Utiliser ${f} W comme FTP</button>` : " C'est ta FTP actuelle."}</p>`;
   }
+  const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
+  const palOpts = sel => STEPS[b.t].map((_, k) => { const L = palLog().filter(x => x.t === b.t && x.k === k).sort((a, c) => a.d < c.d ? -1 : 1), e = L[L.length - 1];
+    return opt(k, sel, stepL(b.t, k) + (e ? (e.ok ? ` ✓ ${dShort(parseYmd(e.d))}` : ` · à refaire (${dShort(parseYmd(e.d))})`) : "")); }).join("");
+  // séance faite : on peut dire laquelle on a vraiment faite (bilan, palier « Réussi / À refaire ») ; le reste du plan ne bouge pas
+  if (b.st === "done") h += `<div class="dmod"><span>Séance faite :</span><select data-ov="ft" aria-label="Séance vraiment faite">${Object.entries(TYPES).filter(([k, t]) => !t.sport && (!t.old || k === b.t)).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
+${b.relab && STEPS[b.t] ? `<select data-ov="fk" aria-label="Palier fait">${palOpts(b.w.k)}</select>` : ""}${b.relab ? `<button class="lnk" data-ovfreset="1">Revenir à la séance prévue</button>` : ""}</div>`;
   if (b.st === "plan" && (W.td < 0 || it.day >= W.td)) {
-    const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
     h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).filter(([k, t]) => !t.sport && (!t.old || k === b.t)).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
-${STEPS[b.t] ? `<select data-ov="k" aria-label="Palier">${STEPS[b.t].map((_, k) => { const L = palLog().filter(x => x.t === b.t && x.k === k).sort((a, c) => a.d < c.d ? -1 : 1), e = L[L.length - 1];
-        return opt(k, b.w.k, stepL(b.t, k) + (e ? (e.ok ? ` ✓ ${dShort(parseYmd(e.d))}` : ` · à refaire (${dShort(parseYmd(e.d))})`) : "")); }).join("")}</select>` : ""}
+${STEPS[b.t] ? `<select data-ov="k" aria-label="Palier">${palOpts(b.w.k)}</select>` : ""}
       <select data-ov="dur" aria-label="Durée">${DURS.map(d => opt(d, b.dur, fmtMin(d))).join("")}</select><select data-ov="place" aria-label="Lieu">${opt("mw", b.place, "MyWhoosh")}${opt("out", b.place, "Dehors")}</select>
       ${b.own ? `<button class="lnk" data-ovreset="1">Revenir au plan</button>` : ""}</div>`;
   }
@@ -1213,7 +1223,9 @@ function bind(c, prof) {
   box.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => { const it = PS.W.items[+b.dataset.dl]; download(fileName(it.bike, it.date), zwo(it.bike, it.date, prof)); });
   if ($("pZip")) $("pZip").onclick = () => { const L = PS.W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (PS.W.td < 0 || it.day >= PS.W.td)); downloadAll(L, prof).catch(() => toast("Téléchargement groupé impossible : télécharge les séances une par une.")); };
   box.querySelectorAll("[data-ov]").forEach(s => s.onchange = () => { const d = +s.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
-    ov[d] = { ...(ov[d] || {}), [s.dataset.ov]: s.dataset.ov === "dur" || s.dataset.ov === "k" ? +s.value : s.value }; if (s.dataset.ov === "t") delete ov[d].k; store2.set(k, ov); render(); });
+    ov[d] = { ...(ov[d] || {}), [s.dataset.ov]: ["dur", "k", "fk"].includes(s.dataset.ov) ? +s.value : s.value }; if (s.dataset.ov === "t") delete ov[d].k; if (s.dataset.ov === "ft") delete ov[d].fk; store2.set(k, ov); render(); });
+  box.querySelectorAll("[data-ovfreset]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
+    if (ov[d]) { delete ov[d].ft; delete ov[d].fk; if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
   box.querySelectorAll("[data-ovreset]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
     if (ov[d]) { ["t", "dur", "place", "k"].forEach(x => delete ov[d][x]); if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
   // course à la main : ajoutée, changée, retirée (planOv:<lundi>[jour].run), effet immédiat, y compris cette semaine
