@@ -36,19 +36,36 @@ def log(msg):
 
 
 # ------------------------------------------------------------------ Lecture de la synchro
-def parse_link(raw):
-    """Lien « …#sync=<base64> » (ou le code seul) → (url, clé), None si illisible."""
-    raw = (raw or "").strip()
-    if not raw:
+def parse_link(raw, why=None):
+    """Lien « …#sync=<base64> » (ou le code seul) → (url, clé), None si illisible ; why (liste) reçoit la raison, sans rien du secret.
+    Tolérant : espaces, guillemets, « # » encodé (%23), texte autour du lien."""
+    def no(r):
+        if why is not None:
+            why.append(r)
         return None
-    code = raw.split("#sync=", 1)[1] if "#sync=" in raw else raw
+    raw = (raw or "").strip().strip("'\"<>").strip()
+    if not raw:
+        return no("vide")
+    m = re.search(r"sync=([A-Za-z0-9_\-+/=]+)", raw)
+    if m:
+        code = m.group(1)
+    elif re.fullmatch(r"[A-Za-z0-9_\-+/=]{20,}", raw):
+        code = raw
+    elif raw.startswith("https://script.google.com/"):
+        return no("c'est l'adresse du script seule, sans la clé : il faut le lien « Copier le lien de configuration » (…#sync=…)")
+    else:
+        return no("pas de « #sync= » dans la valeur : il faut le lien « Copier le lien de configuration » des réglages de synchro")
     try:
-        code = code.replace("-", "+").replace("_", "/")
+        code = code.replace("-", "+").replace("_", "/").rstrip("=")
         o = json.loads(base64.b64decode(code + "=" * (-len(code) % 4)).decode("utf-8"))
     except Exception:
-        return None
-    if not isinstance(o, dict) or not URL_RE.match(str(o.get("url", ""))) or len(str(o.get("key", ""))) < 16:
-        return None
+        return no("le code après « #sync= » est tronqué ou abîmé : recopie le lien en entier")
+    if not isinstance(o, dict):
+        return no("contenu inattendu")
+    if not URL_RE.match(str(o.get("url", ""))):
+        return no("l'adresse du script dans le lien n'est pas une adresse script.google.com/…/exec")
+    if len(str(o.get("key", ""))) < 16:
+        return no("la clé dans le lien fait moins de 16 caractères")
     return o["url"], o["key"]
 
 
@@ -219,11 +236,12 @@ def run(api, today=None, env=os.environ, post=requests.post):
     today = today or datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
     old = json.loads(STATE.read_text()) if STATE.exists() else {"v": 1, "w": {}}
     st = {k: x for k, x in old.items() if k not in ("err", "at")}
-    cfg = parse_link(env.get("SYNC_LINK"))
+    why = []
+    cfg = parse_link(env.get("SYNC_LINK"), why)
     if not cfg:
         new = {**st, "v": 1, "cfg": False}
         if env.get("SYNC_LINK"):
-            log("secret SYNC_LINK illisible : copie le lien depuis les réglages de synchro du site")
+            log(f"secret SYNC_LINK illisible ({len(env['SYNC_LINK'].strip())} caractères) : {why[0] if why else 'raison inconnue'}")
     else:
         try:
             new = sync_watch(api, read_collection(*cfg, post=post), {**st, "v": 1}, today)

@@ -557,6 +557,16 @@ class Montre(unittest.TestCase):
         bad = base64.urlsafe_b64encode(json.dumps({"url": "https://evil.example/exec", "key": "k" * 20}).encode()).decode()
         for x in ("", "n'importe quoi", bad):
             self.assertIsNone(mt.parse_link(x))
+        # tolérant : guillemets, espaces, retour à la ligne, « # » encodé, texte autour, remplissage « = »
+        url = "https://script.google.com/macros/s/AbC-123_x/exec"
+        for x in (f'  "https://x.github.io/Garmin/#sync={code}"\n', f"https://x.github.io/Garmin/%23sync={code}", f"Lien : https://x.github.io/Garmin/#sync={code} (à garder)", code + "=="):
+            self.assertEqual(mt.parse_link(x), (url, "k" * 20), x)
+        # la raison du refus est dite, sans rien du secret
+        for x, r in (("https://script.google.com/macros/s/AbC/exec", "sans la clé"), ("bonjour", "#sync="), ("https://x.io/#sync=" + code[:-9], "tronqué")):
+            why = []
+            self.assertIsNone(mt.parse_link(x, why))
+            self.assertIn(r, why[0])
+            self.assertNotIn("k" * 20, why[0])
 
     def test_format_garmin(self):
         v = SEANCES[0]   # seuil : échauffement, 4 × (4 min au seuil, 1 min trot), retour au calme
