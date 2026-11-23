@@ -27,6 +27,7 @@ function load({ hash = "", acts = [], course = null, extra = {}, fresh = false }
     location: { hash, origin: "https://exemple.test", pathname: "/" }, history: { replaceState: (a, b, u) => calls.replace.push(u) },
     Nav: { curTab: () => "velo" }, atob, btoa, isIndoor: a => a.t === "VirtualRide" || a.tr === 1, nf: n => String(n), esc: s => String(s), ...extra };
   vm.createContext(ctx); vm.runInContext(read("../charge.js"), ctx); ctx.Charge = win.Charge;   // dans le navigateur window est l'objet global
+  vm.runInContext(read("../seances.js"), ctx); ctx.Seances = win.Seances;                       // séances clés course (chargé avant plan.js)
   if (course) { win.Course = course; ctx.Course = course; }
   vm.runInContext(read("../plan.js"), ctx);
   return { Plan: win.Plan, ctx, store, clock, calls, win };
@@ -316,6 +317,19 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   // jours de suite permis à partir du palier 9 ; durée plafonnée par le réglage du jour
   items = free(); place(items, rcOf({ 0: ["alt", 40], 1: ["alt"], 2: ["alt"], 3: ["alt"], 4: ["alt"] }, 2), { run: { ladder: { ...LAD, k: 9, split: false, durs: [60, 35, 30, 30, 25] } } });
   same(items.map(i => i.run ? i.run.dur : 0), [25, 60, 35, 30, 30, 0, 0], "la plus courte sur le jour réglé à 40 min");
+  // séance clé du palier (reprise.js, KEYS) : une sortie du palier devient la séance clé, celle la plus proche de 40 min ; la plus longue reste un footing
+  { const L5 = { k: 4, of: 17, light: false, split: true, durs: [40, 30, 25, 25], key: "rstrides", keyDur: 40 };
+    items = free(); info = place(items, rc7("auto"), { run: { ladder: L5, prevMin: 100 } });
+    const R = items.filter(i => i.run); assert.equal(R.length, 4); assert.equal(R.filter(i => i.run.t === "rstrides").length, 1, "une séance clé");
+    assert.equal(R.find(i => i.run.t === "rstrides").run.dur, 40, "la sortie de 40 min"); same(R.map(i => i.run.dur).sort((a, b) => a - b), [25, 25, 30, 40], "minutes du palier inchangées");
+    assert.ok(info.notes.some(n => /dont une séance clé \(footing \+ lignes droites\)/.test(n)), info.notes.join(" | "));
+    // seuil : sur un jour « à la place du vélo », jamais collé à un jour dur ; égalité 35 / 45 → la plus courte
+    const L7 = { k: 6, of: 17, light: false, split: true, durs: [45, 35, 30, 25], key: "rthr", keyDur: 40 };
+    items = free(); info = place(items, rc7("auto"), { run: { ladder: L7, prevMin: 100 } });
+    const k7 = items.filter(i => i.run && i.run.t === "rthr"); assert.equal(k7.length, 1, "seuil placé"); assert.equal(k7[0].run.dur, 35); assert.equal(k7[0].run.slot, "alt");
+    // que des jours « en plus » : pas de seuil (deux séances dans la journée), une ligne le dit, les footings restent
+    items = free(); info = place(items, rcOf({ 0: ["add"], 2: ["add"], 4: ["add"], 6: ["add"] }, 1, "auto"), { run: { ladder: L7, prevMin: 100 } });
+    assert.equal(items.filter(i => i.run && i.run.t !== "rfoot").length, 0); assert.ok(info.notes.some(n => /Pas de séance clé cette semaine \(seuil course\)/.test(n)), info.notes.join(" | ")); }
   // progression : au plus 1 séance dure, en alternance d'une semaine à l'autre
   const kinds = [];
   for (let w = 0; w < 4; w++) { items = free(); place(items, rc4("progression"), { mon: monday(w), run: { prevMin: 100 } });
@@ -342,13 +356,13 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   assert.deepEqual(R6.filter(t => TY[t].hard), ["rthr", "rvo2"]);
   const thr = 240, W = Object.fromEntries(R6.map(t => [t, RUN.build(t, 60, thr)]));
   R6.forEach(t => { assert.equal(W[t].tss, Math.round(RUN.RUN_IF[t] ** 2 * 100), `charge de ${t} = h × IF² × 100`); assert.ok(W[t].title && W[t].goal && W[t].km > 5); assert.ok(W[t].steps.reduce((a, s) => a + s.d, 0) <= 3601); });
-  assert.deepEqual(Object.values(RUN.RUN_IF), [.65, .68, .7, .88, .97, 1.08]);
+  assert.deepEqual(Object.values(RUN.RUN_IF), [.65, .68, .7, .88, .97, 1.08, .82]);
   near(W.rfoot.steps[1].pace, thr * 1.28, 1e-9, "footing = 1,28 × l'allure seuil");
   const mainPace = t => W[t].steps.find(s => s.n || /Footing|Sortie/.test(s.label)).pace, v = p => thr / p;
-  assert.ok(v(mainPace("rtempo")) >= .88 && v(mainPace("rtempo")) < .95, "tempo en zone 3");
+  assert.ok(v(mainPace("rtempo")) >= .93 && v(mainPace("rtempo")) < .995, "tempo = allure semi, un cran sous le seuil (Daniels : ≈ 97 % de la vitesse seuil)");
   assert.ok(v(mainPace("rthr")) >= .95 && v(mainPace("rthr")) <= 1.02, "seuil en zone 4"); assert.ok(v(mainPace("rvo2")) > 1.02, "VO2max en zone 5");
   assert.ok(v(mainPace("rlong")) < v(mainPace("rfoot")), "sortie longue plus lente que le footing");
-  assert.match(W.rthr.title, /^Seuil \d × 8'$/); assert.match(W.rvo2.title, /^VO2max \d × 3'$/); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
+  assert.match(W.rthr.title, /^Seuil #1 · 3 × 4'$/); assert.match(W.rvo2.title, /^VO2max #1 · 12 × 30\/30$/); assert.ok(W.rthr.key && W.rthr.spec && W.rthr.thr === thr, "séance clé : seances.js, avec sa version montre"); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
   assert.ok(W.rstrides.steps.some(s => s.n === 6 && s.on === 20), "6 lignes droites");
 }
 // ---- 3.7 génération complète : le vélo et la muscu ne changent pas ; invariants sur beaucoup de réglages

@@ -688,6 +688,7 @@ function gather() {
   const res = detectAll(dctx, today), hist = Object.fromEntries(DETECTORS.map(([k, , fn]) => [k, alertHistory(fn, dctx, today)]));
   const report = acts.length ? weekReport(dctx, today, planAPI) : null;
   // séance prévue ce soir (Plan) pour la phrase « Que faire aujourd'hui ? »
+  try { if (planAPI && planAPI.watch) planAPI.watch(); } catch (e) {}   // séances clés course vers la montre, même sans ouvrir le Plan (seances.js)
   let planned = null, done = []; try { const pl = planAPI && planAPI.plannedFor(ymd(today)); if (pl) ({ planned, done } = todaySessions(pl, planAPI.TYPES, planAPI.doneOn ? planAPI.doneOn(ymd(today)) : [])); else if (planAPI && planAPI.doneOn) done = todaySessions(null, planAPI.TYPES, planAPI.doneOn(ymd(today))).done; } catch (e) {}
   const f = fit[fit.length - 1];
   const adv = advice({ tsb: f.tsb, reco: rec.today ? rec.score : null, hrvLow: res.hrv.active, planned, done, night: (() => { try { return window.Recup?.tonight?.(today) || null; } catch (e) { return null; } })() });

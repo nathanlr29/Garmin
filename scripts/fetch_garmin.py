@@ -554,6 +554,12 @@ def main():
             print("Récup : Garmin limite les requêtes (429), on réessaiera au prochain passage.")
         except Exception as e:
             print(f"Récup : erreur {type(e).__name__} : {e}")
+        # Séances clés course du Plan → calendrier Garmin Connect → montre (secret SYNC_LINK) ; une erreur ici ne bloque rien
+        try:
+            import montre
+            montre.run(api)
+        except Exception as e:
+            print(f"Montre : erreur {type(e).__name__} : {e}")
     except GarminConnectTooManyRequestsError:
         sys.exit("Garmin limite les requêtes (429). Le prochain passage réessaiera.")
     finally:

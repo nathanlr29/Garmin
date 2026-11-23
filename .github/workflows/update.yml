@@ -46,6 +46,7 @@ jobs:
           MYWHOOSH_PASSWORD: ${{ secrets.MYWHOOSH_PASSWORD }}
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}         # facultatif (plan B)
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}   # facultatif (plan B)
+          SYNC_LINK: ${{ secrets.SYNC_LINK }}               # facultatif : séances clés course du Plan → calendrier Garmin (scripts/montre.py)
           FULL_SYNC: ${{ inputs.full && '1' || '0' }}
         run: python scripts/fetch_garmin.py
 

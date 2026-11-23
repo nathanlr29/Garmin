@@ -55,6 +55,8 @@ Dans le dépôt, va dans **Settings › Secrets and variables › Actions › Ne
 
 Les secrets restent invisibles, même si le dépôt est public.
 
+Facultatif : `SYNC_LINK` = le lien « Copier le lien de configuration » de la synchronisation du site (carte Chaîne › réglages). Avec lui, les séances clés course du Plan (seuil, VO2max, côtes…) partent toutes seules dans ton calendrier Garmin Connect, puis sur ta montre.
+
 ## 4. Activer la page (2 min)
 
 1. Va dans **Settings › Pages**. Sous *Build and deployment › Source*, choisis **GitHub Actions**.

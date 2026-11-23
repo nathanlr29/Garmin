@@ -21,6 +21,7 @@ except ImportError:  # les tests de lecture n'ont pas besoin de la vraie bibliot
 import fetch_garmin as fg  # noqa: E402
 import recovery as rc  # noqa: E402
 import fetch_poi as fp  # noqa: E402
+import montre as mt  # noqa: E402
 
 rc.time.sleep = lambda s: None   # pas d'attente entre deux appels factices
 
@@ -513,6 +514,164 @@ class PoiTiles(unittest.TestCase):
         self.assertEqual(todo, [t[0], t[1], t[2]])  # jamais fait, puis ancien format (sans entrée = version 1) ; les autres sont frais
         idx[t[5]] = "2026-10-01"  # plus vieux que 14 jours, au bon format : après les anciens formats
         self.assertEqual(fp.todo(idx, ver, date(2026, 10, 26)), [t[0], t[1], t[2], t[5]])
+
+
+# ---------------------------------------------------------------- Séances clés course → calendrier Garmin (scripts/montre.py)
+SEANCES = __import__("json").loads((Path(__file__).resolve().parent / "fixtures" / "montre_seances.json").read_text())
+
+
+class _WatchApi:
+    def __init__(self, fail_on=None):
+        self.n, self.calls, self.fail_on = 1000, [], fail_on
+
+    def upload_workout(self, j):
+        if self.fail_on == "upload":
+            raise RuntimeError("panne")
+        self.n += 1
+        self.calls.append(("up", j["workoutName"], self.n))
+        return {"workoutId": self.n}
+
+    def schedule_workout(self, wid, d):
+        self.calls.append(("sched", wid, d))
+        return {"workoutScheduleId": wid + 5000}
+
+    def unschedule_workout(self, sid):
+        self.calls.append(("unsched", sid))
+
+    def delete_workout(self, wid):
+        self.calls.append(("del", wid))
+
+
+class Montre(unittest.TestCase):
+    def test_empreinte_identique_au_site(self):
+        # empreintes calculées par seances.js (tests/seances.mjs vérifie que le fichier est à jour)
+        for v in SEANCES:
+            self.assertEqual(mt.sig(v), v["sig"], v["name"])
+
+    def test_lien_de_synchro(self):
+        import base64
+        import json
+        code = base64.urlsafe_b64encode(json.dumps({"url": "https://script.google.com/macros/s/AbC-123_x/exec", "key": "k" * 20}).encode()).decode().rstrip("=")
+        self.assertEqual(mt.parse_link(f"https://x.github.io/Garmin/#sync={code}"), ("https://script.google.com/macros/s/AbC-123_x/exec", "k" * 20))
+        self.assertEqual(mt.parse_link(code)[1], "k" * 20)
+        bad = base64.urlsafe_b64encode(json.dumps({"url": "https://evil.example/exec", "key": "k" * 20}).encode()).decode()
+        for x in ("", "n'importe quoi", bad):
+            self.assertIsNone(mt.parse_link(x))
+
+    def test_format_garmin(self):
+        v = SEANCES[0]   # seuil : échauffement, 4 × (4 min au seuil, 1 min trot), retour au calme
+        j = mt.garmin_json(v)
+        self.assertEqual(j["sportType"]["sportTypeKey"], "running")
+        st = j["workoutSegments"][0]["workoutSteps"]
+        self.assertEqual([x["type"] for x in st], ["ExecutableStepDTO", "RepeatGroupDTO", "ExecutableStepDTO"])
+        self.assertEqual([x["stepOrder"] for x in st], [1, 2, 5])
+        rep = st[1]
+        self.assertEqual(rep["numberOfIterations"], 4)
+        run = rep["workoutSteps"][0]
+        self.assertEqual(run["targetType"]["workoutTargetTypeKey"], "pace.zone")
+        fast, slow = v["steps"][1]["steps"][0]["p"]
+        self.assertAlmostEqual(run["targetValueOne"], 1000 / slow, 3)   # la plus lente d'abord (m/s)
+        self.assertLess(run["targetValueOne"], run["targetValueTwo"])
+        self.assertEqual(run["endConditionValue"], 240.0)
+        self.assertEqual(j["estimatedDurationInSecs"], mt.total(v["steps"]))
+        # côtes : échauffement jusqu'au bouton Lap, sans cible d'allure
+        h = mt.garmin_json(SEANCES[2])["workoutSegments"][0]["workoutSteps"]
+        self.assertEqual(h[0]["endCondition"]["conditionTypeKey"], "lap.button")
+        self.assertNotIn("endConditionValue", h[0])
+        self.assertEqual(h[1]["workoutSteps"][0]["targetType"]["workoutTargetTypeKey"], "no.target")
+
+    def test_format_conforme_a_la_bibliotheque(self):
+        try:
+            from garminconnect.workout import RunningWorkout, create_interval_step
+        except Exception:
+            self.skipTest("garminconnect.workout (pydantic) absent")
+        for v in SEANCES:
+            j = mt.garmin_json(v)
+            w = RunningWorkout(**j)            # le modèle typé de garminconnect accepte la séance telle quelle
+            self.assertEqual(w.to_dict()["workoutSegments"][0]["workoutSteps"][0]["stepType"], j["workoutSegments"][0]["workoutSteps"][0]["stepType"])
+        ref = create_interval_step(240.0, 3).model_dump(exclude_none=True)   # mêmes clés que les pas construits par la bibliothèque
+        mine = mt.garmin_json(SEANCES[0])["workoutSegments"][0]["workoutSteps"][1]["workoutSteps"][0]
+        self.assertEqual(ref["stepType"], mine["stepType"])
+        self.assertEqual(ref["endCondition"], mine["endCondition"])
+
+    def test_validation(self):
+        v = dict(SEANCES[0])
+        self.assertTrue(mt.valid(v, v["date"]))
+        self.assertFalse(mt.valid(v, "2026-11-27"), "mauvaise date")
+        self.assertFalse(mt.valid({**v, "steps": [{"t": "interval", "s": 60, "p": [100, 200]}]}, v["date"]), "allure hors plage")
+        self.assertFalse(mt.valid({**v, "steps": [{"t": "sprint", "s": 60, "p": None}]}, v["date"]), "type inconnu")
+        self.assertFalse(mt.valid({**v, "steps": [{"rep": 3, "steps": [{"rep": 2, "steps": []}]}]}, v["date"]), "répétitions imbriquées")
+
+    def test_creation_mise_a_jour_retrait(self):
+        today = "2026-11-24"
+        items = [{"id": "run:" + v["date"], "ts": 1, "v": v} for v in SEANCES] + [{"id": "run:2026-11-20", "ts": 1, "v": SEANCES[0]}]
+        api = _WatchApi()
+        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, today)
+        self.assertEqual(sorted(st["w"]), ["2026-11-26", "2026-11-28", "2026-11-30"], "le passé n'est jamais créé")
+        self.assertEqual([c[0] for c in api.calls], ["up", "sched"] * 3)
+        self.assertEqual(st["w"]["2026-11-26"], {"id": 1001, "sid": 6001, "s": SEANCES[0]["sig"]})
+        # rien de changé : aucun appel
+        api.calls.clear()
+        self.assertEqual(mt.sync_watch(api, items, st, today), st)
+        self.assertEqual(api.calls, [])
+        # séance modifiée (autre palier) : l'ancienne est retirée, la nouvelle créée ; séance retirée du Plan (v nul) : retirée
+        v2 = {**SEANCES[0], "name": "Seuil #3 · 5×4'"}
+        v2["sig"] = mt.sig(v2)
+        items2 = [{"id": "run:2026-11-26", "v": v2}, {"id": "run:2026-11-28", "v": None}, {"id": "run:2026-11-30", "v": SEANCES[2]}]
+        st2 = mt.sync_watch(api, items2, st, today)
+        self.assertIn(("unsched", 6001), api.calls)
+        self.assertIn(("del", 1001), api.calls)
+        self.assertIn(("del", 1002), api.calls)
+        self.assertEqual(sorted(st2["w"]), ["2026-11-26", "2026-11-30"])
+        self.assertEqual(st2["w"]["2026-11-26"]["s"], v2["sig"])
+        # empreinte fausse (séance trafiquée) : ignorée
+        bad = {**SEANCES[0], "sig": "00000000"}
+        self.assertEqual(mt.plan([{"id": "run:2026-11-26", "v": bad}], {"w": {}}, today)[2], ["2026-11-26"])
+        # 15 jours après : retirée de Garmin (bibliothèque propre)
+        api.calls.clear()
+        st3 = mt.sync_watch(api, [], st2, "2026-12-15")
+        self.assertEqual(sorted(st3["w"]), [])
+        self.assertEqual(sum(1 for c in api.calls if c[0] == "del"), 2)
+
+    def test_erreur_garmin_garde_l_etat(self):
+        api = _WatchApi(fail_on="upload")
+        items = [{"id": "run:" + SEANCES[0]["date"], "v": SEANCES[0]}]
+        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, "2026-11-24")
+        self.assertEqual(st["err"], "RuntimeError")
+        self.assertEqual(st["w"], {})
+
+    def test_run_sans_secret_et_sans_changement(self):
+        import tempfile
+        old = mt.STATE
+        with tempfile.TemporaryDirectory() as d:
+            mt.STATE = Path(d) / "montre.json"
+            try:
+                r = mt.run(None, today="2026-11-24", env={})
+                self.assertEqual(r["cfg"], False)
+                txt = mt.STATE.read_text()
+                mt.run(None, today="2026-11-24", env={})
+                self.assertEqual(mt.STATE.read_text(), txt, "rien de changé : fichier intact (pas de commit inutile)")
+
+                class R:
+                    def raise_for_status(self):
+                        pass
+
+                    def json(self):
+                        return {"ok": True, "items": [{"id": "run:" + SEANCES[0]["date"], "v": SEANCES[0]}]}
+                import base64
+                import json
+                link = base64.urlsafe_b64encode(json.dumps({"url": "https://script.google.com/macros/s/x/exec", "key": "k" * 20}).encode()).decode()
+                seen = {}
+
+                def post(url, **kw):
+                    seen.update(url=url, body=json.loads(kw["data"]))
+                    return R()
+                r = mt.run(_WatchApi(), today="2026-11-24", env={"SYNC_LINK": link}, post=post)
+                self.assertEqual(seen["body"], {"k": "k" * 20, "op": "sync", "c": "montre", "items": []})
+                self.assertEqual(list(r["w"]), [SEANCES[0]["date"]])
+                self.assertNotIn("k" * 20, mt.STATE.read_text(), "la clé n'est jamais écrite")
+            finally:
+                mt.STATE = old
 
 
 if __name__ == "__main__":

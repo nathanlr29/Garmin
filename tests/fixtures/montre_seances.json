@@ -1,0 +1,145 @@
+[
+ {
+  "date": "2026-11-26",
+  "v": 1,
+  "name": "Seuil #2 · 4×4'",
+  "steps": [
+   {
+    "t": "warmup",
+    "s": 780,
+    "p": null,
+    "n": "Échauffement"
+   },
+   {
+    "rep": 4,
+    "steps": [
+     {
+      "t": "interval",
+      "s": 240,
+      "p": [
+       264,
+       272
+      ],
+      "n": "Seuil 4:28"
+     },
+     {
+      "t": "recovery",
+      "s": 60,
+      "p": null,
+      "n": "Trot"
+     }
+    ]
+   },
+   {
+    "t": "cooldown",
+    "s": 420,
+    "p": null,
+    "n": "Retour au calme"
+   }
+  ],
+  "sig": "e21f1a2b"
+ },
+ {
+  "date": "2026-11-28",
+  "v": 1,
+  "name": "VO2max #3 · 2×10×30/30",
+  "steps": [
+   {
+    "t": "warmup",
+    "s": 1080,
+    "p": null,
+    "n": "Échauffement"
+   },
+   {
+    "rep": 10,
+    "steps": [
+     {
+      "t": "interval",
+      "s": 30,
+      "p": [
+       237,
+       247
+      ],
+      "n": "30 s 4:02"
+     },
+     {
+      "t": "recovery",
+      "s": 30,
+      "p": null,
+      "n": "Trot"
+     }
+    ]
+   },
+   {
+    "t": "recovery",
+    "s": 150,
+    "p": null,
+    "n": "Récup séries"
+   },
+   {
+    "rep": 10,
+    "steps": [
+     {
+      "t": "interval",
+      "s": 30,
+      "p": [
+       237,
+       247
+      ],
+      "n": "30 s 4:02"
+     },
+     {
+      "t": "recovery",
+      "s": 30,
+      "p": null,
+      "n": "Trot"
+     }
+    ]
+   },
+   {
+    "t": "cooldown",
+    "s": 570,
+    "p": null,
+    "n": "Retour au calme"
+   }
+  ],
+  "sig": "3a96942c"
+ },
+ {
+  "date": "2026-11-30",
+  "v": 1,
+  "name": "Côtes #1 · 6×10\"",
+  "steps": [
+   {
+    "t": "warmup",
+    "s": 0,
+    "p": null,
+    "n": "Vers la côte"
+   },
+   {
+    "rep": 6,
+    "steps": [
+     {
+      "t": "interval",
+      "s": 10,
+      "p": null,
+      "n": "Sprint côte"
+     },
+     {
+      "t": "recovery",
+      "s": 120,
+      "p": null,
+      "n": "Descente au pas"
+     }
+    ]
+   },
+   {
+    "t": "cooldown",
+    "s": 420,
+    "p": null,
+    "n": "Retour au calme"
+   }
+  ],
+  "sig": "6b47c1f9"
+ }
+]

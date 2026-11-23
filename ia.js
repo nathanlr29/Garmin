@@ -119,7 +119,8 @@ function secProfile(now) {
   try { const g = P && P._cfg && P._cfg().goal; if (g) L.push(`Objectifs du Plan : FTP ${g.ftp || "?"} W, VO2max ${g.vo2 || "?"}${g.date ? `, pour le ${g.date}` : ""} ; ultra de 250 km à 28 km/h.`); } catch (e) {}
   // course : programme de reprise (reprise.js) et volume récent (course.js)
   try { const X = window.Reprise._, Pg = X.progress(acts(), new Date(now));
-    if (Pg.started) L.push("Course à pied : reprise après une blessure au tibia (périostite, arrêt en juin), en complément du vélo. Programme par paliers d'une semaine : footings faciles seulement (où il peut parler, sous 150 bpm environ), pas de fractionné, foulée courte. "
+    if (Pg.started) L.push("Course à pied : reprise après une blessure au tibia (périostite, arrêt en juin), en complément du vélo. Programme par paliers d'une semaine : footings faciles (où il peut parler, sous 150 bpm environ), foulée courte"
+      + (X.KEYS && X.KEYS[Pg.k] ? `, plus une séance clé ce palier (${{ rstrides: "lignes droites", rhill: "côtes", rthr: "seuil", rvo2: "VO2max" }[X.KEYS[Pg.k]]}, prévue au Plan avec ses allures) et rien de plus dur` : ", pas de fractionné ce palier") + ". "
       + X.answer(Pg, X.week(Pg.k, X.weekRuns(acts(), X.mondayOf(+now)), X.longCap(acts(), +now)), +now)); } catch (e) {}
   try { const G = window.Course._.gauge(acts(), +now);
     if (G.acute || G.chronic) L.push(`Volume de course : ${n(G.acute, 1)} km sur les 7 derniers jours, ${n(G.chronic, 1)} km par semaine en moyenne sur les 28 jours d'avant${G.zone != null ? ` (rapport ${n(G.ratio, 2)} : ${["sous-charge", "zone sûre", "vigilance", "risque élevé"][G.zone]})` : ""}.`); } catch (e) {}

@@ -58,5 +58,5 @@ function build(name, recs, pts) {
   w.msg(3, 21, [[253, "uint32", ts(z.t)], [0, "enum", 0], [1, "enum", 4], [4, "uint8", 0]]);                      // event : arrêt
   return w.done();
 }
-window.FitCourse = { build, COURSE_POINT, _crc: crc };
+window.FitCourse = { build, writer, COURSE_POINT, _crc: crc };
 })();

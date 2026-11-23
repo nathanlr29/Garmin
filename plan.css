@@ -315,3 +315,21 @@ html.bm-open{overflow:hidden}
 .bm-blk td b{font:700 16px/1 var(--font-num)}
 .bm-blk td small{margin-left:3px;color:var(--muted);font-size:11.5px}
 .bm-bn{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ink);color:var(--card);font:700 11px/1 var(--font-ui)}
+/* séances clés course (seances.js) : prochaines séances, état de l'envoi vers la montre */
+#plan .klist{list-style:none;margin:0 0 4px;padding:0}
+#plan .klist li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+#plan .klist li b{min-width:64px}
+#plan .kst{font-size:12.5px;color:var(--muted)}
+#plan .kst.ok{color:var(--good)}
+#plan .kst.err,#plan .kst.nolink{color:var(--warn)}
+#plan .klist .kst{margin-left:auto}
+#plan .kwline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:10px 0 4px}
+#plan .kwline .kst{flex:1 1 220px;line-height:1.4}
+#plan .keyrun .pgbars .lnk{font-size:12.5px}
+#plan .keyrun .pgbars li{grid-template-columns:110px minmax(0,1fr) auto auto}
+#plan .kwatch{font-size:13.5px;line-height:1.5;color:var(--ink)}
+#plan .kwatch p{margin:8px 0}
+#plan .kwatch ol{margin:6px 0;padding-left:20px}
+#plan .kwatch li{margin:4px 0}
+#plan .kwatch code{font-family:var(--font-mono,monospace);font-size:12.5px;background:var(--raised);padding:1px 4px;border-radius:4px}
+@media (max-width:600px){#plan .keyrun .pgbars li{grid-template-columns:1fr auto auto}}

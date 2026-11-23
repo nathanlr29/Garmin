@@ -1,6 +1,7 @@
 "use strict";
 /* Carte « Ta reprise course » de l'onglet Plan : programme de reprise progressive par paliers d'une semaine (demande du 23/10/2026,
-   après une périostite tibiale), en complément du vélo. Footing facile seulement, pas de fractionné.
+   après une périostite tibiale), en complément du vélo. Footing facile ; à partir du palier 5, une séance clé par semaine au plus
+   (demande du 23/11/2026, KEYS : lignes droites, côtes, seuil, VO2max en fin de programme ; contenu dans seances.js).
    La course est un bouche-trou : pas de jours fixes ni de questionnaire. La progression se lit dans les courses Garmin de chaque semaine
    (voir progress). Le Plan place les sorties du palier sur les jours de course cochés (plan.js, ladderFor) ; sans jour coché, la carte propose des jours libres.
    API : Reprise.html({ acts, items, now }) → chaîne de la section ; Reprise._ = fonctions pures (node tests/reprise.mjs). */
@@ -17,6 +18,12 @@
   const RULE = { ok: .9, okLight: .5, back: .5 };   // part des minutes prévues : ≥ 90 % palier suivant (50 % en semaine allégée) ; < 50 % un palier en arrière
   const LONG = { days: 30, plus: 5, floor: 25 };    // la plus longue sortie : au plus 5 min de plus que la plus longue des 30 derniers jours
   const SPLIT_FROM = 8;                             // jamais deux jours de course de suite avant le palier 9 (index 8)
+  // séance clé de chaque palier (index), une au plus, jamais en semaine allégée : 4 semaines de footings sans douleur d'abord, puis
+  // lignes droites (foulée, presque sans fatigue), sprints en côte (la pente limite le choc au sol), seuil, et la VO2max en dernier
+  // (vitesse la plus haute, donc le plus de charge sur le tibia). Le Plan la met à la place d'un footing (plan.js, placeRuns).
+  const KEYS = [null, null, null, null, "rstrides", "rhill", "rthr", null, "rthr", "rhill", "rthr", null, "rthr", "rvo2", "rthr", null, "rvo2"];
+  const KEY_DUR = 40;                               // la séance clé prend la sortie du palier la plus proche de 40 min
+  const nextKey = k => { for (let i = k + 1; i < KEYS.length; i++) if (KEYS[i]) return { k: i, t: KEYS[i] }; return null; };
   const PACE = 340;                                 // allure de footing pour estimer les km (5:40/km, tes footings d'octobre 2026)
   const DAYN = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
 
@@ -121,8 +128,9 @@
       ${W.capped && P.started ? `<p class="note">La plus longue est ramenée à ${Math.max(...W.rows.map(r => r.min))} min : jamais plus de ${LONG.plus} min au-dessus de ta plus longue sortie des ${LONG.days} derniers jours.</p>` : ""}
       ${slotTxt}
       <details class="pgall"><summary>Voir tous les paliers</summary><div class="pgsteps">${cells}</div></details>
-      <p class="note">Footing où tu parles, sous 150 bpm environ, pas de fractionné. Chemins et piste d'abord, foulée un peu plus courte. Mollets et releveurs 2 fois par semaine en muscu (3 × 15 montées sur pointes lentes, 3 × 30 s sur les talons). Tibia douloureux au-dessus de 2/10 : saute la sortie, le programme redescendra tout seul. Le palier suivant vient avec 90 % des minutes de la semaine ; moins de 50 %, un palier en arrière.</p></section>`;
+      ${KEYS[k] && P.started ? `<p class="note">Séance clé de ce palier : ${{ rstrides: "lignes droites", rhill: "côtes", rthr: "seuil", rvo2: "VO2max" }[KEYS[k]]}, à la place d'un footing (détail dans la carte Séances clés course).</p>` : ""}
+      <p class="note">Footings où tu parles, sous 150 bpm environ. Séance clé à partir du palier 5, une par semaine au plus, jamais en semaine allégée. Chemins et piste d'abord, foulée un peu plus courte. Mollets et releveurs 2 fois par semaine en muscu (3 × 15 montées sur pointes lentes, 3 × 30 s sur les talons). Tibia douloureux au-dessus de 2/10 : saute la sortie, le programme redescendra tout seul. Le palier suivant vient avec 90 % des minutes de la semaine ; moins de 50 %, un palier en arrière.</p></section>`;
   }
 
-  window.Reprise = { html, _: { START, LADDER, LIGHT, RULE, LONG, SPLIT_FROM, weekRuns, progress, longCap, week, slots, answer, mondayOf } };
+  window.Reprise = { html, _: { START, LADDER, LIGHT, RULE, LONG, SPLIT_FROM, KEYS, KEY_DUR, nextKey, weekRuns, progress, longCap, week, slots, answer, mondayOf } };
 })();

@@ -66,3 +66,11 @@ const h = R.html({ acts, items, now: day("2026-11-24", 12).getTime() });
 assert.match(h, /Ta reprise course/); assert.match(h, /Palier 3 sur 17/); assert.doesNotMatch(h, /undefined|NaN/);
 assert.match(R.html({ acts: [], items, now: day("2026-10-23", 12).getTime() }), /démarre le lundi 2 novembre/);
 console.log("reprise : ok");
+
+// ------------------------------------------------------------------ Séances clés du programme (demande du 23/11/2026)
+assert.equal(X.KEYS.length, X.LADDER.length);
+X.KEYS.forEach((t, i) => { if (X.LIGHT.has(i)) assert.equal(t, null, `palier ${i + 1} allégé : pas de séance clé`); if (i < 4) assert.equal(t, null, `palier ${i + 1} : footings seulement`); });
+assert.equal(X.KEYS[4], "rstrides", "d'abord les lignes droites"); assert.equal(X.KEYS[5], "rhill"); assert.equal(X.KEYS[6], "rthr");
+assert.ok(X.KEYS.indexOf("rvo2") >= 12, "la VO2max en dernier");
+same(X.nextKey(3), { k: 4, t: "rstrides" }); same(X.nextKey(6), { k: 8, t: "rthr" }); assert.equal(X.nextKey(16), null);
+console.log("ok reprise (séances clés) : 4 semaines de footings, lignes droites, côtes, seuil, VO2max en dernier, jamais en semaine allégée");
