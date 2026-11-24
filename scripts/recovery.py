@@ -465,6 +465,22 @@ def read_pr(resp):
     return out or None
 
 
+def read_vo2_bike(mm):
+    """VO2max vélo : valeurs « cycling » ; la valeur générique (course) seulement avant la première valeur vélo. Mélanger les deux
+    (61 à vélo, 58 en course les jours sans vélo, constaté le 24/11/2026) faisait osciller la valeur affichée et fausser la tendance."""
+    cyc, gen = {}, {}
+    for d in _walk(mm):
+        for key, out in (("cycling", cyc), ("generic", gen)):
+            sub = d.get(key)
+            if isinstance(sub, dict):
+                v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
+                dt = _date(sub) or _date(d)
+                if v and dt:
+                    out[dt] = round(v, 1)
+    first = min(cyc) if cyc else None
+    return sorted({**{k: x for k, x in gen.items() if first is None or k < first}, **cyc}.items())
+
+
 def read_vo2_run(mm):
     """VO2max course : partie « generic » seulement (profile.vo2 reste celui du vélo, utilisé par le Plan)."""
     vo = {}
@@ -560,16 +576,7 @@ def fetch_profile(api, start, today, prev=None):
     # VO2max vélo (sinon générique)
     mm = safe(api.get_max_metrics_range, start.isoformat(), today.isoformat())
     raw["vo2"] = _raw(mm, 1200)
-    vo = {}
-    for d in _walk(mm):
-        for key in ("cycling", "generic"):
-            sub = d.get(key)
-            if isinstance(sub, dict):
-                v = _num(sub.get("vo2MaxPreciseValue"), 20, 95) or _num(sub.get("vo2MaxValue"), 20, 95)
-                dt = _date(sub) or _date(d)
-                if v and dt and (key == "cycling" or dt not in vo):
-                    vo[dt] = round(v, 1)
-    p["vo2"] = sorted(vo.items())
+    p["vo2"] = read_vo2_bike(mm)
     # Zones cardio (profil vélo, sinon par défaut)
     zones = safe(api.get_heart_rate_zones) or []
     raw["zones"] = _raw(zones, 1500)

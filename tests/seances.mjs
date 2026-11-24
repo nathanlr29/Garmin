@@ -49,8 +49,8 @@ for (const t of ["rthr", "rvo2", "rhill", "rstrides", "rtempo"]) for (const d of
 }
 let w = B("rthr", 40, { k: 1 });
 assert.equal(w.title, "Seuil #2 · 4 × 4'"); assert.equal(w.cut, null);
-const rep = w.steps.find(s => s.n); assert.equal(rep.pace, P.T); assert.equal(rep.plo, P.T - 4); assert.equal(rep.phi, P.T + 4);
-assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [P.T - 4, P.T + 4], "fourchette envoyée à la montre");
+const rep = w.steps.find(s => s.n); assert.equal(rep.pace, P.T); assert.equal(rep.plo, P.T - 6); assert.equal(rep.phi, P.T + 6);
+assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [P.T - 6, P.T + 6], "fourchette envoyée à la montre");
 // règle de Daniels : 25 km par semaine → 2,7 km au seuil au plus (plancher) → 3 × 4' au lieu de 4 × 4'
 w = B("rthr", 40, { k: 1, wkKm: 25 }); assert.equal(w.title, "Seuil #2 · 3 × 4'"); assert.match(w.cut, /limité à 10 % de tes km .*3 répétitions au lieu de 4/);
 w = B("rthr", 40, { k: 1, wkKm: 40 }); assert.equal(w.title, "Seuil #2 · 4 × 4'", "40 km : palier complet");
@@ -75,31 +75,46 @@ assert.equal(S.fileName(B("rhill", 40).spec), "Cotes-1-6x10.fit");
 // tests/fixtures/montre_seances.json (lu par tests/test_garmin.py) : même contenu et même empreinte que seances.js aujourd'hui
 const FX = JSON.parse(read("fixtures/montre_seances.json")), P10 = S.paces(S.source({ races: { "10k": 2615 } }));
 [["rthr", 40, 1], ["rvo2", 50, 2], ["rhill", 40, 0]].forEach(([t, d, k], i) => {
-  const v = { date: FX[i].date, ...S.build(t, d, { P: P10, k, wkKm: 40 }).spec };
+  const v = S.build(t, d, { P: P10, k, wkKm: 40 }).spec;
   assert.equal(JSON.stringify({ ...v, sig: S.sig(v) }), JSON.stringify(FX[i]), `fixture ${t} à jour (sinon : la régénérer)`); });
 
-// ------------------------------------------------------------------ 5. Envoi vers la Sheet : seulement ce qui change, dans la fenêtre
-const today = "2026-11-24", v1 = { date: "2026-11-26", sig: "aaaa" }, v2 = { date: "2026-11-28", sig: "bbbb" };
-let d = X.diff({ "2026-11-26": v1, "2026-11-28": v2 }, { "2026-11-26": "aaaa", "2026-11-27": "cccc", "2026-11-20": "dddd", "2026-12-09": "eeee" }, today, 5);
-assert.deepEqual(JSON.parse(JSON.stringify(d)), [{ id: "run:2026-11-28", ts: 5, v: v2 }, { id: "run:2026-11-27", ts: 5, v: null }], "nouvelle, retirée ; ni le passé ni au-delà de 8 jours");
-assert.equal(X.diff({ "2026-11-26": { ...v1, sig: "zzzz" } }, { "2026-11-26": "aaaa" }, today, 5, new Set(["2026-11-26"])).length, 0, "séance déjà faite : jamais renvoyée");
-assert.equal(X.diff({ "2026-11-26": v1 }, null, today).length, 0, "Sheet jamais lue sur cet appareil : on attend");
-assert.ok(X.inWin("2026-11-24", today) && X.inWin("2026-12-01", today) && !X.inWin("2026-12-02", today) && !X.inWin("2026-11-23", today));
+// ------------------------------------------------------------------ 5. Envoi vers la Sheet : une séance par semaine, seulement ce qui change
+// semaine utile = dimanche pas encore passé et lundi dans les 8 jours ; empreinte = séance + jours conseillés + faite
+const today = "2026-11-24", spec1 = B("rthr", 40, { k: 1 }).spec;
+const wv = (mon, days, done = false) => ({ mon, days, done, ...spec1, sig: S.sig(spec1) });
+const cur = wv("2026-11-23", ["2026-11-25", "2026-11-27"]), nxt = wv("2026-11-30", ["2026-12-01"]);
+let d = X.diff({ "2026-11-23": cur, "2026-11-30": nxt }, { "2026-11-23": X.fp(cur), "2026-11-16": "x", "2026-12-07": "y", "2026-11-30": "z" }, today, 5);
+assert.equal(JSON.stringify(d), JSON.stringify([{ id: "key:2026-11-30", ts: 5, v: nxt }]), "seule la semaine suivante a changé ; ni le passé ni au-delà");
+d = X.diff({}, { "2026-11-23": X.fp(cur) }, today, 5); assert.equal(JSON.stringify(d), JSON.stringify([{ id: "key:2026-11-23", ts: 5, v: null }]), "plus de séance clé cette semaine : null");
+assert.equal(X.diff({ "2026-11-23": wv("2026-11-23", ["2026-11-27"]) }, { "2026-11-23": X.fp(cur) }, today).length, 1, "jours conseillés changés : renvoyée");
+assert.equal(X.diff({ "2026-11-23": wv("2026-11-23", cur.days, true) }, { "2026-11-23": X.fp(cur) }, today).length, 1, "faite : renvoyée (le workflow la fige)");
+assert.equal(X.diff({ "2026-11-23": cur }, null, today).length, 0, "Sheet jamais lue sur cet appareil : on attend");
+assert.ok(X.inWin("2027-10-25", "2027-10-31"), "dimanche du passage à l'heure d'hiver : la semaine est encore utile");
+assert.ok(X.inWin("2026-11-23", today) && X.inWin("2026-11-30", today) && !X.inWin("2026-12-07", "2026-11-24") && !X.inWin("2026-11-16", today));
+assert.equal(cur.sig, S.sig(spec1), "l'empreinte ne porte que sur la séance : changer de jour ne recrée pas la séance chez Garmin");
 
 // ------------------------------------------------------------------ 6. État côté Garmin et carte
-const spec = B("rthr", 40, { k: 1 }).spec, sg = S.sig({ date: "2026-11-26", ...spec });
-assert.equal(S.status("2026-11-26", spec).k, "nocfg", "sans synchro sur cet appareil");
+const spec = spec1, sg = S.sig(spec);
+assert.equal(S.status("2026-11-23", spec).k, "nocfg", "sans synchro sur cet appareil");
 ctx.window.Sync = { configured: () => true }; ctx.Sync = ctx.window.Sync;
-assert.equal(S.status("2026-11-26", spec).k, "load");
-let resolve; ctx.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ v: 1, cfg: true, w: { "2026-11-26": { id: 1, sid: 2, s: sg } } }) });
+assert.equal(S.status("2026-11-23", spec).k, "load");
+ctx.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ v: 1, cfg: true, w: { "2026-11-23": { id: 1, sid: 2, s: sg, date: "2026-11-25" }, "2026-11-16": { id: 3, s: "x", date: "2026-11-18", done: 77 } } }) });
 await S.loadState();
-assert.equal(S.status("2026-11-26", spec).k, "ok"); assert.equal(S.status("2026-11-28", spec).k, "wait");
-const html = S.cardHtml({ P, next: [{ date: "2026-11-26", t: "rthr", title: "Seuil #2 · 4 × 4'", spec, pace: P.T, when: "jeudi 26 novembre", whenShort: "jeu. 26" }],
-  pal: { rthr: 1, rhill: 0, rvo2: 0 }, palDone: { rthr: new Set([0]) }, lt: { pace: 252 }, reprise: null });
-assert.match(html, /Prochaine séance clé : Seuil #2 · 4 × 4' jeudi 26 novembre à 4:28 \/km\./);
-assert.match(html, /✓ dans ton calendrier Garmin/); assert.match(html, /seuil 4:28/); assert.match(html, /Le seuil Garmin \(4:12 \/km\) reste celui de la charge ; il est plus rapide de 16 s/);
+assert.equal(S.status("2026-11-23", spec).k, "ok"); assert.match(S.status("2026-11-23", spec).txt, /mercredi 25 novembre/);
+assert.equal(S.status("2026-11-30", spec).k, "wait"); assert.equal(S.status("2026-11-16", spec).k, "done");
+{ const w16 = { mon: "2026-11-16", w: B("rthr", 40, { k: 1 }), days: [], done: null };
+  assert.match(X.answer({ key: w16 }), /faite ✓ en suivant ta montre \(mercredi 18 novembre\).*Dis si elle est réussie/, "faite sur la montre, sans validation sur le site");
+  assert.match(X.answer({ key: { ...w16, done: { d: "2026-11-18", ok: true } } }), /faite ✓ : .*réussie/); }
+const W = B("rthr", 40, { k: 1 }), key = { mon: "2026-11-23", t: "rthr", w: W, days: ["2026-11-25", "2026-11-27"], loose: false, avoid: "Jours durs de ta semaine : jeudi (seuil).", done: null, run: { d: "2026-11-23", label: "course de lundi, 6,1 km" } };
+const card = o => S.cardHtml({ P, key, next: null, pal: { rthr: 1, rhill: 0, rvo2: 0 }, palDone: { rthr: new Set([0]) }, lt: { pace: 252 }, reprise: null, ...o });
+let html = card({});
+assert.match(html, /Séance clé de la semaine : Seuil #2 · 4 × 4' à 4:28 \/km, le jour qui t'arrange : mercredi et vendredi\./);
+assert.match(html, /Sur ta montre comme séance du jour, mercredi 25 novembre/); assert.match(html, /data-kdone="2026-11-23:2026-11-23:1"/);
+assert.match(html, /seuil 4:28/); assert.match(html, /Le seuil Garmin \(4:12 \/km\) reste celui de la charge ; il est plus rapide de 16 s/);
 assert.match(html, /SYNC_LINK/); assert.ok(!/<script/i.test(html));
-assert.match(X.answer({ next: [], reprise: { k: 3, light: true, nextKey: { k: 4, t: "rstrides" } } }), /palier 4 de ta reprise, semaine allégée\)\. La prochaine arrive au palier 5 : lignes droites/);
-assert.match(X.answer({ next: [], mode: "entretien" }), /Progression/);
+html = card({ key: { ...key, done: { d: "2026-11-25", ok: true } } });
+assert.match(html, /Séance clé de la semaine faite ✓ : Seuil #2 · 4 × 4', réussie\./); assert.ok(!/data-kdone="[^"]*:1"/.test(html), "faite : plus de question"); assert.match(html, /Annuler/);
+html = card({ key: { ...key, days: [] } }); assert.match(html, /Plus de jour idéal d'ici dimanche/);
+assert.match(X.answer({ key: null, reprise: { k: 3, light: true, nextKey: { k: 4, t: "rstrides" } } }), /palier 4 de ta reprise, semaine allégée\) : que des footings\. La prochaine arrive au palier 5 : lignes droites/);
 
 console.log("ok seances : allures de Daniels, paliers, volume (Daniels), durées, .fit, empreinte partagée avec le workflow, envoi, état, carte");

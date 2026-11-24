@@ -139,6 +139,15 @@ class Series(unittest.TestCase):
             self.assertEqual(rc.read_vo2_run(empty), [])
 
 
+    def test_vo2_velo_sans_melange(self):
+        mm = [{"generic": {"calendarDate": "2026-03-01", "vo2MaxPreciseValue": 57.3}},
+              {"generic": {"calendarDate": "2026-03-10", "vo2MaxPreciseValue": 57.5}, "cycling": {"calendarDate": "2026-03-10", "vo2MaxPreciseValue": 59.0}},
+              {"generic": {"calendarDate": "2026-11-22", "vo2MaxPreciseValue": 58.0}},
+              {"cycling": {"calendarDate": "2026-11-21", "vo2MaxValue": 61}}]
+        self.assertEqual(rc.read_vo2_bike(mm), [("2026-03-01", 57.3), ("2026-03-10", 59.0), ("2026-11-21", 61.0)], "course seulement avant le premier vélo")
+        self.assertEqual(rc.read_vo2_bike([mm[0]]), [("2026-03-01", 57.3)], "sans vélo : la valeur générique")
+        self.assertEqual(rc.read_vo2_bike(None), [])
+
 # ---------------------------------------------------------------- fetch_run_profile : appels indépendants
 class FakeApi:
     def __init__(self, **resp):
@@ -521,8 +530,9 @@ SEANCES = __import__("json").loads((Path(__file__).resolve().parent / "fixtures"
 
 
 class _WatchApi:
+    """Faux Garmin Connect : bibliothèque, calendrier, activités reliées aux séances prévues."""
     def __init__(self, fail_on=None):
-        self.n, self.calls, self.fail_on = 1000, [], fail_on
+        self.n, self.calls, self.fail_on, self.sched, self.linked = 1000, [], fail_on, {}, set()
 
     def upload_workout(self, j):
         if self.fail_on == "upload":
@@ -532,14 +542,27 @@ class _WatchApi:
         return {"workoutId": self.n}
 
     def schedule_workout(self, wid, d):
+        sid = wid * 10 + len(self.sched)
+        self.sched[sid] = (wid, d)
         self.calls.append(("sched", wid, d))
-        return {"workoutScheduleId": wid + 5000}
+        return {"workoutScheduleId": sid, "calendarDate": d}
+
+    def get_scheduled_workout_by_id(self, sid):
+        self.calls.append(("get", sid))
+        return {"workoutScheduleId": sid, "associatedActivityId": 555 if sid in self.linked else None}
 
     def unschedule_workout(self, sid):
+        self.sched.pop(sid, None)
         self.calls.append(("unsched", sid))
 
     def delete_workout(self, wid):
         self.calls.append(("del", wid))
+
+
+def _wk(i, mon, days, done=False):
+    v = {"mon": mon, "days": days, "done": done, **{k: x for k, x in SEANCES[i].items() if k != "sig"}}
+    v["sig"] = mt.sig(v)
+    return {"id": "key:" + mon, "ts": 1, "v": v}
 
 
 class Montre(unittest.TestCase):
@@ -547,6 +570,7 @@ class Montre(unittest.TestCase):
         # empreintes calculées par seances.js (tests/seances.mjs vérifie que le fichier est à jour)
         for v in SEANCES:
             self.assertEqual(mt.sig(v), v["sig"], v["name"])
+        self.assertEqual(mt.sig({**SEANCES[0], "mon": "2026-11-23", "days": ["2026-11-25"]}), SEANCES[0]["sig"], "les jours n'entrent pas dans l'empreinte")
 
     def test_lien_de_synchro(self):
         import base64
@@ -557,11 +581,9 @@ class Montre(unittest.TestCase):
         bad = base64.urlsafe_b64encode(json.dumps({"url": "https://evil.example/exec", "key": "k" * 20}).encode()).decode()
         for x in ("", "n'importe quoi", bad):
             self.assertIsNone(mt.parse_link(x))
-        # tolérant : guillemets, espaces, retour à la ligne, « # » encodé, texte autour, remplissage « = »
         url = "https://script.google.com/macros/s/AbC-123_x/exec"
         for x in (f'  "https://x.github.io/Garmin/#sync={code}"\n', f"https://x.github.io/Garmin/%23sync={code}", f"Lien : https://x.github.io/Garmin/#sync={code} (à garder)", code + "=="):
             self.assertEqual(mt.parse_link(x), (url, "k" * 20), x)
-        # la raison du refus est dite, sans rien du secret
         for x, r in (("https://script.google.com/macros/s/AbC/exec", "sans la clé"), ("bonjour", "#sync="), ("https://x.io/#sync=" + code[:-9], "tronqué")):
             why = []
             self.assertIsNone(mt.parse_link(x, why))
@@ -584,7 +606,6 @@ class Montre(unittest.TestCase):
         self.assertLess(run["targetValueOne"], run["targetValueTwo"])
         self.assertEqual(run["endConditionValue"], 240.0)
         self.assertEqual(j["estimatedDurationInSecs"], mt.total(v["steps"]))
-        # côtes : échauffement jusqu'au bouton Lap, sans cible d'allure
         h = mt.garmin_json(SEANCES[2])["workoutSegments"][0]["workoutSteps"]
         self.assertEqual(h[0]["endCondition"]["conditionTypeKey"], "lap.button")
         self.assertNotIn("endConditionValue", h[0])
@@ -597,12 +618,124 @@ class Montre(unittest.TestCase):
             self.skipTest("garminconnect.workout (pydantic) absent")
         for v in SEANCES:
             j = mt.garmin_json(v)
-            w = RunningWorkout(**j)            # le modèle typé de garminconnect accepte la séance telle quelle
+            w = RunningWorkout(**j)
             self.assertEqual(w.to_dict()["workoutSegments"][0]["workoutSteps"][0]["stepType"], j["workoutSegments"][0]["workoutSteps"][0]["stepType"])
-        ref = create_interval_step(240.0, 3).model_dump(exclude_none=True)   # mêmes clés que les pas construits par la bibliothèque
+        ref = create_interval_step(240.0, 3).model_dump(exclude_none=True)
         mine = mt.garmin_json(SEANCES[0])["workoutSegments"][0]["workoutSteps"][1]["workoutSteps"][0]
         self.assertEqual(ref["stepType"], mine["stepType"])
         self.assertEqual(ref["endCondition"], mine["endCondition"])
+
+    def test_validation(self):
+        v = _wk(0, "2026-11-23", ["2026-11-25", "2026-11-27"])["v"]
+        self.assertTrue(mt.valid(v, "2026-11-23"))
+        self.assertFalse(mt.valid(v, "2026-11-30"), "mauvaise semaine")
+        self.assertFalse(mt.valid({**v, "days": ["2026-12-01"]}, "2026-11-23"), "jour hors de la semaine")
+        self.assertFalse(mt.valid({**v, "days": ["2026-11-27", "2026-11-25"]}, "2026-11-23"), "jours dans le désordre")
+        self.assertFalse(mt.valid({**v, "steps": [{"t": "interval", "s": 60, "p": [100, 200]}]}, "2026-11-23"), "allure hors plage")
+        self.assertFalse(mt.valid({**v, "steps": [{"t": "sprint", "s": 60, "p": None}]}, "2026-11-23"), "type inconnu")
+        self.assertFalse(mt.valid({**v, "steps": [{"rep": 3, "steps": [{"rep": 2, "steps": []}]}]}, "2026-11-23"), "répétitions imbriquées")
+        bad = dict(v, sig="00000000")
+        self.assertEqual(mt.wanted([{"id": "key:2026-11-23", "v": bad}])[1], ["2026-11-23"], "empreinte fausse : ignorée")
+
+    def test_seance_du_jour_qui_avance(self):
+        api, mon = _WatchApi(), "2026-11-23"
+        items = [_wk(0, mon, ["2026-11-25", "2026-11-27", "2026-11-29"])]
+        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, "2026-11-24")
+        e = st["w"][mon]
+        self.assertEqual((e["date"], e["s"]), ("2026-11-25", SEANCES[0]["sig"]), "premier jour conseillé")
+        self.assertEqual([c[0] for c in api.calls], ["up", "sched"])
+        # même jour, rien de changé : rien
+        api.calls.clear()
+        self.assertEqual(mt.sync_watch(api, items, st, "2026-11-24")["w"], st["w"])
+        self.assertEqual(api.calls, [])
+        # le 25 passé sans la faire : le 26 elle passe au jour conseillé suivant (le 27), sans être recréée
+        api.calls.clear()
+        st2 = mt.sync_watch(api, items, st, "2026-11-26")
+        self.assertEqual(st2["w"][mon]["date"], "2026-11-27")
+        self.assertEqual([c[0] for c in api.calls], ["get", "unsched", "sched"])
+        # faite le 27 en suivant la montre : figée, plus jamais déplacée ni retirée
+        api.linked.add(st2["w"][mon]["sid"])
+        st3 = mt.sync_watch(api, items, st2, "2026-11-28")
+        self.assertEqual(st3["w"][mon]["done"], 555)
+        self.assertEqual(st3["w"][mon]["date"], "2026-11-27")
+        api.calls.clear()
+        st4 = mt.sync_watch(api, [{"id": "key:" + mon, "v": None}], st3, "2026-11-29")
+        self.assertEqual(st4["w"][mon]["done"], 555, "faite : jamais retirée")
+        self.assertEqual(api.calls, [])
+
+    def test_validee_sur_le_site_remplacee_retiree(self):
+        api, mon = _WatchApi(), "2026-11-23"
+        st = mt.sync_watch(api, [_wk(0, mon, ["2026-11-25"])], {"v": 1, "w": {}}, "2026-11-24")
+        wid = st["w"][mon]["id"]
+        # autre palier : retirée puis recréée
+        st2 = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"])], st, "2026-11-24")
+        self.assertIn(("del", wid), api.calls)
+        self.assertNotEqual(st2["w"][mon]["id"], wid)
+        # validée sur le site sans la montre : retirée du calendrier et de la bibliothèque, marquée faite
+        st3 = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"], done=True)], st2, "2026-11-24")
+        self.assertEqual(st3["w"][mon], {"s": SEANCES[1]["sig"], "done": True, "site": True})
+        # validation annulée sur le site : elle revient sur la montre
+        st3b = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"])], st3, "2026-11-24")
+        self.assertEqual(st3b["w"][mon]["date"], "2026-11-25")
+        self.assertNotIn("done", st3b["w"][mon])
+        st3 = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"], done=True)], st3b, "2026-11-24")
+        # semaine suivante sans séance clé (null) : rien créé ; plus de jour conseillé : rien créé
+        st4 = mt.sync_watch(api, [{"id": "key:2026-11-30", "v": None}, _wk(0, "2026-12-07", [])], st3, "2026-11-24")
+        self.assertNotIn("2026-11-30", st4["w"])
+        self.assertNotIn("2026-12-07", st4["w"])
+        # retirée du Plan avant d'être faite : retirée de Garmin
+        st5 = mt.sync_watch(api, [_wk(2, "2026-11-30", ["2026-12-01"])], st4, "2026-11-30")
+        wid5 = st5["w"]["2026-11-30"]["id"]
+        st6 = mt.sync_watch(api, [{"id": "key:2026-11-30", "v": None}], st5, "2026-11-30")
+        self.assertNotIn("2026-11-30", st6["w"])
+        self.assertIn(("del", wid5), api.calls)
+        # 3 semaines après : la vieille entrée quitte l'état (et Garmin)
+        st7 = mt.sync_watch(api, [], st6, "2026-12-20")
+        self.assertNotIn(mon, st7["w"])
+
+    def test_erreur_garmin_garde_l_etat(self):
+        api = _WatchApi(fail_on="upload")
+        st = mt.sync_watch(api, [_wk(0, "2026-11-23", ["2026-11-25"])], {"v": 1, "w": {}}, "2026-11-24")
+        self.assertEqual(st["err"], "RuntimeError")
+        self.assertEqual(st["w"], {})
+        st2 = mt.sync_watch(_WatchApi(), [_wk(0, "2026-11-23", ["2026-11-25"])], st, "2026-11-24")
+        self.assertNotIn("err", st2, "réussite : l'erreur disparaît")
+
+    def test_panne_passagere_pas_de_doublon(self):
+        api, mon = _WatchApi(), "2026-11-23"
+        items = [_wk(0, mon, ["2026-11-25", "2026-11-27"])]
+        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, "2026-11-24")
+
+        def panne(sid):
+            raise RuntimeError("Connection reset")
+        api.get_scheduled_workout_by_id = panne
+        api.calls.clear()
+        st2 = mt.sync_watch(api, items, st, "2026-11-26")
+        self.assertEqual(st2["w"][mon], st["w"][mon], "panne : rien ne change")
+        self.assertEqual(api.calls, [], "ni création ni mise au calendrier")
+
+        class NotFound(Exception):
+            status_code = 404
+
+        def introuvable(sid):
+            raise NotFound("introuvable")
+        api.get_scheduled_workout_by_id = introuvable
+        st3 = mt.sync_watch(api, items, st, "2026-11-26")
+        self.assertEqual(st3["w"][mon]["id"], st["w"][mon]["id"], "même séance, pas de doublon dans la bibliothèque")
+        self.assertEqual(st3["w"][mon]["date"], "2026-11-27", "retirée à la main : remise au calendrier")
+
+    def test_journal_sans_adresse(self):
+        import io
+        import contextlib
+        url = "https://script.google.com/macros/s/SECRET123/exec"
+
+        class E(Exception):
+            pass
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mt.log("erreur " + mt.why(E(f"Max retries exceeded with url: {url}")))
+        self.assertNotIn("SECRET123", out.getvalue())
+        self.assertIn("E", out.getvalue())
 
     def test_essai_reel_une_fois(self):
         api = _WatchApi()
@@ -612,56 +745,11 @@ class Montre(unittest.TestCase):
         self.assertEqual(api.calls[1][2], "2027-01-23")
         api = _WatchApi(fail_on="upload")
         self.assertEqual(mt.probe(api, "2026-11-24"), {"ok": False, "d": "2026-11-24", "err": "RuntimeError"})
-        self.assertTrue(mt.valid({**mt.PROBE, "date": "2026-11-24"}, "2026-11-24"), "l'essai a le format des vraies séances")
-
-    def test_validation(self):
-        v = dict(SEANCES[0])
-        self.assertTrue(mt.valid(v, v["date"]))
-        self.assertFalse(mt.valid(v, "2026-11-27"), "mauvaise date")
-        self.assertFalse(mt.valid({**v, "steps": [{"t": "interval", "s": 60, "p": [100, 200]}]}, v["date"]), "allure hors plage")
-        self.assertFalse(mt.valid({**v, "steps": [{"t": "sprint", "s": 60, "p": None}]}, v["date"]), "type inconnu")
-        self.assertFalse(mt.valid({**v, "steps": [{"rep": 3, "steps": [{"rep": 2, "steps": []}]}]}, v["date"]), "répétitions imbriquées")
-
-    def test_creation_mise_a_jour_retrait(self):
-        today = "2026-11-24"
-        items = [{"id": "run:" + v["date"], "ts": 1, "v": v} for v in SEANCES] + [{"id": "run:2026-11-20", "ts": 1, "v": SEANCES[0]}]
-        api = _WatchApi()
-        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, today)
-        self.assertEqual(sorted(st["w"]), ["2026-11-26", "2026-11-28", "2026-11-30"], "le passé n'est jamais créé")
-        self.assertEqual([c[0] for c in api.calls], ["up", "sched"] * 3)
-        self.assertEqual(st["w"]["2026-11-26"], {"id": 1001, "sid": 6001, "s": SEANCES[0]["sig"]})
-        # rien de changé : aucun appel
-        api.calls.clear()
-        self.assertEqual(mt.sync_watch(api, items, st, today), st)
-        self.assertEqual(api.calls, [])
-        # séance modifiée (autre palier) : l'ancienne est retirée, la nouvelle créée ; séance retirée du Plan (v nul) : retirée
-        v2 = {**SEANCES[0], "name": "Seuil #3 · 5×4'"}
-        v2["sig"] = mt.sig(v2)
-        items2 = [{"id": "run:2026-11-26", "v": v2}, {"id": "run:2026-11-28", "v": None}, {"id": "run:2026-11-30", "v": SEANCES[2]}]
-        st2 = mt.sync_watch(api, items2, st, today)
-        self.assertIn(("unsched", 6001), api.calls)
-        self.assertIn(("del", 1001), api.calls)
-        self.assertIn(("del", 1002), api.calls)
-        self.assertEqual(sorted(st2["w"]), ["2026-11-26", "2026-11-30"])
-        self.assertEqual(st2["w"]["2026-11-26"]["s"], v2["sig"])
-        # empreinte fausse (séance trafiquée) : ignorée
-        bad = {**SEANCES[0], "sig": "00000000"}
-        self.assertEqual(mt.plan([{"id": "run:2026-11-26", "v": bad}], {"w": {}}, today)[2], ["2026-11-26"])
-        # 15 jours après : retirée de Garmin (bibliothèque propre)
-        api.calls.clear()
-        st3 = mt.sync_watch(api, [], st2, "2026-12-15")
-        self.assertEqual(sorted(st3["w"]), [])
-        self.assertEqual(sum(1 for c in api.calls if c[0] == "del"), 2)
-
-    def test_erreur_garmin_garde_l_etat(self):
-        api = _WatchApi(fail_on="upload")
-        items = [{"id": "run:" + SEANCES[0]["date"], "v": SEANCES[0]}]
-        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, "2026-11-24")
-        self.assertEqual(st["err"], "RuntimeError")
-        self.assertEqual(st["w"], {})
 
     def test_run_sans_secret_et_sans_changement(self):
         import tempfile
+        import base64
+        import json
         old = mt.STATE
         with tempfile.TemporaryDirectory() as d:
             mt.STATE = Path(d) / "montre.json"
@@ -677,9 +765,7 @@ class Montre(unittest.TestCase):
                         pass
 
                     def json(self):
-                        return {"ok": True, "items": [{"id": "run:" + SEANCES[0]["date"], "v": SEANCES[0]}]}
-                import base64
-                import json
+                        return {"ok": True, "items": [_wk(0, "2026-11-23", ["2026-11-25"])]}
                 link = base64.urlsafe_b64encode(json.dumps({"url": "https://script.google.com/macros/s/x/exec", "key": "k" * 20}).encode()).decode()
                 seen = {}
 
@@ -689,7 +775,7 @@ class Montre(unittest.TestCase):
                 api = _WatchApi()
                 r = mt.run(api, today="2026-11-24", env={"SYNC_LINK": link}, post=post)
                 self.assertEqual(seen["body"], {"k": "k" * 20, "op": "sync", "c": "montre", "items": []})
-                self.assertEqual(list(r["w"]), [SEANCES[0]["date"]])
+                self.assertEqual(r["w"]["2026-11-23"]["date"], "2026-11-25")
                 self.assertEqual(r["probe"], {"ok": True, "d": "2026-11-24"})
                 api.calls.clear()
                 mt.run(api, today="2026-11-25", env={"SYNC_LINK": link}, post=post)

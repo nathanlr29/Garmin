@@ -120,8 +120,12 @@ function secProfile(now) {
   // course : programme de reprise (reprise.js) et volume récent (course.js)
   try { const X = window.Reprise._, Pg = X.progress(acts(), new Date(now));
     if (Pg.started) L.push("Course à pied : reprise après une blessure au tibia (périostite, arrêt en juin), en complément du vélo. Programme par paliers d'une semaine : footings faciles (où il peut parler, sous 150 bpm environ), foulée courte"
-      + (X.KEYS && X.KEYS[Pg.k] ? `, plus une séance clé ce palier (${{ rstrides: "lignes droites", rhill: "côtes", rthr: "seuil", rvo2: "VO2max" }[X.KEYS[Pg.k]]}, prévue au Plan avec ses allures) et rien de plus dur` : ", pas de fractionné ce palier") + ". "
+      + (X.KEYS && X.KEYS[Pg.k] ? `, plus une séance clé ce palier (${{ rstrides: "lignes droites", rhill: "côtes", rthr: "seuil", rvo2: "VO2max" }[X.KEYS[Pg.k]]}) et rien de plus dur` : ", pas de fractionné ce palier") + ". "
+      + "Pas de jour fixe pour courir : il court quand ça l'arrange. "
       + X.answer(Pg, X.week(Pg.k, X.weekRuns(acts(), X.mondayOf(+now)), X.longCap(acts(), +now)), +now)); } catch (e) {}
+  // séance clé course de la semaine (Plan, sans jour fixe) : titre, jours conseillés, faite ou non
+  try { const K = P && P._key && P._key.week(Charge.mondayOf(new Date(now)));
+    if (K) L.push(`Séance clé course de la semaine : ${K.w.title}${K.done ? `, faite ${rel(new Date(K.done.d + "T12:00:00"), now)}${K.done.ok === false ? " (à refaire)" : ""}` : K.days.length ? `, pas encore faite ; jours conseillés : ${K.days.map(d => rel(new Date(d + "T12:00:00"), now)).join(", ")}` : ", pas encore faite ; plus de jour idéal cette semaine"}.`); } catch (e) {}
   try { const G = window.Course._.gauge(acts(), +now);
     if (G.acute || G.chronic) L.push(`Volume de course : ${n(G.acute, 1)} km sur les 7 derniers jours, ${n(G.chronic, 1)} km par semaine en moyenne sur les 28 jours d'avant${G.zone != null ? ` (rapport ${n(G.ratio, 2)} : ${["sous-charge", "zone sûre", "vigilance", "risque élevé"][G.zone]})` : ""}.`); } catch (e) {}
   try { const f = Charge.fitness(now); L.push(`Forme aujourd'hui : niveau d'entraînement ${n(f.ctl)}, fatigue récente ${n(f.atl)}, fraîcheur ${n(f.tsb)}, soit « ${formWord(f.tsb)} » (la fraîcheur est la forme moins la fatigue, pas une température ; échelle de l'outil : frais > 5, équilibré > −10, chargé > −25, très chargé en dessous).`); } catch (e) {}

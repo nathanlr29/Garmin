@@ -33,7 +33,7 @@ const paceAt = (V, f) => 60000 / velOf(f * V);                                  
 function raceTime(V, m) { let lo = m / 600 * 60, hi = m / 80 * 60; for (let i = 0; i < 60; i++) { const t = (lo + hi) / 2; if (vdot(m, t) > V) lo = t; else hi = t; } return (lo + hi) / 2; }
 // parts de la VDOT (tables de Daniels) : seuil 88 %, intervalles « I » 97,5 %, vitesse à VO2max 100 %, footing 63 à 72 %
 const PCT = { E: [.72, .63], T: .88, I: .975, VV: 1 };
-const TOL = { T: 4, I: 4, VV: 5, HM: 5 };   // fourchette d'allure envoyée à la montre (± s/km)
+const TOL = { T: 6, I: 6, VV: 8, HM: 8 };   // fourchette d'allure envoyée à la montre (± s/km) : le GPS bouge de 5 à 10 s/km, ±4 faisait biper sans arrêt
 const OK_RACE = { "10k": [1500, 4800], "5k": [720, 2400] };
 const PACE_OK = [180, 480];
 
@@ -194,89 +194,115 @@ function download(spec, date) {
 }
 
 // ------------------------------------------------------------------ Envoi vers Garmin Connect (collection `montre` de sync.js)
-// Le site dépose les séances clés des 8 prochains jours ({ id: "run:<date>", v: { date, sig, ...spec } }, null = plus de séance ce jour-là) ;
-// le workflow (scripts/montre.py) les crée dans Garmin Connect et les place dans le calendrier, d'où la montre les reçoit.
-const COL = "montre", K_SRV = "montreSrv", WINDOW = 8;
+// Une séance clé par semaine, sans jour fixe (demande du 24/11/2026) : le site dépose { id: "key:<lundi>", v: { mon, days, done, v, name, steps, sig } }
+// (days = jours conseillés restants, done = faite, null = pas de séance clé cette semaine). Le workflow (scripts/montre.py) la crée dans Garmin Connect
+// et la met au calendrier le premier jour conseillé à partir d'aujourd'hui : elle devient la « séance du jour » de la montre, et passe au jour
+// conseillé suivant tant qu'elle n'est pas faite. Faite (suivie sur la montre, ou validée sur le site) : elle ne bouge plus.
+const COL = "montre", K_SRV = "montreSrv2";
 const ls = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
 let want = null, registered = false, state = null, stateP = null;
-const srv = () => ls.get(K_SRV, null);   // { date: sig | null } d'après la Sheet ; null = jamais synchronisé sur cet appareil
-function inWin(date, today) { const d = Date.parse(date + "T12:00:00"), t = Date.parse(today + "T12:00:00"); return d >= t && d < t + WINDOW * DAY; }
-// éléments à envoyer : ce qui diffère de la Sheet dans la fenêtre (le passé ne bouge jamais)
-function diff(wanted, server, today, now = Date.now(), keep = new Set()) {
+const srv = () => ls.get(K_SRV, null);   // { lundi: empreinte | null } d'après la Sheet ; null = jamais synchronisé sur cet appareil
+const fp = v => v ? JSON.stringify([v.sig, v.days, !!v.done]) : null;
+const ymdOf = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+// semaine encore utile : son dimanche n'est pas passé et son lundi est dans les 8 jours
+// en dates du calendrier (AAAA-MM-JJ) : un calcul en millisecondes perdait une heure le dimanche du passage à l'heure d'hiver
+const addD = (s, n) => { const [y, m, d] = s.split("-").map(Number); return ymdOf(new Date(y, m - 1, d + n, 12)); };
+function inWin(mon, today) { return addD(mon, 6) >= today && mon < addD(today, 8); }
+// éléments à envoyer : ce qui diffère de la Sheet pour les semaines utiles (le passé ne bouge jamais)
+function diff(wanted, server, today, now = Date.now()) {
   if (!wanted || !server) return [];
-  const out = [], dates = new Set([...Object.keys(wanted), ...Object.keys(server)]);
-  for (const d of dates) { if (!inWin(d, today) || keep.has(d)) continue;
-    const w = wanted[d] || null, s = server[d] || null;
-    if ((w ? w.sig : null) !== s) out.push({ id: "run:" + d, ts: now, v: w }); }
+  const out = [];
+  for (const m of new Set([...Object.keys(wanted), ...Object.keys(server)])) { if (!inWin(m, today)) continue;
+    const w = wanted[m] || null; if (fp(w) !== (server[m] || null)) out.push({ id: "key:" + m, ts: now, v: w }); }
   return out;
 }
-function flush() { if (!window.Sync || !Sync.configured() || !want) return; const items = diff(want.items, srv(), want.today, Date.now(), want.keep); if (items.length) Sync.push(COL, items); }
+function flush() { if (!window.Sync || !Sync.configured() || !want) return; const items = diff(want.items, srv(), want.today); if (items.length) Sync.push(COL, items); }
 function register() {
   if (registered || !window.Sync) return; registered = true;
-  Sync.register(COL, { local: () => [], apply(items) { const m = {}; items.forEach(it => { const d = /^run:(\d{4}-\d\d-\d\d)$/.exec(it.id); if (d) m[d[1]] = it.v && it.v.sig || null; }); ls.set(K_SRV, m); flush(); } });
+  Sync.register(COL, { local: () => [], apply(items) { const m = {}; items.forEach(it => { const d = /^key:(\d{4}-\d\d-\d\d)$/.exec(it.id); if (d) m[d[1]] = fp(it.v); }); ls.set(K_SRV, m); flush(); } });
 }
-// le Plan donne ses séances de la fenêtre : { "AAAA-MM-JJ": { spec, keep? } } ; keep = séance déjà faite, jamais renvoyée
-function offer(today, byDate) {
-  const items = {}, keep = new Set();
-  for (const [d, x] of Object.entries(byDate)) if (x && x.spec) { const v = { date: d, ...x.spec }; items[d] = { ...v, sig: sig(v) }; if (x.keep) keep.add(d); }
-  want = { today, items, keep }; register(); flush();
+// le Plan donne ses séances clés : [{ mon, spec, days, done }] (semaine en cours et suivante) ; une semaine absente = pas de séance clé
+function offer(today, weeks) {
+  const items = {};
+  weeks.forEach(x => { if (x && x.spec) items[x.mon] = { mon: x.mon, days: x.days || [], done: !!x.done, ...x.spec, sig: sig(x.spec) }; });
+  want = { today, items }; register(); flush();
 }
 // état côté Garmin écrit par le workflow (data/montre.json), lu une fois par page
 function loadState(onDone) {
   if (!stateP) stateP = fetch(`data/montre.json?t=${Date.now()}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null).then(j => { state = j || { none: true }; if (onDone) onDone(); return state; });
   return stateP;
 }
-// où en est l'envoi d'une séance (date, spec) : { k: "ok" | "wait" | "nocfg" | "nolink" | "err" | "load", txt }
-function status(date, spec) {
-  const v = { date, ...spec }, sg = sig(v), S = state, got = S && S.w && S.w[date];
-  if (got && got.s === sg) return { k: "ok", txt: "Dans ton calendrier Garmin : elle arrive sur ta montre à sa prochaine synchro avec le téléphone." };
+const dLong = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+// où en est la séance de la semaine côté Garmin : { k: "ok" | "done" | "wait" | "nocfg" | "nolink" | "err" | "load", txt, date? }
+function status(mon, spec) {
+  const S = state, got = S && S.w && S.w[mon];
+  if (got && got.done) return { k: "done", txt: got.site ? "Validée sur le site : retirée de ta montre." : `Faite en suivant la séance de la montre${got.date ? ` (${dLong(got.date)})` : ""}.`, date: got.date };
+  if (got && got.s === sig(spec) && got.date) return { k: "ok", txt: `Sur ta montre comme séance du jour, ${dLong(got.date)} : si tu ne la fais pas ce jour-là, elle passe au jour conseillé suivant.`, date: got.date };
   if (!window.Sync || !Sync.configured()) return { k: "nocfg", txt: "Envoi automatique arrêté : la synchro n'est pas configurée sur cet appareil (réglages de la carte Chaîne)." };
   if (!S) return { k: "load", txt: "…" };
-  if (S.none || S.cfg === false) return { k: "nolink", txt: "Le workflow n'a pas encore le secret SYNC_LINK : vois « Sur ta montre » dans la carte Séances clés course." };
+  if (S.none || S.cfg === false) return { k: "nolink", txt: "Le workflow n'a pas encore le secret SYNC_LINK : vois « Sur ta montre » plus bas." };
   if (S.err) return { k: "err", txt: `Dernier envoi à Garmin en échec (${S.err}) : nouvel essai au prochain passage.` };
-  return { k: "wait", txt: "Envoyée au prochain passage du workflow (toutes les heures, vers la 17e minute)." };
+  return { k: "wait", txt: "Elle part sur ta montre au prochain passage du workflow (toutes les heures, vers la 17e minute)." };
 }
 
 // ------------------------------------------------------------------ Carte « Tes séances clés course » (onglet Plan)
-// o : { P, next: [{ date, t, title, spec, st }], pal: t → palier en cours, palDone: t → paliers réussis (Set), reprise: { k, key, nextKey } | null, mode, wkKm }
+// o : { P, key (séance de la semaine, voir weekKey de plan.js) | null, next (celle de la semaine suivante) | null, reprise: { k, light, nextKey } | null,
+//       pal / palDone (paliers en cours et réussis), lt }
+const list = a => a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} et ${a[a.length - 1]}`;
+const dayName = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
 function answer(o) {
-  const n = o.next && o.next[0];
-  if (n) { const d = new Date(n.date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
-    return `Prochaine séance clé : ${n.title} ${n.when || d}${n.pace ? ` à ${fmtPace(n.pace)} /km` : ""}.`; }
+  const K = o.key;
+  if (K && K.done) return `Séance clé de la semaine faite ✓ : ${K.w.title}${K.done.ok === true ? ", réussie" : K.done.ok === false ? ", à refaire" : ""}.`;
+  const g = K && !K.done && state && state.w && state.w[K.mon];
+  if (g && g.done && !g.site) return `Séance clé de la semaine faite ✓ en suivant ta montre${g.date ? ` (${dLong(g.date)})` : ""} : ${K.w.title}. Dis si elle est réussie, pour passer au palier suivant.`;
+  if (K) { const main = K.w.steps.find(x => x.n && x.pace), pace = main ? ` à ${fmtPace(main.pace)} /km` : "";
+    if (!K.days.length) return `Séance clé de la semaine : ${K.w.title}${pace}. Plus de jour idéal d'ici dimanche (vélo dur, sortie longue ou jambes à côté) : fais-la seulement si tu te sens frais, sinon laisse-la.`;
+    return `Séance clé de la semaine : ${K.w.title}${pace}, le jour qui t'arrange : ${K.days.length >= 5 ? "n'importe quel jour" : list(K.days.map(dayName))}${K.loose ? " (sans jour idéal, choisis le moins chargé)" : ""}.`; }
   const R = o.reprise;
-  if (R && R.nextKey) return `Pas de séance clé cette semaine (palier ${R.k + 1} de ta reprise${R.light ? ", semaine allégée" : ""}). La prochaine arrive au palier ${R.nextKey.k + 1} : ${NAME[R.nextKey.t].toLowerCase()}.`;
-  if (o.mode && o.mode !== "progression") return "Pas de séance clé prévue : le programme course du Plan est en « " + (o.mode === "entretien" ? "Entretien" : "Reprise") + " ». Passe-le sur « Progression » (Mes disponibilités) pour une séance par semaine, ou ajoute-en une à la main (+ course).";
-  return "Pas de séance clé dans les 8 prochains jours : ajoute-en une à la main (+ course) ou coche un jour de course « à la place du vélo ».";
+  if (R && R.nextKey) return `Pas de séance clé cette semaine (palier ${R.k + 1} de ta reprise${R.light ? ", semaine allégée" : ""}) : que des footings. La prochaine arrive au palier ${R.nextKey.k + 1} : ${NAME[R.nextKey.t].toLowerCase()}.`;
+  return "Pas de séance clé cette semaine (semaine allégée) : que des footings.";
 }
 function cardHtml(o) {
-  const P = o.P, lines = [];
+  const P = o.P, K = o.key;
   const bar = t => { const N = LADDERS[t].length, cur = o.pal[t], done = o.palDone[t] || new Set();
     return `<li><b>${NAME[t]}</b><span class="pgseg" role="img" aria-label="palier ${cur + 1} sur ${N}">${LADDERS[t].map((_, k) => `<i class="${done.has(k) ? "ok" : k === cur ? "cur" : ""}"></i>`).join("")}</span>
       <span class="pgnext">${cur + 1}/${N} · ${stepL(t, cur).slice(stepL(t, cur).indexOf("·") + 2)}</span><button class="lnk" data-kfit="${t}:${cur}" title="Fichier .fit du palier en cours, pour le copier sur la montre par câble">.fit</button></li>`; };
-  const n = o.next || [];
-  n.slice(0, 3).forEach(x => { const st = status(x.date, x.spec);
-    lines.push(`<li><b>${esc(x.whenShort)}</b> ${esc(x.title)}<small class="kst ${st.k}">${st.k === "ok" ? "✓ dans ton calendrier Garmin" : st.k === "wait" ? "envoi au prochain passage" : st.k === "load" ? "" : st.k === "nocfg" ? "synchro non configurée" : st.k === "nolink" ? "secret SYNC_LINK manquant" : "envoi en échec"}</small> <button class="lnk" data-kfitd="${x.date}">.fit</button></li>`); });
+  let body = "";
+  if (K) {
+    const st = K.done ? null : status(K.mon, K.w.spec);
+    // validation : la course de la semaine qui a servi de séance clé (la plus récente, ou celle suivie sur la montre)
+    const R = K.run, ask = !K.done && R ? `<p class="sg">Tu l'as faite${R.label ? ` (${esc(R.label)})` : ""} ? <button class="btn2 primary" data-kdone="${K.mon}:${R.d}:1">Réussie</button> <button class="btn2" data-kdone="${K.mon}:${R.d}:0">À refaire</button></p>` : "";
+    const undo = K.done ? `<p class="note">${K.done.ok === true ? "Réussie" : K.done.ok === false ? "À refaire" : "Faite"} le ${dLong(K.done.d)}. <button class="lnk" data-kdone="${K.mon}:${K.done.d}:x">Annuler</button></p>` : "";
+    body = `<div class="keyw">${runTableHtml(K.w)}</div>
+      ${K.w.cut ? `<p class="note">${esc(K.w.cut.charAt(0).toUpperCase() + K.w.cut.slice(1))}.</p>` : ""}
+      ${K.avoid ? `<p class="note">${esc(K.avoid)}</p>` : ""}
+      ${ask}${undo}
+      ${st ? `<div class="kwline"><span class="kst ${st.k}">${st.k === "ok" ? "✓ " : ""}${esc(st.txt)}</span><button class="btn2" data-kfitw="${K.mon}">Fichier pour la montre (.fit)</button></div>` : ""}`;
+  }
+  const N = o.next, nextTxt = N ? `<p class="note">Semaine prochaine : ${esc(N.w.title)}${N.days.length && N.days.length < 5 ? `, de préférence ${list(N.days.map(dayName))}` : ""}.</p>` : "";
   const gLt = o.lt && o.lt.pace ? o.lt.pace : null;
   const allures = `Footing ${fmtPace(P.E[0])}-${fmtPace(P.E[1])} · allure semi ${fmtPace(P.HM)} · <b>seuil ${fmtPace(P.T)}</b> · VO2max ${fmtPace(P.I)} · 30/30 ${fmtPace(P.VV)} (/km)`;
   const ltNote = gLt && P.src.how !== "own" && P.src.how !== "lt" && Math.abs(gLt - P.T) >= 6 ? ` Le seuil Garmin (${fmtPace(gLt)} /km) reste celui de la charge ; il est ${gLt < P.T ? "plus rapide" : "plus lent"} de ${Math.abs(gLt - P.T)} s que ta forme du moment${gLt < P.T ? " : tes blocs au seuil seraient à l'allure d'un 10 km" : ""}.` : "";
-  const R = o.reprise;
-  const repTxt = R ? `Pendant ta reprise, une séance clé par semaine au plus, jamais en semaine allégée : lignes droites au palier 5, côtes au 6, seuil au 7, puis seuil et côtes en alternance, VO2max à partir du palier 14. Tibia au-dessus de 2/10 pendant ou le lendemain : la séance suivante redevient un footing.` : "";
-  return `<section class="card span12 pgram keyrun" id="pKey"><h2>Tes séances clés course <small>seuil, VO2max, côtes</small></h2>
+  const repTxt = o.reprise ? "Pendant ta reprise, une séance clé par semaine au plus, jamais en semaine allégée : lignes droites au palier 5, côtes au 6, seuil au 7, puis seuil et côtes en alternance, VO2max à partir du palier 14. Tibia au-dessus de 2/10 pendant ou le lendemain : la séance suivante redevient un footing." : "";
+  return `<section class="card span12 pgram keyrun" id="pKey"><h2>Tes séances clés course <small>une par semaine, sans jour fixe</small></h2>
     <p class="tdmsg">${answer(o)}</p>
-    ${lines.length ? `<ul class="klist">${lines.join("")}</ul>` : ""}
+    ${body}${nextTxt}
     <p class="note">Tes allures : ${allures}. Calculées avec les formules de Daniels (VDOT ${nf(P.V, 1)}) d'après ${esc(P.src.txt)}, elles suivent ta forme.${ltNote}</p>
     <ul class="pgbars">${["rthr", "rhill", "rvo2"].map(bar).join("")}</ul>
     ${repTxt ? `<p class="note">${repTxt}</p>` : ""}
     <details class="pgall"><summary>Sur ta montre</summary><div class="kwatch">
-      <p><b>Automatique</b> : les séances clés des 8 prochains jours partent dans ton calendrier Garmin Connect à chaque passage du workflow (toutes les heures) ; la montre les reçoit à sa synchro avec le téléphone, dans Entraînement › Calendrier (ou « Séance du jour »), avec les allures cibles et les alertes. Si tu changes une séance dans le Plan, elle est remplacée au passage suivant.</p>
-      <ol><li>La synchro doit être active sur l'appareil où tu ouvres le Plan (carte Chaîne › réglages › Synchronisation).</li>
+      <p><b>Automatique</b> : la séance clé de la semaine part dans ton calendrier Garmin Connect et devient la « séance du jour » de ta montre le premier jour conseillé ; si tu ne la fais pas ce jour-là, elle passe au jour conseillé suivant. Au départ d'une course, la montre te la propose : tu la suis, ou tu fais ton footing. Une fois faite, elle ne bouge plus.</p>
+      <ol><li>La synchro doit être active sur l'appareil où tu ouvres le site (carte Chaîne › réglages › Synchronisation).</li>
       <li>Une seule fois : dans les mêmes réglages, « Copier le lien de configuration », puis sur GitHub : dépôt › Settings › Secrets and variables › Actions › New repository secret, nom <code>SYNC_LINK</code>, valeur = ce lien.</li>
-      <li>Ouvre le Plan une fois : les séances partent au passage suivant, la ligne passe à « ✓ dans ton calendrier Garmin ».</li></ol>
+      <li>Ouvre le site au moins une fois par semaine : c'est lui qui calcule la séance et ses jours conseillés.</li></ol>
       <p><b>Par câble</b> (sans attendre) : bouton .fit, montre branchée à l'ordinateur, copie le fichier dans le dossier <code>GARMIN/NewFiles</code> ; elle apparaît dans Entraînement › Entraînements. Sur Mac, une montre récente demande l'appli OpenMTP pour voir ses dossiers.</p>
     </div></details></section>`;
 }
+// tableau des étapes d'une séance (même rendu que le détail d'une course du Plan, fourni par plan.js)
+let runTableHtml = () => "";
 
 window.Seances = { LADDERS, NAME, KEY, stepL, fullMin, build, source, paces, fit, fileName, download, sig, offer, status, loadState, cardHtml,
-  _: { vdot, raceTime, paceAt, velOf, PCT, TOL, CAP, NMIN, total, diff, inWin, answer, fmtPace, is3030, srv: () => srv(), WINDOW } };
+  setTable: f => { runTableHtml = f; },
+  _: { vdot, raceTime, paceAt, velOf, PCT, TOL, CAP, NMIN, total, diff, inWin, fp, answer, fmtPace, is3030, srv: () => srv() } };
 if (window.Sync) register(); else addEventListener("DOMContentLoaded", register);
 })();

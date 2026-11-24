@@ -155,6 +155,69 @@ function defaultCfg() {
     return { bike: s ? (s.place === "out" ? "out" : "mw") : "none", dur: s ? s.dur : (d >= 5 ? 180 : 60), muscu: d !== 5 }; });
   return { v: 2, goal: { ...GOAL0 }, start: START0, days };
 }
+// ------------------------------------------------------------------ Disponibilités déduites des habitudes (24/11/2026 : plus de menu)
+// Demande de Nathan : « enlever le menu disponibilités, tout calculer automatiquement ». Modèle choisi par backtest (24/11/2026, 25 semaines
+// de vélo du 01/06 au 16/11/2026, muscu sur 75 semaines) : F1 jours vélo 0,77 contre 0,67 pour l'ancien « Vélo selon mes habitudes »,
+// séances plus longues que prévu 29 % contre 46 %, 92 % des semaines identiques à la précédente (33 % avant), F1 muscu 0,74 contre 0,65.
+// Par semaine, à partir des 16 semaines d'avant le lundi (donc stable toute la semaine, et identique sur tous les appareils) :
+// - semaines atypiques ignorées (vacances, malade, blessure) : moins de 30 % de la médiane des minutes de vélo (des séances de muscu pour la muscu) ;
+// - probabilité de rouler chaque jour de la semaine, semaines récentes favorisées (demi-vie 6 semaines) ; un jour entre à p ≥ 0,5 et reste tant
+//   que p ≥ 0,3 (hystérésis : le plan ne saute pas d'une semaine à l'autre) ; chaque jour retenu a sa séance (2 jours au moins) ;
+// - durée max par jour sur les 8 dernières semaines retenues : médiane en semaine, 75e centile le week-end (moins de 3 sorties ce jour-là :
+//   tous les jours de semaine, ou les deux jours du week-end), arrondie au palier supérieur, 45 à 300 min ;
+// - lieu : la météo décide, pas l'habitude (aucune règle ne dépassait 67 %) : MyWhoosh en semaine, au choix le week-end (dehors à partir de 2 h 30) ;
+// - muscu le matin (avant 12 h) les jours où p ≥ 0,3 ;
+// - sortie de groupe : jamais automatique (signal trop faible, F1 0,53) ; une sortie dure imprévue est gérée par R3.
+// Moins de 4 semaines de vélo retenues : on garde le dernier réglage enregistré (ou celui par défaut).
+const AUTO = { weeks: 16, hl: 6, low: .3, enter: .5, stay: .3, durWeeks: 8, minRides: 3, mus: .3, morning: 12, minWeeks: 4, depth: 26 };
+const autoMemo = new Map();
+const med = a => { const s = [...a].sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0; };
+const quant = (a, q) => { const s = [...a].sort((x, y) => x - y); if (!s.length) return 0; const i = (s.length - 1) * q, lo = Math.floor(i); return s[lo] + (s[Math.min(lo + 1, s.length - 1)] - s[lo]) * (i - lo); };
+// semaines d'avant le lundi `mon` (1 = la dernière) : jours roulés, minutes, matins de muscu
+function autoWeeks(mon, acts) {
+  const W = [];
+  for (let i = 1; i <= AUTO.weeks; i++) { const m = addDays(mon, -7 * i), e = addDays(m, 7), w = { i, ride: Array(7).fill(false), mus: Array(7).fill(false), min: 0, nMus: 0, rides: [] };
+    acts.forEach(a => { if (!a.dt || a.dt < m || a.dt >= e) return; const d = (a.dt.getDay() + 6) % 7;
+      if (RIDE_TYPES.has(a.t) && isTraining(a)) { w.ride[d] = true; w.min += a.mt / 60; w.rides.push({ d, min: a.mt / 60 }); }
+      else if (isMuscu(a) && a.dt.getHours() < AUTO.morning) { w.mus[d] = true; w.nMus++; } });
+    W.push(w); }
+  return W;
+}
+function autoProb(W, key, size) {
+  const kept = W.filter(w => w[size] >= AUTO.low * med(W.map(x => x[size])) && w[size] > 0);
+  const wt = w => Math.pow(.5, (w.i - 1) / AUTO.hl), tot = kept.reduce((s, w) => s + wt(w), 0);
+  return { kept, p: Array.from({ length: 7 }, (_, d) => tot ? kept.reduce((s, w) => s + (w[key][d] ? wt(w) : 0), 0) / tot : 0) };
+}
+function autoAvail(mon, acts = S.all || [], depth = AUTO.depth) {
+  const key = ymd(mon) + ":" + acts.length + ":" + depth; if (autoMemo.has(key)) return autoMemo.get(key);
+  const W = autoWeeks(mon, acts), B = autoProb(W, "ride", "min");
+  let out = null;
+  if (B.kept.length >= AUTO.minWeeks) {
+    const prev = depth > 0 ? autoAvail(addDays(mon, -7), acts, depth - 1) : null, was = new Set(prev ? prev.avail : []);
+    const avail = [0, 1, 2, 3, 4, 5, 6].filter(d => B.p[d] >= AUTO.enter || (was.has(d) && B.p[d] >= AUTO.stay));
+    const k = Math.round(B.p.reduce((s, x) => s + x, 0));   // séances attendues (affichage) ; tous les jours probables gardent leur séance :
+    // plafonner aux k plus probables faisait tomber le F1 de 0,77 à 0,65-0,69 et changer les jours chaque semaine (backtest du 24/11/2026)
+    let bike = avail.slice();
+    if (bike.length < 2) bike = [0, 1, 2, 3, 4, 5, 6].sort((a, b) => B.p[b] - B.p[a] || a - b).slice(0, 2);
+    // durée max : 8 dernières semaines retenues
+    const R8 = B.kept.slice(0, AUTO.durWeeks).flatMap(w => w.rides), we = d => d >= 5;
+    const dur = d => { let L = R8.filter(r => r.d === d).map(r => r.min); if (L.length < AUTO.minRides) L = R8.filter(r => we(r.d) === we(d)).map(r => r.min);
+      const x = L.length ? (we(d) ? quant(L, .75) : med(L)) : (we(d) ? 180 : 60); return clamp(DURS.find(v => v >= x - 1e-9) || 300, 45, 300); };
+    const M = autoProb(W, "mus", "nMus");
+    const mus = M.kept.length >= AUTO.minWeeks ? M.p.map(p => p >= AUTO.mus) : null;
+    out = { avail, bike: bike.sort((a, b) => a - b), k, p: B.p, pm: M.p, weeks: B.kept.length, mus,
+      days: Array.from({ length: 7 }, (_, d) => { const on = bike.includes(d), du = dur(d);
+        return { bike: on ? (we(d) ? "any" : "mw") : "none", dur: on && we(d) ? Math.max(60, du) : du, muscu: mus ? mus[d] : d !== 5 }; }) };
+  }
+  autoMemo.set(key, out); return out;
+}
+// réglages d'une semaine : objectif et départ enregistrés, jours déduits des habitudes
+// une semaine à venir prend la semaine type de la semaine en cours : sa propre estimation compterait la semaine en cours, pas finie,
+// comme une semaine où il n'a pas roulé les jours qui restent (aperçu de la semaine prochaine qui change chaque jour)
+function cfgFor(mon) {
+  const m = mondayOf(mon), cur = mondayOf(new Date()), c = getCfg(), A = autoAvail(+m > +cur ? cur : m);
+  return A ? { ...c, days: A.days, auto: A } : c;
+}
 function getCfg() {
   let c = store2.get("planCfg");
   if (!c || !Array.isArray(c.days) || c.days.length !== 7) c = defaultCfg();
@@ -504,6 +567,7 @@ function baseWeek(mon, c, ctx) {
   }
   return base;
 }
+const BIG_DAY = { rideH: 4, load: 250 };   // grosse journée (R4) : 4 h de vélo ou 250 de charge (≈ 97e centile de ses journées actives, 24/11/2026)
 // créneau pour une séance clé déplacée : pas collée à un jour dur, pas le jour ni le lendemain des jambes
 function keySlot(items, from, F, ftp, opt = {}) {
   // withLong : une sortie longue compte comme jour dur la veille de la séance (pas le lendemain : vendredi clé + samedi long, c'est classique)
@@ -607,13 +671,13 @@ function effective(mon, c, ctx) {
   const base = baseWeek(mon, c, ctx), ph = phase(mon, c), key = ymd(mon), ov = store2.get("planOv:" + key) || {};
   const items = base.items.map((it, d) => { const o = ov[d] || {}; let bike = it.bike ? { ...it.bike, st: "plan" } : null;
     if (bike && o.t && TYPES[o.t]) { bike.t = o.t; bike.own = true; } if (bike && o.dur) { bike.dur = o.dur; bike.own = true; } if (bike && o.place) { bike.place = o.place; bike.own = true; } if (bike && Number.isInteger(o.k) && STEPS[bike.t] && o.k < STEPS[bike.t].length) { bike.k = o.k; bike.own = true; }
-    let run = it.run ? { ...it.run, st: "plan" } : null;
+    let run = it.run && !ctx.noRuns ? { ...it.run, st: "plan" } : null;   // une semaine figée avant le 24/11/2026 peut encore porter des courses placées
     // course choisie à la main (n'importe quel jour, même avec muscu et vélo) : jamais bloquée par les règles de placement ; 0 = retirée
     if (o.run === 0) run = null;
     else if (o.run && RUN_OWN(o.run)) { run = { ...(run || { slot: bike ? "add" : "alt" }), t: o.run.t, dur: o.run.dur, st: "plan", own: true, ...(run ? {} : { added: true }) }; delete run.cool; delete run.k;
       if (Number.isInteger(o.run.k) && LAD(o.run.t) && o.run.k >= 0 && o.run.k < LAD(o.run.t).length) run.k = o.run.k; }
     return { day: d, date: addDays(mon, d), bike, muscu: it.muscu ? { s: it.muscu, st: "plan", ...(it.mown ? { own: true } : {}) } : null, ...(it.mnone ? { mnone: true } : {}), extra: [], ...(run ? { run } : {}) }; });
-  const out = { mon, ph, items, changes: [], K: base.K, tired: base.tired, isCur, td: isCur ? (now.getDay() + 6) % 7 : mon < cur ? 7 : -1, ...(base.run ? { runInfo: base.run } : {}) };
+  const out = { mon, ph, items, changes: [], K: base.K, tired: base.tired, isCur, td: isCur ? (now.getDay() + 6) % 7 : mon < cur ? 7 : -1, ...(base.run && !ctx.noRuns ? { runInfo: base.run } : {}) };
   if (out.td < 0) return out;  // semaine à venir : simple aperçu
   const td = out.td, F = weekFacts(mon), ftp = profile().ftp, undo = new Set(store2.get("planUndo:" + key) || []), lbl = store2.get("muscuLbl") || {};
   const ready = ctx.ready, morningOver = now.getHours() >= 12, eveningOver = now.getHours() >= 22;
@@ -655,14 +719,32 @@ function effective(mon, c, ctx) {
       const t = b.t, tgt = keySlot(items, Math.max(x + 1, td + (now.getHours() >= 20 ? 1 : 0)), F, ftp, { ignore: x }), easy = x === d ? "rec" : "end";
       step(`legs-${x}`, `Legs faite ${dl(d)} matin : ${TYPES[t].l} de ${dl(x)} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée (pas d'autre jour possible cette semaine)"}, ${easy === "rec" ? "récupération" : "endurance"} ${x === td ? "ce soir" : dl(x)} : pas de séance clé le jour des jambes ni le lendemain.`,
         () => { if (tgt != null) { const B = items[tgt].bike; B.t = t; B.dur = Math.max(B.dur, 60); B.moved = x; } b.t = easy; b.dur = Math.min(b.dur, easy === "rec" ? 60 : b.dur); b.changed = true; }); }); });
+  // --- R4 (24/11/2026, demande de Nathan : « une grosse sortie de 5 h le dimanche, le lundi c'est repos ») : lendemain d'une grosse journée,
+  // prévue ou non (≥ 4 h de vélo ou ≥ 250 de charge, tous sports : ≈ 97e centile de ses journées) → repos, au plus 45 min très faciles.
+  // Appliquée à tous les jours de la semaine jusqu'à demain (pas seulement aujourd'hui), avant R1 : le repos reste affiché une fois le jour passé
+  // (même s'il a roulé les 45 min), et une séance clé prévue ce jour-là devient « perdue » (keyLost) : R1 la déplace comme une clé ratée, une seule
+  // fois (le compte des séances dures faites l'arrête ensuite). Une vraie séance dure faite ce jour-là quand même : on n'y touche pas.
+  // Sur 18 mois, après de telles journées il s'est reposé ou a roulé facile 30 fois sur 36 ; VFC −29 % la nuit suivante (17 journées ≥ 250).
+  for (let d = 0; d <= Math.min(6, td + 1); d++) { const it = items[d], b = it.bike, prev = addDays(mon, d - 1);
+    if (!b || b.t === "rec" || b.t === "grp" || ymd(prev) > ymd(now)) continue;
+    if (b.st === "done" && (b.acts || []).some(a => hardRide(a, ftp))) continue;
+    const pa = (S.all || []).filter(a => a.d.slice(0, 10) === ymd(prev)), rideH = pa.filter(a => RIDE_TYPES.has(a.t)).reduce((x, a) => x + a.mt, 0) / 3600, load = Charge.dayLoad(prev);
+    if (rideH < BIG_DAY.rideH && load < BIG_DAY.load) continue;
+    const t0 = b.t, key = isKey(t0), nm = TYPES[t0].l, what = `${rideH >= 1 ? `${fmtMin(Math.round(rideH * 12) * 5)} de vélo, ` : ""}charge ${Math.round(load)}`;
+    const prevTxt = d - 1 === td ? "aujourd'hui" : d === 0 ? "dimanche" : dl(d - 1), when = d === td ? "aujourd'hui" : dl(d);
+    step(`big-${d}`, `Grosse journée ${prevTxt} (${what}) : repos ${when}${key ? ` ; ${nm} replacée un autre jour si possible` : d >= td ? ` (${nm.toLowerCase()} retirée ; au plus 45 min très faciles si tu as envie de rouler)` : ""}.`,
+      () => { b.t = "rec"; b.dur = Math.min(b.dur, 45); b.rest = true; b.changed = true; if (key) b.keyLost = t0; });
+  }
   // --- R1 : séance clé ratée → déplacée si possible
-  items.forEach(it => { if (!it.bike || it.bike.st !== "missed" || !isKey(it.bike.t) || it.bike.t === "grp") return;  // une sortie de groupe ne se déplace pas
+  // (aussi une clé remplacée par du repos le lendemain d'une grosse journée : keyLost, R4)
+  items.forEach(it => { const lost = it.bike && it.bike.keyLost;
+    if (!it.bike || it.bike.t === "grp" || (!lost && (it.bike.st !== "missed" || !isKey(it.bike.t)))) return;  // une sortie de groupe ne se déplace pas
     const future = items.filter(x => x.day >= td && x.bike && x.bike.st === "plan" && isKey(x.bike.t)).length;
     if (hardDays + future >= plannedKeys) return;
     const from = td + (now.getHours() >= 20 ? 1 : 0), tgt = keySlot(items, from, F, ftp, { ignore: it.day });  // le vélo se fait le soir
-    const t = it.bike.t, nm = TYPES[t].l;
-    if (tgt == null) { info(`${nm} de ${dl(it.day)} non faite : pas de place cette semaine sans enchaîner deux jours durs, on la laisse passer.`); return; }
-    step(`move-${it.day}`, `${nm} de ${dl(it.day)} non faite : déplacée à ${dl(tgt)}.`, () => { const b = items[tgt].bike; b.t = t; b.dur = Math.max(b.dur, 60); b.moved = it.day; it.bike.movedTo = tgt; });
+    const t = lost || it.bike.t, nm = TYPES[t].l, why = lost ? "remplacée par du repos" : "non faite";
+    if (tgt == null) { info(`${nm} de ${dl(it.day)} ${why} : pas de place cette semaine sans enchaîner deux jours durs, on la laisse passer.`); return; }
+    step(`move-${it.day}`, `${nm} de ${dl(it.day)} ${why} : déplacée à ${dl(tgt)}.`, () => { const b = items[tgt].bike; b.t = t; b.dur = Math.max(b.dur, 60); b.moved = it.day; it.bike.movedTo = tgt; });
   });
   // --- R2 : récupération basse ce matin et séance clé prévue aujourd'hui
   const T = td < 7 ? items[td] : null;
@@ -687,7 +769,7 @@ function effective(mon, c, ctx) {
       () => { if (tgt != null) { const b = items[tgt].bike; b.t = t; b.moved = x.day; } x.bike.t = "end"; x.bike.changed = true; });
   });
   // --- course (étape 5b) : seulement si la semaine porte des courses (sans jour de course, rien ne change)
-  if (base.run) runAdjust(out, { td, now, F, ftp, ready, rc: ctx.rc !== undefined ? ctx.rc : runCfg(c), run: ctx.run || {}, step, info });
+  if (base.run && !ctx.noRuns) runAdjust(out, { td, now, F, ftp, ready, rc: ctx.rc !== undefined ? ctx.rc : runCfg(c), run: ctx.run || {}, step, info });
   // --- muscu manquée → reportée sur un matin libre
   const seen = new Set();
   missedM.forEach(m => { if (seen.has(m.s)) return; seen.add(m.s);
@@ -937,11 +1019,10 @@ function runPal(it) {
   return `<p class="sg">Palier #${k + 1} fait. ${e ? `${e.ok ? `<b>Réussi ✓</b>${k < N - 1 ? ` : la prochaine passe au #${k + 2}.` : " : dernier palier."}` : "<b>À refaire</b> : la prochaine reprend ce palier."} <button class="lnk" data-pal="${d}:${r.t}:${k}:x">Changer</button>`
     : `Toutes les répétitions tenues à l'allure (ou à l'effort), sans finir à bloc ni douleur au tibia ? <button class="btn2 primary" data-pal="${d}:${r.t}:${k}:1">Réussi</button> <button class="btn2" data-pal="${d}:${r.t}:${k}:0">À refaire</button>`}</p>`;
 }
-// séance clé à venir : où elle en est côté Garmin (seances.js, data/montre.json) et le fichier .fit
+// course ajoutée à la main avec une séance clé : son fichier .fit (la séance clé de la semaine, elle, part toute seule sur la montre)
 function runWatch(it) {
   const r = it.run; if (!r.w.spec || r.st !== "plan") return "";
-  const st = Seances.status(ymd(it.date), r.w.spec);
-  return `<div class="kwline"><span class="kst ${st.k}">${st.k === "ok" ? "✓ " : ""}${esc(st.txt)}</span><button class="btn2" data-kfitd="${ymd(it.date)}">Fichier pour la montre (.fit)</button></div>`;
+  return `<div class="kwline"><button class="btn2" data-kfitd="${ymd(it.date)}">Fichier pour la montre (.fit)</button></div>`;
 }
 function runDetail(W, it) {
   const r = it.run;
@@ -1055,6 +1136,7 @@ function renderWeek(W, prof) {
   const mw = W.items.filter(it => it.bike && it.bike.place === "mw" && it.bike.st === "plan" && (W.td < 0 || it.day >= W.td));
   return `<section class="card span12 wkc" id="pWeek"><h2>La semaine <small>${cyc} · ≈ ${plannedT} de charge prévus${W.isCur ? ` · ${doneT} faits` : ""}</small><span class="wsel"><button class="chip" data-w="0" aria-pressed="${+W.mon === +thisMon}">Cette semaine</button><button class="chip" data-w="7" aria-pressed="${+W.mon === +addDays(thisMon, 7)}">Semaine prochaine</button></span></h2>
     <p class="pnote">${esc(ph.focus)}.${W.tired ? " Version allégée : fatigue détectée." : ""}${W.td < 0 ? " Aperçu : la semaine se fige lundi, puis s'ajuste chaque jour." : ""} Muscu le matin, vélo le soir ; jamais les jambes le jour ou la veille d'une séance clé.</p>
+    ${habitsNote(W)}
     ${weekStrip(W)}
     <div class="wk">${pastFold(W, prof)}</div>${runNote}
     ${mw.length ? `<div class="factions">${mw.length > 1 ? `<button class="btn2 primary" id="pZip">Télécharger les ${mw.length} séances MyWhoosh (.zip)</button>` : ""}</div>
@@ -1066,31 +1148,14 @@ function renderWeek(W, prof) {
   </section>`;
 }
 // une phrase qui dit ce qu'« auto » a choisi, avec le chiffre de la jauge de reprise (km courus par semaine sur les 4 semaines d'avant)
-function runAutoText(c) {
-  const R = runCtx(mondayOf(new Date())), G = R.chronic, lim = window.Course && Course._ && Course._.GAUGE ? Course._.GAUGE.resumeKm : 15;
-  const Lc = runCtx(addDays(mondayOf(new Date()), 7)).ladder || R.ladder;
-  const says = Lc ? `ta reprise par paliers (palier ${Lc.k + 1} sur ${Lc.of} : ${Lc.durs.length} footings de ${Lc.durs.slice().reverse().join(", ")} min), qui fixe le nombre et la durée des sorties ; coche au moins ${Lc.durs.length} jours de course`
-    : G == null ? "jauge de reprise indisponible, donc entretien" : `${R.resume ? "reprise" : "entretien"}, car tu cours ${nf(G, 1)} km par semaine en moyenne sur les 4 dernières semaines (reprise sous ${lim} km)`;
-  return `« À la place » : la course prend la place de ta séance de vélo du soir si elle est facile (ou s'y ajoute s'il n'y en a pas). « En plus » : un footing le midi. Programme « Auto » : ${says}. Reprise = footings seulement, sans lignes droites (pendant le programme de reprise : ses paliers, pas le nombre de courses réglé) ; entretien = footings et une sortie longue ; progression = en plus au plus une séance dure par semaine. Un jour coché qui tombe sur une séance clé, la sortie longue vélo ou les jambes garde sa course, mais en footing court et très facile (30 min au plus), en plus de la séance du jour ; jamais le jour d'un test FTP. Une séance dure n'est jamais collée à un jour dur.`;
-}
-function renderAvail(c) {
-  const opt = (v, cur, l) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
-  const nb = c.days.filter(d => d.bike !== "none").length, nm = c.days.filter(d => d.muscu).length, nr = c.days.filter(d => d.run === "alt" || d.run === "add").length;
-  return `<section class="card span12 avail" id="pAvail"><details ${PS.avail ? "open" : ""} id="pAvailD"><summary><span class="avt">Mes disponibilités</span><small>${nb} jour${nb > 1 ? "s" : ""} de vélo · ${nm} matin${nm > 1 ? "s" : ""} de muscu possibles${nr ? ` · ${nr} jour${nr > 1 ? "s" : ""} de course` : ""}</small></summary>
-    <div class="avg">${c.days.map((d, i) => `<div class="avrow" data-i="${i}"><b>${DAYN[i]}</b>
-      <select data-k="bike" aria-label="Vélo ${DAYN[i]}">${opt("none", d.bike, "Pas de vélo")}${opt("mw", d.bike, "MyWhoosh")}${opt("out", d.bike, "Dehors")}${opt("grp", d.bike, "Sortie de groupe")}${opt("any", d.bike, "Au choix")}</select>
-      <select data-k="dur" aria-label="Durée max ${DAYN[i]}" ${d.bike === "none" ? "disabled" : ""}>${DURS.map(v => opt(v, d.dur, "jusqu'à " + fmtMin(v))).join("")}</select>
-      <label class="mtog"><input type="checkbox" data-k="muscu" ${d.muscu ? "checked" : ""}> muscu le matin</label>
-      <i class="avsp"></i><select data-k="run" aria-label="Course ${DAYN[i]}">${opt("none", d.run || "none", "Pas de course")}${opt("alt", d.run, "Course à la place")}${opt("add", d.run, "Course en plus")}</select>
-      <select data-k="runDur" aria-label="Durée max de la course ${DAYN[i]}" ${!d.run || d.run === "none" ? "disabled" : ""}>${RUN_DURS.map(v => opt(v, d.runDur || 60, "jusqu'à " + fmtMin(v))).join("")}</select></div>`).join("")}</div>
-    <div class="avrun"><b>Course à pied</b>
-      <label>Courses par semaine, au plus <select data-g="runN" aria-label="Nombre de courses par semaine">${[1, 2, 3, 4].map(v => opt(v, c.runN || 2, v)).join("")}</select></label>
-      <label>Programme <select data-g="runMode" aria-label="Mode de course">${opt("auto", c.runMode || "auto", "Auto")}${opt("reprise", c.runMode, "Reprise")}${opt("entretien", c.runMode, "Entretien")}${opt("progression", c.runMode, "Progression")}</select></label></div>
-    <p class="note">${runAutoText(c)} S'applique à partir du lundi suivant ; la semaine en cours n'est jamais régénérée.</p>
-    <p class="note">Le plan choisit les jours des séances clés et place Push, Pull, Legs et Upper sur 4 de tes matins de muscu : jamais les jambes le matin d'une séance clé, ni la veille d'une séance clé ou de la sortie longue. Avec moins de 4 matins, Upper saute en premier. Une sortie « dehors » de 2 h 30 ou plus devient la sortie longue.</p>
-    <div class="factions"><button class="btn2" id="pShare">Copier le lien pour mon autre appareil</button><button class="btn2 ghost" id="pHabits">Vélo selon mes habitudes</button></div><div id="pShareOut"></div>
-    ${renderDesign()}
-  </details></section>`;
+// semaine type déduite des habitudes (autoAvail) : une ligne dans la carte La semaine, à la place de l'ancien menu « Mes disponibilités »
+function habitsNote(W) {
+  const A = cfgFor(W.mon).auto, dn = d => DAYN[d].toLowerCase();
+  if (!A) return `<p class="pnote">Pas encore assez d'historique pour déduire tes jours (4 semaines de vélo au moins) : semaine type par défaut.</p>`;
+  const list = a => a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} et ${a[a.length - 1]}`;
+  const span = ds => ds.length >= 3 && ds.every((d, i) => !i || d === ds[i - 1] + 1) ? `du ${dn(ds[0])} au ${dn(ds[ds.length - 1])}` : list(ds.map(dn));
+  const bike = A.bike.map(d => `${dn(d)} (${fmtMin(A.days[d].dur)}${A.days[d].bike === "mw" ? "" : ", dehors s'il fait beau"})`), mus = A.days.map((x, d) => x.muscu ? d : null).filter(d => d != null);
+  return `<p class="pnote">Ta semaine type, déduite de tes ${A.weeks} dernières semaines (vacances et semaines blessé ignorées) : vélo ${list(bike)}${mus.length ? ` ; muscu le matin ${span(mus)}` : ""}. Durées au plus, recalculées chaque lundi ; chaque jour, le Plan suit ce que tu as vraiment fait (séance ratée, sortie imprévue, grosse journée, récup basse).</p>`;
 }
 
 // ------------------------------------------------------------------ Charge conseillée du jour
@@ -1125,7 +1190,9 @@ function renderToday(form, ready, W) {
 const AFY = { "<30": [4.95, 5.77], "30-39": [4.3, 5.59], "40-49": [4, 4.88], "50-59": [3.63, 4.38], "60+": [3.23, 4.18] };  // médiane, top 10 % (hommes)
 
 // ------------------------------------------------------------------ Logique de page
-function ctxFor(mon, form, ready) { const rc = rcFor(mon); return { form, ready, prev: prevCtx(mon), rc, ...(rc ? { run: runCtx(mon) } : {}) }; }
+// Plus de jours de course ni de courses placées par le Plan (demande de Nathan du 24/11/2026 : « trop restrictif ») : la course se fait quand il veut,
+// la séance clé de la semaine n'a pas de jour (weekKey). Le moteur de placement (placeRuns, runAdjust) reste testé mais n'est plus appelé ici.
+function ctxFor(mon, form, ready) { return { form, ready, prev: prevCtx(mon), rc: null, noRuns: true }; }
 // allures des séances clés course (seances.js) : réglage à la main, sinon 10 km prédit par Garmin, sinon seuil Garmin ; km par semaine (4 dernières)
 function runKeyCtx() {
   if (!window.Seances) return {};
@@ -1138,7 +1205,8 @@ function runKeyCtx() {
 }
 function withWorkouts(W) {
   const thr = W.items.some(it => it.run) ? Charge.params().runPace : null, RK = thr ? runKeyCtx() : {};
-  W.items.forEach(it => { if (it.bike) it.bike.w = build(it.bike.t, it.bike.dur, { ...W.ph, date: it.date, k: it.bike.k });
+  W.items.forEach(it => { if (it.bike) { it.bike.w = build(it.bike.t, it.bike.dur, { ...W.ph, date: it.date, k: it.bike.k });
+      if (it.bike.rest) it.bike.w = { ...it.bike.w, title: "Repos (ou 45 min très faciles)", goal: "Lendemain de grosse journée : repos. Si tu as vraiment envie de rouler, 45 min très faciles, sans forcer, puis récupère (sommeil, glucides, protéines)." }; }
     if (it.run) it.run.w = buildRun(it.run.t, it.run.dur, thr, { ...RK, k: LAD(it.run.t) ? (Number.isInteger(it.run.k) && it.run.k < LAD(it.run.t).length ? it.run.k : palFor(it.run.t, it.date)) : null }); });
   return W;
 }
@@ -1146,7 +1214,7 @@ function withWorkouts(W) {
 const DESIGN_URL = "https://claude.ai/artifact/L69eY3jybaGrp1MQQZyFr4";
 const STATE_URL = "https://claude.ai/code/artifact/70fc8fa6-f042-43da-a65f-b06d176b215f";  // état des lieux vélo du 20/10/2026 (doc Claude privé)
 function renderDesign() {
-  return `<div class="design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie de groupe (réglage « Sortie de groupe ») compte comme la séance dure de la semaine, et après un gros week-end la séance clé attend le mercredi.</p>
+  return `<div class="design"><p class="tdmsg">Ton plan garde seulement les séances qui font progresser : VO2max 30/15, sweet spot et seuil long pour la FTP, endurance + tempo, sortie longue au cardio, et un test de 20 min toutes les 8 semaines. Une sortie dure imprévue (groupe, course) décale la séance clé suivante, après un gros week-end la séance clé attend le mercredi, et le lendemain d'une grosse journée (4 h de vélo ou 250 de charge) est un jour de repos.</p>
     <p class="note"><a href="${DESIGN_URL}" target="_blank" rel="noopener">Les séances fondatrices</a> · <a href="${STATE_URL}" target="_blank" rel="noopener">l'état des lieux du 20 octobre</a> · pages privées, visibles seulement avec ton compte Claude.</p></div>`;
 }
 // carte « Ton programme FTP » : où tu en es de chaque échelle de paliers (palLog)
@@ -1161,63 +1229,103 @@ function renderProgram() {
   return `<section class="card span12 pgram" id="pPgram"><h2>Ton programme FTP <small>environ 12 semaines</small></h2>
     <p class="tdmsg">${done ? `${done} palier${done > 1 ? "s" : ""} réussi${done > 1 ? "s" : ""}, encore ${left} à franchir.` : "Tu démarres au palier #1 de chaque séance, le plus facile."} Chaque séance réussie fait passer la suivante au palier d'après : on allonge d'abord les blocs, puis on monte l'intensité, comme les plans FTP de MyWhoosh et Zwift.</p>
     <ul class="pgbars">${Object.keys(STEPS).map(bar).join("")}</ul>
-    <details class="pgall"${PS.pgAll ? " open" : ""}><summary>Voir tous les paliers</summary><ul class="pgl">${Object.keys(STEPS).map(row).join("")}</ul></details></section>`;
+    <details class="pgall"${PS.pgAll ? " open" : ""}><summary>Voir tous les paliers</summary><ul class="pgl">${Object.keys(STEPS).map(row).join("")}</ul></details>${renderDesign()}</section>`;
 }
 function render() {
   const box = $("plan"); if (!box) return;
   if (!store2.get("planSince")) store2.set("planSince", ymd(new Date()));
   const c = getCfg(), prof = profile(), form = fitness(), ready = readiness(), cur = mondayOf(new Date());
   if (!PS.mon || PS.mon < cur) PS.mon = weekTarget();
-  const Wc = withWorkouts(effective(cur, c, ctxFor(cur, form, ready)));
-  const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, c, ctxFor(PS.mon, form, ready)));
-  PS.W = W; PS.Wc = Wc; PS.K = keyRuns(Wc); offerWatch(PS.K);
+  const Wc = withWorkouts(effective(cur, cfgFor(cur), ctxFor(cur, form, ready)));
+  const W = +PS.mon === +cur ? Wc : withWorkouts(effective(PS.mon, cfgFor(PS.mon), ctxFor(PS.mon, form, ready)));
+  PS.W = W; PS.Wc = Wc; PS.KW = keyWeeks(Wc); offerWatch(PS.KW);
   if (window.Seances) Seances.loadState(() => { if (Nav.curTab() === "plan" && PS.W) render(); });
   if (!$("pTop")) box.innerHTML = `<nav class="psum" aria-label="Sommaire du plan">${SUM.map(([id, l]) => `<button class="chip" data-sum="${id}">${l}</button>`).join("")}</nav>
     <div class="grid" id="pTop"></div><div class="grid" id="pAna"></div>`;
   const H = renderHead(prof, form, ready, W.ph, c);
-  $("pTop").innerHTML = `${H.goal}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${window.Reprise ? Reprise.html({ acts: S.all, items: Wc.items, now: Date.now() }) : ""}${renderKey(Wc, PS.K)}${H.form}${renderAvail(c)}`;
+  $("pTop").innerHTML = `${H.goal}${renderDay(Wc, ready)}${renderToday(form, ready, Wc)}${renderWeek(W, prof)}${renderProgram()}${window.Reprise ? Reprise.html({ acts: S.all, items: Wc.items, now: Date.now() }) : ""}${renderKey(Wc, PS.KW)}${H.form}`;
   renderAna(c, prof);
   bind(c, prof);
   spy();
 }
-// ------------------------------------------------------------------ Séances clés course : liste des 8 prochains jours, carte, envoi vers la montre
-// séances clés (seances.js) prévues ou faites d'aujourd'hui à J+7, semaine en cours et suivante (aperçu) : [{ date, t, title, spec, pace, when, whenShort }]
-function keyRuns(Wc) {
-  if (!window.Seances || !Wc) return [];
-  const t0 = ymd(new Date()), nextMon = addDays(Wc.mon, 7);
-  const Wn = PS.W && +PS.W.mon === +nextMon ? PS.W : withWorkouts(effective(nextMon, getCfg(), ctxFor(nextMon, fitness(), readiness())));
-  return [...Wc.items, ...Wn.items].filter(it => it.run && it.run.w && it.run.w.spec && (it.run.st === "plan" || it.run.st === "done") && Seances._.inWin(ymd(it.date), t0))
-    .map(it => { const main = it.run.w.steps.find(x => x.n && x.pace);
-      return { date: ymd(it.date), t: it.run.t, st: it.run.st, title: it.run.w.title, spec: it.run.w.spec, pace: main ? main.pace : null,
-        when: ymd(it.date) === t0 ? "aujourd'hui" : it.date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
-        whenShort: ymd(it.date) === t0 ? "Aujourd'hui" : it.date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" }) }; });
+// ------------------------------------------------------------------ Séance clé course de la semaine (sans jour fixe, demande du 24/11/2026)
+// Pendant la reprise : celle du palier (Reprise._.KEYS, aucune en semaine allégée). Ensuite : seuil et VO2max en alternance, aucune en
+// semaine allégée du Plan. Pas de jour : elle se fait le jour qui arrange Nathan, parmi les jours conseillés = jours restants sans séance
+// clé vélo, sortie longue, test, sortie de groupe ni jambes (prévus ou faits) ; pour seuil, VO2max et côtes, ni la veille ni le lendemain.
+// Faite = validée (« Réussie / À refaire », keyLog synchronisé, + palLog pour le palier) ou suivie sur la montre (data/montre.json).
+const KEY_AFTER = ["rthr", "rvo2"];                       // après la reprise, une semaine sur deux
+const keyLog = () => { const L = store2.get("keyLog"); return Array.isArray(L) ? L.filter(x => x && /^\d{4}-\d\d-\d\d$/.test(x.w) && /^\d{4}-\d\d-\d\d$/.test(x.d) && TYPES[x.t]) : []; };
+function setKeyLog(w, t, d, ok) {
+  const L = keyLog().filter(x => x.w !== w); if (ok != null) L.push({ w, t, d, ok }); store2.set("keyLog", L.sort((a, b) => a.w < b.w ? -1 : 1).slice(-30));
+  if (LAD(t)) { const k = palFor(t, parseYmd(d)); setPal(d, t, k, ok); }
 }
-// dépose les séances de la fenêtre dans la collection `montre` (le workflow les envoie dans le calendrier Garmin)
-// une séance déjà faite n'est jamais renvoyée (keep) : Garmin garde celle que tu as suivie
-function offerWatch(K) { try { Seances.offer(ymd(new Date()), Object.fromEntries(K.map(x => [x.date, { spec: x.spec, keep: x.st === "done" }]))); } catch (e) { console.error(e); } }
-function renderKey(Wc, K) {
-  if (!window.Seances || (!Wc.runInfo && !K.length)) return "";
+function weekKey(W) {
+  if (!window.Seances || !W) return null;
+  const mon = W.mon, X = window.Reprise && Reprise._, wk = d => ymd(addDays(mon, d));
+  if (X && ymd(mon) < X.START) return null;
+  const L = ladderFor(S.all || [], mon);
+  let t, dur = null;
+  if (L) { if (!L.key) return null;
+    t = L.key; const gap = d => Math.abs(d - L.keyDur); dur = L.durs.reduce((b, d) => gap(d) < gap(b) || (gap(d) === gap(b) && d < b) ? d : b, L.durs[0]); }
+  else { if (W.ph.deload) return null; t = KEY_AFTER[Math.round(mon.getTime() / (7 * 864e5)) % 2]; }
+  const k = LAD(t) ? palFor(t, mon) : null;
+  if (dur == null) dur = LAD(t) ? Seances.fullMin(t, k) : 40;
+  const w = buildRun(t, dur, Charge.params().runPace, { ...runKeyCtx(), k });
+  // jours conseillés : à partir d'aujourd'hui (demain après 20 h)
+  const F = weekFacts(mon), ftp = profile().ftp, now = new Date(), from = ymd(now.getHours() >= 20 ? addDays(now, 1) : now);
+  // jour dur : séance dure prévue (vélo, jambes), repos imposé après une grosse journée (R4), ou grosse séance faite ; le dimanche d'avant compte
+  // pour le lundi (relecture du 24/11/2026 : après 5 h de vélo le dimanche, la séance clé était conseillée le lundi)
+  const pace = Charge.params().runPace, doneHard = (acts, date) => acts.some(a => (RIDE_TYPES.has(a.t) && (hardRide(a, ftp) || a.mt >= 3 * 3600)) || (Charge.RUN_TYPES.has(a.t) && hardRun(a, pace)))
+    || Charge.dayLoad(date) >= BIG_DAY.load;
+  const hard = d => { if (d === -1) { const ps = addDays(mon, -1); return doneHard((S.all || []).filter(a => a.d.slice(0, 10) === ymd(ps)), ps); }
+    if (d < 0 || d > 6) return false; const it = W.items[d], b = it.bike;
+    return !!((b && b.st !== "missed" && (isKey(b.t) || isLong(b.t) || b.t === "grp" || b.t.startsWith("test") || b.rest)) || (it.muscu && it.muscu.s === "legs" && it.muscu.st !== "missed")
+      || doneHard(F[d].rides.concat(F[d].runs), addDays(mon, d))); };
+  const why = d => { const it = W.items[d], b = it.bike; return b && b.rest ? "repos après une grosse journée" : b && (isKey(b.t) || b.t === "grp" || b.t.startsWith("test")) ? b.w.title.split(" · ")[0].toLowerCase() : b && isLong(b.t) ? "sortie longue" : it.muscu && it.muscu.s === "legs" ? "jambes" : "grosse séance faite"; };
+  const near = TYPES[t].hard, free = d => !hard(d) && !(near && (hard(d - 1) || hard(d + 1)));
+  const rest = [0, 1, 2, 3, 4, 5, 6].filter(d => wk(d) >= from);
+  let days = rest.filter(free), loose = false;
+  if (!days.length) { days = rest.filter(d => !hard(d)); loose = days.length > 0; }
+  const hd = [0, 1, 2, 3, 4, 5, 6].filter(hard), avoid = hd.length ? `Jours durs de ta semaine : ${hd.map(d => `${DAYN[d].toLowerCase()} (${why(d)})`).join(", ")}${near ? " : la séance clé n'y va pas, ni la veille ni le lendemain." : " : la séance clé n'y va pas."}` : "";
+  // faite ?
+  const e = keyLog().find(x => x.w === ymd(mon)), runs = F.flatMap((f, d) => f.runs.map(a => ({ a, d }))).filter(x => x.a.mt >= 1200);
+  const lastRun = runs.length ? runs[runs.length - 1] : null;
+  return { mon: ymd(mon), t, k, dur, w, days: days.map(wk), loose, avoid, done: e ? { d: e.d, ok: e.ok } : null,
+    run: lastRun ? { d: wk(lastRun.d), label: `course de ${DAYN[lastRun.d].toLowerCase()}, ${nf(lastRun.a.km, 1)} km` } : null };
+}
+// séances clés de la semaine en cours et de la suivante (aperçu), déposées pour la montre
+function keyWeeks(Wc) {
+  if (!window.Seances || !Wc) return { cur: null, next: null };
+  const nextMon = addDays(Wc.mon, 7), Wn = PS.W && +PS.W.mon === +nextMon ? PS.W : withWorkouts(effective(nextMon, cfgFor(nextMon), ctxFor(nextMon, fitness(), readiness())));
+  return { cur: weekKey(Wc), next: weekKey(Wn) };
+}
+function offerWatch(KW) {
+  // activités pas encore chargées (ou fichier en échec) : rien n'est envoyé, sinon la Sheet recevrait « pas de séance clé » et le workflow la retirerait
+  if (!(S.all || []).length) return;
+  // « faite » ici = validée sur le site ; faite en suivant la séance de la montre, le workflow le voit lui-même (associatedActivityId)
+  try { Seances.offer(ymd(new Date()), [KW.cur, KW.next].filter(Boolean).map(x => ({ mon: x.mon, spec: x.w.spec, days: x.days, done: !!x.done }))); } catch (e) { console.error(e); }
+}
+function renderKey(Wc, KW) {
+  if (!window.Seances) return "";
   const L = ladderFor(S.all || [], Wc.mon), X = window.Reprise && Reprise._, RK = runKeyCtx(), pr = (window.Recup && Recup.data && Recup.data.profile) || {};
   const pal = {}, palDone = {}; ["rthr", "rhill", "rvo2"].forEach(t => { pal[t] = palFor(t, addDays(new Date(), 1)); palDone[t] = new Set(palLog().filter(x => x.t === t && x.ok).map(x => x.k)); });
-  const nk = L && X && X.nextKey ? X.nextKey(L.k) : null;
-  return Seances.cardHtml({ P: RK.P, next: K.filter(x => x.st === "plan"), pal, palDone, lt: pr.run && pr.run.lt, mode: Wc.runInfo && Wc.runInfo.mode,
-    reprise: L ? { k: L.k, light: L.light, key: L.key, nextKey: L.key ? null : nk } : null });
+  return Seances.cardHtml({ P: RK.P, key: KW.cur, next: KW.next, pal, palDone, lt: pr.run && pr.run.lt,
+    reprise: L ? { k: L.k, light: L.light, nextKey: X && X.nextKey ? X.nextKey(L.k) : null } : null });
 }
-// sans ouvrir le Plan (appelé par la Synthèse) : les séances de la fenêtre partent quand même vers la montre
+// sans ouvrir le Plan (appelé par la Synthèse) : la séance de la semaine part quand même vers la montre
 function watch() {
   if (!window.Seances || !store2.get("planSince")) return;
-  try { const cur = mondayOf(new Date()), Wc = withWorkouts(effective(cur, getCfg(), ctxFor(cur, fitness(), readiness()))); offerWatch(keyRuns(Wc)); } catch (e) { console.error(e); }
+  try { const cur = mondayOf(new Date()), Wc = withWorkouts(effective(cur, cfgFor(cur), ctxFor(cur, fitness(), readiness()))); offerWatch(keyWeeks(Wc)); } catch (e) { console.error(e); }
 }
 
 // ------------------------------------------------------------------ Navigation dans l'onglet
 // Sommaire collant : un clic fait défiler jusqu'à la carte, la puce de la carte à l'écran est mise en avant
-const SUM = [["pDay", "Aujourd'hui"], ["pWeek", "Semaine"], ["pPgram", "Paliers"], ["pRun", "Course"], ["pAvail", "Dispos"], ["pAna", "Analyses"]];
+const SUM = [["pDay", "Aujourd'hui"], ["pWeek", "Semaine"], ["pPgram", "Paliers"], ["pRun", "Course"], ["pAna", "Analyses"]];
 let spyObs = null;
 function spy() {
   const nav = document.querySelector("#plan .psum"); if (!nav) return;
   nav.querySelectorAll("[data-sum]").forEach(b => b.onclick = () => {
     const el = $(b.dataset.sum); if (!el) return;
-    if (b.dataset.sum === "pAvail") { const d = $("pAvailD"); if (d && !d.open) { d.open = true; PS.avail = true; } }
     el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   });
   if (spyObs) spyObs.disconnect();
@@ -1313,28 +1421,16 @@ function bind(c, prof) {
   box.querySelectorAll("[data-ovr]").forEach(s => s.onchange = () => { const date = s.closest(".dmod").dataset.date, it = PS.W.items[dayIndex(parseYmd(date), PS.W.mon)], f = s.dataset.ovr;
     ovRun(date, o => { o.run = { t: it.run.t, dur: it.run.dur, ...(Number.isInteger(it.run.k) && f !== "t" ? { k: it.run.k } : {}), [f]: f === "t" ? s.value : +s.value }; }); render(); });
   // séances clés course : fichier .fit (copie par câble sur la montre), d'un jour du Plan ou du palier en cours d'une échelle
-  box.querySelectorAll("[data-kfitd]").forEach(b => b.onclick = () => { const d = b.dataset.kfitd, it = [...PS.W.items, ...PS.Wc.items].find(y => ymd(y.date) === d && y.run && y.run.w.spec), x = it ? it.run.w : (PS.K || []).find(y => y.date === d);
+  box.querySelectorAll("[data-kfitd]").forEach(b => b.onclick = () => { const d = b.dataset.kfitd, it = [...PS.W.items, ...PS.Wc.items].find(y => ymd(y.date) === d && y.run && y.run.w.spec), x = it ? it.run.w : null;
     if (x) Seances.download(x.spec, d); });
+  box.querySelectorAll("[data-kfitw]").forEach(b => b.onclick = () => { const K = [PS.KW.cur, PS.KW.next].find(x => x && x.mon === b.dataset.kfitw); if (K) Seances.download(K.w.spec, K.mon); });
+  box.querySelectorAll("[data-kdone]").forEach(b => b.onclick = () => { const [w, d, ok] = b.dataset.kdone.split(":"), K = PS.KW.cur && PS.KW.cur.mon === w ? PS.KW.cur : null; if (!K) return;
+    setKeyLog(w, K.t, d, ok === "x" ? null : ok === "1"); render(); });
   box.querySelectorAll("[data-kfit]").forEach(b => b.onclick = () => { const [t, k] = b.dataset.kfit.split(":"), w = buildRun(t, Seances.fullMin(t, +k), Charge.params().runPace, { ...runKeyCtx(), k: +k }); if (w && w.spec) Seances.download(w.spec); });
   box.querySelectorAll("[data-ovrdel]").forEach(b => b.onclick = () => { const date = b.closest(".dmod").dataset.date; ovRun(date, o => { o.run = 0; }); delete PS.open[date + ":r"]; render(); });
   box.querySelectorAll("[data-ovrreset]").forEach(b => b.onclick = () => { ovRun(b.closest(".dmod").dataset.date, o => { delete o.run; }); render(); });
-  const ad = $("pAvailD"); if (ad) ad.ontoggle = () => { PS.avail = ad.open; };
   box.querySelectorAll("[data-past]").forEach(b => b.onclick = () => { PS.past = b.dataset.past === "1"; if (!PS.past) Object.keys(PS.open).forEach(k => { if (k < ymd(new Date())) delete PS.open[k]; }); render(); });
   const pa = box.querySelector(".pgall"); if (pa) pa.ontoggle = () => { PS.pgAll = pa.open; };
-  box.querySelectorAll(".avrow").forEach(r => r.onchange = e => { const i = +r.dataset.i, k = e.target.dataset.k; if (!k) return;
-    c.days[i][k] = k === "muscu" ? e.target.checked : k === "dur" || k === "runDur" ? +e.target.value : e.target.value;
-    if (k === "bike" && e.target.value === "any" && c.days[i].dur < 60) c.days[i].dur = 60;
-    if (k === "run" && e.target.value !== "none" && !c.days[i].runDur) c.days[i].runDur = 60;
-    saveCfg(c); setRc(c); PS.avail = true; render(); });
-  box.querySelectorAll("[data-g]").forEach(s => s.onchange = () => { c[s.dataset.g] = s.dataset.g === "runN" ? +s.value : s.value; saveCfg(c); setRc(c); PS.avail = true; render(); });
-  if ($("pHabits")) $("pHabits").onclick = () => { const sets = habitSets(); c.days.forEach((d, i) => { const s = sets.find(x => x.day === i); d.bike = s ? s.place : "none"; if (s) d.dur = s.dur; }); saveCfg(c); PS.avail = true; render(); };
-  if ($("pShare")) $("pShare").onclick = () => {
-    const data = { c, kg: store2.get("bwWeight"), age: store2.get("bwAge"), ftp: store2.get("planFtp") };
-    const code = btoa(unescape(encodeURIComponent(JSON.stringify(data)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const url = `${location.origin}${location.pathname}#plan=${code}`;
-    const show = () => { $("pShareOut").innerHTML = `<input class="shareout" readonly value="${esc(url)}" aria-label="Lien de tes réglages">`; $("pShareOut").firstChild.select(); };
-    if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast("Lien copié : ouvre-le sur ton autre appareil."), show); else show();
-  };
 }
 // Un lien #plan= vient de l'extérieur : tout est validé (type, liste, bornes) et le reste est ignoré ; rien d'autre n'est jamais enregistré
 const isNum = v => typeof v === "number" && isFinite(v);
@@ -1374,7 +1470,7 @@ function importLink() {
 function planItem(key) {
   const since = store2.get("planSince"); if (!since || key < since) return null;
   const d = parseYmd(key), mon = mondayOf(d), form = fitness(), ready = readiness();
-  return withWorkouts(effective(mon, getCfg(), ctxFor(mon, form, ready))).items[dayIndex(d, mon)] || null;
+  return withWorkouts(effective(mon, cfgFor(mon), ctxFor(mon, form, ready))).items[dayIndex(d, mon)] || null;
 }
 // séance muscu placée ce jour-là (pour l'entraîneur IA) : { s, label, st } ou null
 function muscuOn(key) { const it = planItem(key), m = it && it.muscu; return m && MUSCU[m.s] ? { s: m.s, label: MUSCU[m.s].l, st: m.st } : null; }
@@ -1402,8 +1498,11 @@ async function open() {
   if (!ok) return;
   render();
 }
-window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, watch, muscuOn, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, watch,
+  _auto: autoAvail, _cfgFor: cfgFor,
+  _key: { week: mon => weekKey(withWorkouts(effective(mon, cfgFor(mon), ctxFor(mon, fitness(), readiness())))), set: setKeyLog, log: keyLog }, muscuOn, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
+if (window.Seances) Seances.setTable(runTable);   // même tableau d'étapes que le détail d'une course
 migrateFtp();  // dès le chargement : la Synthèse et la charge lisent la même FTP que le Plan, même sans avoir ouvert le Plan
 if (importLink() && Nav.curTab() === "plan") dispatchEvent(new HashChangeEvent("hashchange"));
 document.addEventListener("velo:loaded", () => { if (Nav.curTab() === "plan") open(); });
