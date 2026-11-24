@@ -98,9 +98,6 @@ def _ok_step(s):
         return False
     if p is not None and not (isinstance(p, list) and len(p) == 2 and all(isinstance(x, int) and 150 <= x <= 600 for x in p) and p[0] <= p[1]):
         return False
-    h = s.get("h")   # cardio plafond des footings (bpm)
-    if h is not None and (p is not None or not (isinstance(h, list) and len(h) == 2 and all(isinstance(x, int) and not isinstance(x, bool) and 60 <= x <= 215 for x in h) and h[0] < h[1])):
-        return False
     return isinstance(s.get("n", ""), str) and len(s.get("n", "")) <= 40
 
 
@@ -150,9 +147,6 @@ def garmin_json(v):
             fast, slow = s["p"]
             st["targetType"] = {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "pace.zone", "displayOrder": 6}
             st["targetValueOne"], st["targetValueTwo"] = round(1000 / slow, 4), round(1000 / fast, 4)
-        elif s.get("h"):   # footing : fourchette de cardio en bpm
-            st["targetType"] = {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone", "displayOrder": 4}
-            st["targetValueOne"], st["targetValueTwo"] = float(s["h"][0]), float(s["h"][1])
         return {k: x for k, x in st.items() if x is not None}
 
     def rep(s):
@@ -163,7 +157,7 @@ def garmin_json(v):
                 "endConditionValue": float(s["rep"]), "workoutSteps": [ex(x) for x in s["steps"]]}
 
     steps = [rep(s) if "rep" in s else ex(s) for s in v["steps"]]
-    return {"workoutName": v["name"], "description": "Breizh Watts · séance course du Plan", "sportType": SPORT, "author": {},
+    return {"workoutName": v["name"], "description": "Breizh Watts · séance clé course", "sportType": SPORT, "author": {},
             "estimatedDurationInSecs": int(total(v["steps"])),
             "workoutSegments": [{"segmentOrder": 1, "sportType": SPORT, "workoutSteps": steps}]}
 

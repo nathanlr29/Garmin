@@ -604,26 +604,6 @@ class Montre(unittest.TestCase):
         self.assertEqual(ref["stepType"], mine["stepType"])
         self.assertEqual(ref["endCondition"], mine["endCondition"])
 
-    def test_footing_cardio_plafond(self):
-        v = SEANCES[3]   # footing 40 min : 5 min libres, puis cardio entre 110 et 150 bpm
-        self.assertTrue(mt.valid(v, v["date"]))
-        st = mt.garmin_json(v)["workoutSegments"][0]["workoutSteps"]
-        self.assertEqual(st[0]["targetType"]["workoutTargetTypeKey"], "no.target")
-        self.assertEqual(st[1]["targetType"]["workoutTargetTypeKey"], "heart.rate.zone")
-        self.assertEqual((st[1]["targetValueOne"], st[1]["targetValueTwo"]), (110.0, 150.0))
-        self.assertEqual(mt.garmin_json(v)["estimatedDurationInSecs"], 2400)
-        bad = {**v, "steps": [{"t": "interval", "s": 600, "p": [260, 270], "h": [110, 150]}]}
-        self.assertFalse(mt.valid(bad, v["date"]), "allure et cardio à la fois")
-        self.assertFalse(mt.valid({**v, "steps": [{"t": "interval", "s": 600, "p": None, "h": [150, 110]}]}, v["date"]), "fourchette à l'envers")
-        try:
-            from garminconnect.workout import CustomHeartRateTarget, RunningWorkout, create_interval_step
-        except Exception:
-            self.skipTest("garminconnect.workout (pydantic) absent")
-        RunningWorkout(**mt.garmin_json(v))
-        t = CustomHeartRateTarget(lower_limit=110, upper_limit=150)
-        self.assertEqual(st[1]["targetType"]["workoutTargetTypeId"], t.target_type)
-        self.assertEqual(st[1]["targetType"]["workoutTargetTypeKey"], t.target_type_key)
-
     def test_validation(self):
         v = dict(SEANCES[0])
         self.assertTrue(mt.valid(v, v["date"]))
@@ -634,7 +614,7 @@ class Montre(unittest.TestCase):
 
     def test_creation_mise_a_jour_retrait(self):
         today = "2026-11-24"
-        items = [{"id": "run:" + v["date"], "ts": 1, "v": v} for v in SEANCES[:3]] + [{"id": "run:2026-11-20", "ts": 1, "v": SEANCES[0]}]
+        items = [{"id": "run:" + v["date"], "ts": 1, "v": v} for v in SEANCES] + [{"id": "run:2026-11-20", "ts": 1, "v": SEANCES[0]}]
         api = _WatchApi()
         st = mt.sync_watch(api, items, {"v": 1, "w": {}}, today)
         self.assertEqual(sorted(st["w"]), ["2026-11-26", "2026-11-28", "2026-11-30"], "le passé n'est jamais créé")

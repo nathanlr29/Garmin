@@ -74,16 +74,9 @@ assert.equal(S.fileName(B("rthr", 40, { k: 1 }).spec, "2026-11-26"), "2026-11-26
 assert.equal(S.fileName(B("rhill", 40).spec), "Cotes-1-6x10.fit");
 // tests/fixtures/montre_seances.json (lu par tests/test_garmin.py) : même contenu et même empreinte que seances.js aujourd'hui
 const FX = JSON.parse(read("fixtures/montre_seances.json")), P10 = S.paces(S.source({ races: { "10k": 2615 } }));
-[["rthr", 40, 1], ["rvo2", 50, 2], ["rhill", 40, 0], ["rfoot", 40]].forEach(([t, d, k], i) => {
-  const v = { date: FX[i].date, ...(t === "rfoot" ? S.easy(t, d, 178) : S.build(t, d, { P: P10, k, wkKm: 40 }).spec) };
+[["rthr", 40, 1], ["rvo2", 50, 2], ["rhill", 40, 0]].forEach(([t, d, k], i) => {
+  const v = { date: FX[i].date, ...S.build(t, d, { P: P10, k, wkKm: 40 }).spec };
   assert.equal(JSON.stringify({ ...v, sig: S.sig(v) }), JSON.stringify(FX[i]), `fixture ${t} à jour (sinon : la régénérer)`); });
-
-// footing et sortie longue (24/11/2026) : durée du Plan, 5 min libres puis cardio plafond (84 % de la FC seuil course), jamais d'allure
-let e = S.easy("rfoot", 40, 178);
-assert.equal(e.name, "Footing 40'"); assert.equal(X.total(e.steps), 2400); assert.equal(e.steps[0].t, "warmup"); assert.equal(e.steps[0].h, undefined);
-assert.equal(JSON.stringify(e.steps[1].h), "[110,150]", "plafond 150 bpm pour un seuil à 178"); assert.equal(e.steps[1].p, null);
-assert.equal(S.easy("rlong", 60).name, "Sortie longue 60'"); assert.equal(S.easyCap(null), 150, "sans FC seuil : 150 bpm"); assert.equal(S.easyCap(300), 150, "valeur absurde ignorée");
-const ef = S.fit(e, Date.UTC(2026, 10, 24)); assert.equal(ctx.FitCourse._crc(ef.subarray(0, ef.length - 2)), ef[ef.length - 2] | ef[ef.length - 1] << 8);
 
 // ------------------------------------------------------------------ 5. Envoi vers la Sheet : seulement ce qui change, dans la fenêtre
 const today = "2026-11-24", v1 = { date: "2026-11-26", sig: "aaaa" }, v2 = { date: "2026-11-28", sig: "bbbb" };

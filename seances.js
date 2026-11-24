@@ -71,7 +71,7 @@ const LADDERS = {
 const NAME = { rthr: "Seuil", rvo2: "VO2max", rhill: "Côtes", rstrides: "Lignes droites", rtempo: "Allure semi" };
 const NMIN = { rthr: 2, rvo2: 3, rhill: 4 };                 // en dessous, la séance n'a plus de sens : on garde ce minimum
 const CAP = { rthr: [.10, 2.7], rvo2: [.08, 1.5] };          // km de qualité ≤ part des km de la semaine (Daniels), jamais sous le plancher (km)
-const KEY = new Set(["rstrides", "rtempo", "rthr", "rvo2", "rhill"]);   // séances structurées (footing et sortie longue vont aussi sur la montre : easy)
+const KEY = new Set(["rstrides", "rtempo", "rthr", "rvo2", "rhill"]);   // séances structurées : celles qui vont sur la montre
 const is3030 = s => s.on <= 30 && s.off === s.on;
 function stepL(t, k) {
   const s = LADDERS[t][k], set = s.sets ? `${s.sets} × ` : "";
@@ -166,23 +166,12 @@ function build(type, durMin, o = {}) {
   return { title, goal, steps: S, km: S.reduce((a, x) => a + x.km, 0), k, cut, spec: { v: 1, name, steps: spec } };
 }
 
-// ------------------------------------------------------------------ Footing et sortie longue sur la montre (demande du 24/11/2026)
-// La durée du Plan et un cardio plafond, pas d'allure (elle sonnerait à chaque côte) : 5 min libres pour laisser monter le cœur,
-// puis une alerte entre plafond − 40 et plafond. Plafond = 84 % de ta FC seuil course (178 → 150 bpm, le « sous 150 bpm » de la reprise).
-const EASY_HR = .84;
-const easyCap = hr => hr >= 120 && hr <= 215 ? Math.round(hr * EASY_HR) : 150;
-function easy(type, durMin, hr) {
-  const cap = easyCap(hr), T = Math.round(durMin * 60), warm = Math.min(300, Math.max(0, T - 300));
-  const steps = (warm ? [{ t: "warmup", s: warm, p: null, n: "Échauffement" }] : []).concat({ t: "interval", s: T - warm, p: null, h: [cap - 40, cap], n: `Sous ${cap} bpm` });
-  return { v: 1, name: `${type === "rlong" ? "Sortie longue" : "Footing"} ${durMin}'`, steps };
-}
-
 // ------------------------------------------------------------------ Montre : empreinte et fichier .fit
 // FNV-1a 32 bits du JSON de la séance (même calcul dans scripts/montre.py, sur json.dumps(separators=(",", ":"), ensure_ascii=False))
 function sig(spec) { const b = new TextEncoder().encode(JSON.stringify(spec)); let h = 0x811c9dc5; for (const x of b) { h ^= x; h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, "0"); }
 const total = steps => steps.reduce((a, x) => a + (x.rep ? x.rep * total(x.steps) : x.s), 0);
 // FIT « workout » (profil FIT : file_id type 5, workout, workout_step) ; aucun numéro de série ni identifiant d'appareil
-const DUR = { time: 0, open: 5, repeat: 6 }, TGT = { speed: 0, hr: 1, open: 2 }, INT = { warmup: 2, cooldown: 3, interval: 0, recovery: 4 };
+const DUR = { time: 0, open: 5, repeat: 6 }, TGT = { speed: 0, open: 2 }, INT = { warmup: 2, cooldown: 3, interval: 0, recovery: 4 };
 function fit(spec, created = Date.now()) {
   const F = window.FitCourse; if (!F || !F.writer) throw new Error("encodeur FIT absent");
   const w = F.writer(), flat = [];
@@ -194,8 +183,7 @@ function fit(spec, created = Date.now()) {
     if (x.repeat != null) { w.msg(3, 27, [[254, "uint16", i], [1, "enum", DUR.repeat], [2, "uint32", x.repeat], [4, "uint32", x.times]]); return; }
     const mps = p => Math.round(1e6 / p);   // s/km → mm/s
     w.msg(2, 27, [[254, "uint16", i], [0, "string", (x.n || "").slice(0, 15), 16], [1, "enum", x.s ? DUR.time : DUR.open], [2, "uint32", x.s ? x.s * 1000 : 0],
-      // cardio personnalisé : bpm + 100 (convention FIT : 0 à 100 = % de la FC max)
-      [3, "enum", x.p ? TGT.speed : x.h ? TGT.hr : TGT.open], [4, "uint32", 0], [5, "uint32", x.p ? mps(x.p[1]) : x.h ? x.h[0] + 100 : 0], [6, "uint32", x.p ? mps(x.p[0]) : x.h ? x.h[1] + 100 : 0], [7, "enum", INT[x.t] ?? 0]]);
+      [3, "enum", x.p ? TGT.speed : TGT.open], [4, "uint32", 0], [5, "uint32", x.p ? mps(x.p[1]) : 0], [6, "uint32", x.p ? mps(x.p[0]) : 0], [7, "enum", INT[x.t] ?? 0]]);
   });
   return w.done();
 }
@@ -288,7 +276,7 @@ function cardHtml(o) {
     </div></details></section>`;
 }
 
-window.Seances = { LADDERS, NAME, KEY, stepL, fullMin, build, easy, easyCap, source, paces, fit, fileName, download, sig, offer, status, loadState, cardHtml,
+window.Seances = { LADDERS, NAME, KEY, stepL, fullMin, build, source, paces, fit, fileName, download, sig, offer, status, loadState, cardHtml,
   _: { vdot, raceTime, paceAt, velOf, PCT, TOL, CAP, NMIN, total, diff, inWin, answer, fmtPace, is3030, srv: () => srv(), WINDOW } };
 if (window.Sync) register(); else addEventListener("DOMContentLoaded", register);
 })();
