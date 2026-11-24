@@ -358,8 +358,13 @@ function ladderFor(acts, mon) {
   const X = window.Reprise && window.Reprise._; if (!X) return null;
   try {
     if (ymd(mon) < X.START) return null;
-    const P = X.progress(acts, mon), last = X.LADDER.length - 1;
+    // semaine à venir (aperçu) : la semaine en cours n'est pas finie, on la compte comme réussie (le palier suivant), sinon l'aperçu
+    // la jugerait ratée et la séance clé de lundi n'apparaîtrait (ni sur la montre) qu'une fois la semaine passée. Lundi, tout est relu.
+    const cur = mondayOf(new Date()), base = +mon > +cur ? cur : mon, P = X.progress(acts, base), last = X.LADDER.length - 1;
     if (P.hist.some(h => h.k === last && h.res === "up")) return null;   // dernier palier réussi : programme fini, retour au mode normal
+    let k = P.k;
+    for (let w = new Date(Math.max(+base, +parseYmd(X.START))); w < mon; w = addDays(w, 7)) k = Math.min(k + 1, last);
+    P.k = k;
     const cap = X.longCap(acts, Math.min(Date.now(), mon.getTime()));
     return { k: P.k, of: X.LADDER.length, light: X.LIGHT.has(P.k), split: P.k < X.SPLIT_FROM, durs: X.LADDER[P.k].map(m => Math.min(m, cap)).sort((a, b) => b - a),
       ...(X.KEYS && X.KEYS[P.k] && TYPES[X.KEYS[P.k]] ? { key: X.KEYS[P.k], keyDur: X.KEY_DUR || 40 } : {}) };

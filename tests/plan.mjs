@@ -478,6 +478,14 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   vm.runInContext(read("../reprise.js"), h.ctx);
   assert.equal(RUN_(h).ctx(new Date(2026, 9, 26)).ladder, null, "avant le début de la reprise");
   const lad = RUN_(h).ctx(new Date(2026, 10, 2)).ladder; assert.equal(lad.k, 0); same(lad.durs, [25, 25, 25]); assert.equal(lad.split, true);
+  // aperçu d'une semaine à venir : les semaines pas encore finies comptent comme réussies (relu chaque lundi)
+  assert.equal(RUN_(h).ctx(new Date(2026, 10, 9)).ladder.k, 1, "horloge au 12/10 : 2e semaine de la reprise = palier 2");
+  { const t0 = h.clock.t; h.clock.t = new Date(2026, 10, 4, 12).getTime();
+    assert.equal(RUN_(h).ctx(new Date(2026, 10, 2)).ladder.k, 0, "semaine en cours : palier en cours");
+    assert.equal(RUN_(h).ctx(new Date(2026, 10, 9)).ladder.k, 1, "semaine suivante, semaine en cours inachevée (0 min) : palier suivant, pas un palier en arrière");
+    h.clock.t = new Date(2026, 10, 10, 12).getTime();
+    assert.equal(RUN_(h).ctx(new Date(2026, 10, 9)).ladder.k, 0, "une fois la semaine passée et ratée : relue, on reste au palier 1");
+    h.clock.t = t0; }
   const r2 = RUN_(load({ acts: [] })).ctx(new Date(2026, 10, 2)); assert.equal(r2.resume, false); assert.equal(r2.advice, null); assert.equal(r2.pace, 300, "allure seuil de repli");
   function RUN_(x) { return x.Plan._run; }
   // plannedFor : course seule, vélo seul, les deux

@@ -208,6 +208,9 @@ def plan(items, state, today):
 def sync_watch(api, items, state, today):
     """Applique le plan ; l'état suit chaque opération réussie (une erreur au milieu ne fait jamais créer deux fois la même séance)."""
     create, drop, bad = plan(items, state, today)
+    end = (date.fromisoformat(today) + timedelta(days=AHEAD)).isoformat()
+    near = sum(1 for it in items if today <= str(it.get("id", ""))[4:] < end and it.get("v"))
+    log(f"{len(items)} élément(s) dans la synchro, {near} séance(s) du {today} au {end} ; {len(create)} à créer, {len(drop)} à retirer")
     for d in bad:
         log(f"séance du {d} illisible : ignorée")
     W, err = dict(state.get("w", {})), None
@@ -232,6 +235,35 @@ def sync_watch(api, items, state, today):
     return out
 
 
+# Essai réel, une fois (puis une fois par jour tant qu'il échoue) : une séance d'essai est créée, mise au calendrier dans 60 jours,
+# retirée du calendrier puis supprimée. Vérifie le format et les droits côté Garmin avant la première vraie séance, sans rien laisser.
+PROBE = {"v": 1, "name": "Breizh Watts essai", "steps": [
+    {"t": "warmup", "s": 600, "p": None, "n": "Échauffement"},
+    {"rep": 2, "steps": [{"t": "interval", "s": 240, "p": [264, 272], "n": "Seuil 4:28"}, {"t": "recovery", "s": 60, "p": None, "n": "Trot"}]},
+    {"t": "cooldown", "s": 300, "p": None, "n": "Retour au calme"}]}
+
+
+def probe(api, today):
+    wid = sid = None
+    try:
+        r = api.upload_workout(garmin_json(PROBE))
+        wid = r.get("workoutId") if isinstance(r, dict) else None
+        if not isinstance(wid, int):
+            raise RuntimeError("pas d'identifiant de séance dans la réponse de Garmin")
+        sr = api.schedule_workout(wid, (date.fromisoformat(today) + timedelta(days=60)).isoformat())
+        sid = _sched_id(sr)
+        log(f"essai : séance créée et mise au calendrier (champs de la réponse : {sorted(sr) if isinstance(sr, dict) else type(sr).__name__})")
+        out = {"ok": True, "d": today}
+    except Exception as e:
+        msg = str(e)[:300]
+        log(f"essai refusé par Garmin : {type(e).__name__} : {msg}")
+        out = {"ok": False, "d": today, "err": type(e).__name__}
+    finally:
+        if wid:
+            _drop(api, {"id": wid, "sid": sid})
+    return out
+
+
 def run(api, today=None, env=os.environ, post=requests.post):
     today = today or datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
     old = json.loads(STATE.read_text()) if STATE.exists() else {"v": 1, "w": {}}
@@ -243,6 +275,9 @@ def run(api, today=None, env=os.environ, post=requests.post):
         if env.get("SYNC_LINK"):
             log(f"secret SYNC_LINK illisible ({len(env['SYNC_LINK'].strip())} caractères) : {why[0] if why else 'raison inconnue'}")
     else:
+        pr = st.get("probe") or {}
+        if api is not None and not pr.get("ok") and pr.get("d") != today:
+            st["probe"] = probe(api, today)
         try:
             new = sync_watch(api, read_collection(*cfg, post=post), {**st, "v": 1}, today)
         except Exception as e:

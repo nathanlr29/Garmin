@@ -604,6 +604,16 @@ class Montre(unittest.TestCase):
         self.assertEqual(ref["stepType"], mine["stepType"])
         self.assertEqual(ref["endCondition"], mine["endCondition"])
 
+    def test_essai_reel_une_fois(self):
+        api = _WatchApi()
+        r = mt.probe(api, "2026-11-24")
+        self.assertEqual(r, {"ok": True, "d": "2026-11-24"})
+        self.assertEqual([c[0] for c in api.calls], ["up", "sched", "unsched", "del"], "rien ne reste chez Garmin")
+        self.assertEqual(api.calls[1][2], "2027-01-23")
+        api = _WatchApi(fail_on="upload")
+        self.assertEqual(mt.probe(api, "2026-11-24"), {"ok": False, "d": "2026-11-24", "err": "RuntimeError"})
+        self.assertTrue(mt.valid({**mt.PROBE, "date": "2026-11-24"}, "2026-11-24"), "l'essai a le format des vraies séances")
+
     def test_validation(self):
         v = dict(SEANCES[0])
         self.assertTrue(mt.valid(v, v["date"]))
@@ -676,9 +686,14 @@ class Montre(unittest.TestCase):
                 def post(url, **kw):
                     seen.update(url=url, body=json.loads(kw["data"]))
                     return R()
-                r = mt.run(_WatchApi(), today="2026-11-24", env={"SYNC_LINK": link}, post=post)
+                api = _WatchApi()
+                r = mt.run(api, today="2026-11-24", env={"SYNC_LINK": link}, post=post)
                 self.assertEqual(seen["body"], {"k": "k" * 20, "op": "sync", "c": "montre", "items": []})
                 self.assertEqual(list(r["w"]), [SEANCES[0]["date"]])
+                self.assertEqual(r["probe"], {"ok": True, "d": "2026-11-24"})
+                api.calls.clear()
+                mt.run(api, today="2026-11-25", env={"SYNC_LINK": link}, post=post)
+                self.assertFalse(any(c[1] == "Breizh Watts essai" for c in api.calls if c[0] == "up"), "essai réussi : jamais refait")
                 self.assertNotIn("k" * 20, mt.STATE.read_text(), "la clé n'est jamais écrite")
             finally:
                 mt.STATE = old
