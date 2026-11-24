@@ -472,7 +472,10 @@ function buildRun(type, durMin, thr, o = {}) {
   let title = TYPES[type].l, goal = "";
   if (type === "rlong") { warm(10); one(T - M(15), "Sortie longue", RUN_V.long, RPE_RUN.long); cool(5); title = `Sortie longue ${fmtMin(durMin)}`; goal = "La plus longue sortie de la semaine, à allure très facile : endurance, tendons, habitude de durer. Emporte à boire au-delà de 90 min."; }
   else { warm(wu); body(wu, "Footing", RUN_V.foot, RPE_RUN.easy); cool(wu); title = `Footing ${fmtMin(durMin)}`; goal = "Footing facile : une allure où tu peux parler. Il construit l'endurance sans fatiguer ; mieux vaut trop lent que trop vite."; }
-  return { title, goal, steps: S, tss: runTss(type, durMin), km: S.reduce((a, s) => a + s.km, 0), thr };
+  // sur la montre : la durée et un cardio plafond (seances.js, easy), pas d'allure
+  const spec = window.Seances ? Seances.easy(type, durMin, o.hr) : null;
+  if (spec) goal += ` Sur la montre : alerte si le cardio passe au-dessus de ${Seances.easyCap(o.hr)} bpm.`;
+  return { title, goal, steps: S, tss: runTss(type, durMin), km: S.reduce((a, s) => a + s.km, 0), thr, ...(spec ? { spec } : {}) };
 }
 
 // ------------------------------------------------------------------ Semaine réelle : ce qui a été fait, et les réajustements
@@ -1176,7 +1179,7 @@ function render() {
   spy();
 }
 // ------------------------------------------------------------------ Séances clés course : liste des 8 prochains jours, carte, envoi vers la montre
-// séances clés (seances.js) prévues ou faites d'aujourd'hui à J+7, semaine en cours et suivante (aperçu) : [{ date, t, title, spec, pace, when, whenShort }]
+// courses (séances clés, footings et sorties longues : toutes ont une version montre) prévues ou faites d'aujourd'hui à J+7, semaine en cours et suivante (aperçu) : [{ date, t, title, spec, pace, when, whenShort }]
 function keyRuns(Wc) {
   if (!window.Seances || !Wc) return [];
   const t0 = ymd(new Date()), nextMon = addDays(Wc.mon, 7);
@@ -1195,7 +1198,7 @@ function renderKey(Wc, K) {
   const L = ladderFor(S.all || [], Wc.mon), X = window.Reprise && Reprise._, RK = runKeyCtx(), pr = (window.Recup && Recup.data && Recup.data.profile) || {};
   const pal = {}, palDone = {}; ["rthr", "rhill", "rvo2"].forEach(t => { pal[t] = palFor(t, addDays(new Date(), 1)); palDone[t] = new Set(palLog().filter(x => x.t === t && x.ok).map(x => x.k)); });
   const nk = L && X && X.nextKey ? X.nextKey(L.k) : null;
-  return Seances.cardHtml({ P: RK.P, next: K.filter(x => x.st === "plan"), pal, palDone, lt: pr.run && pr.run.lt, mode: Wc.runInfo && Wc.runInfo.mode,
+  return Seances.cardHtml({ P: RK.P, next: K.filter(x => x.st === "plan" && Seances.KEY.has(x.t)), pal, palDone, lt: pr.run && pr.run.lt, mode: Wc.runInfo && Wc.runInfo.mode,
     reprise: L ? { k: L.k, light: L.light, key: L.key, nextKey: L.key ? null : nk } : null });
 }
 // sans ouvrir le Plan (appelé par la Synthèse) : les séances de la fenêtre partent quand même vers la montre

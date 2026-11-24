@@ -141,5 +141,29 @@
    }
   ],
   "sig": "6b47c1f9"
+ },
+ {
+  "date": "2026-12-01",
+  "v": 1,
+  "name": "Footing 40'",
+  "steps": [
+   {
+    "t": "warmup",
+    "s": 300,
+    "p": null,
+    "n": "Échauffement"
+   },
+   {
+    "t": "interval",
+    "s": 2100,
+    "p": null,
+    "h": [
+     110,
+     150
+    ],
+    "n": "Sous 150 bpm"
+   }
+  ],
+  "sig": "579ec933"
  }
 ]
