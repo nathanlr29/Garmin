@@ -33,7 +33,7 @@ const paceAt = (V, f) => 60000 / velOf(f * V);                                  
 function raceTime(V, m) { let lo = m / 600 * 60, hi = m / 80 * 60; for (let i = 0; i < 60; i++) { const t = (lo + hi) / 2; if (vdot(m, t) > V) lo = t; else hi = t; } return (lo + hi) / 2; }
 // parts de la VDOT (tables de Daniels) : seuil 88 %, intervalles « I » 97,5 %, vitesse à VO2max 100 %, footing 63 à 72 %
 const PCT = { E: [.72, .63], T: .88, I: .975, VV: 1 };
-const TOL = { T: 4, I: 4, VV: 5, HM: 5 };   // fourchette d'allure envoyée à la montre (± s/km)
+const TOL = { T: 6, I: 6, VV: 8, HM: 8 };   // fourchette d'allure envoyée à la montre (± s/km) : le GPS bouge de 5 à 10 s/km, ±4 faisait biper sans arrêt
 const OK_RACE = { "10k": [1500, 4800], "5k": [720, 2400] };
 const PACE_OK = [180, 480];
 
@@ -205,7 +205,9 @@ const srv = () => ls.get(K_SRV, null);   // { lundi: empreinte | null } d'après
 const fp = v => v ? JSON.stringify([v.sig, v.days, !!v.done]) : null;
 const ymdOf = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 // semaine encore utile : son dimanche n'est pas passé et son lundi est dans les 8 jours
-function inWin(mon, today) { const m = Date.parse(mon + "T12:00:00"), t = Date.parse(today + "T12:00:00"); return m + 6 * DAY >= t && m < t + 8 * DAY; }
+// en dates du calendrier (AAAA-MM-JJ) : un calcul en millisecondes perdait une heure le dimanche du passage à l'heure d'hiver
+const addD = (s, n) => { const [y, m, d] = s.split("-").map(Number); return ymdOf(new Date(y, m - 1, d + n, 12)); };
+function inWin(mon, today) { return addD(mon, 6) >= today && mon < addD(today, 8); }
 // éléments à envoyer : ce qui diffère de la Sheet pour les semaines utiles (le passé ne bouge jamais)
 function diff(wanted, server, today, now = Date.now()) {
   if (!wanted || !server) return [];
@@ -234,7 +236,7 @@ const dLong = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekd
 // où en est la séance de la semaine côté Garmin : { k: "ok" | "done" | "wait" | "nocfg" | "nolink" | "err" | "load", txt, date? }
 function status(mon, spec) {
   const S = state, got = S && S.w && S.w[mon];
-  if (got && got.done) return { k: "done", txt: `Faite en suivant la séance de la montre${got.date ? ` (${dLong(got.date)})` : ""}.`, date: got.date };
+  if (got && got.done) return { k: "done", txt: got.site ? "Validée sur le site : retirée de ta montre." : `Faite en suivant la séance de la montre${got.date ? ` (${dLong(got.date)})` : ""}.`, date: got.date };
   if (got && got.s === sig(spec) && got.date) return { k: "ok", txt: `Sur ta montre comme séance du jour, ${dLong(got.date)} : si tu ne la fais pas ce jour-là, elle passe au jour conseillé suivant.`, date: got.date };
   if (!window.Sync || !Sync.configured()) return { k: "nocfg", txt: "Envoi automatique arrêté : la synchro n'est pas configurée sur cet appareil (réglages de la carte Chaîne)." };
   if (!S) return { k: "load", txt: "…" };
@@ -251,6 +253,8 @@ const dayName = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { wee
 function answer(o) {
   const K = o.key;
   if (K && K.done) return `Séance clé de la semaine faite ✓ : ${K.w.title}${K.done.ok === true ? ", réussie" : K.done.ok === false ? ", à refaire" : ""}.`;
+  const g = K && !K.done && state && state.w && state.w[K.mon];
+  if (g && g.done && !g.site) return `Séance clé de la semaine faite ✓ en suivant ta montre${g.date ? ` (${dLong(g.date)})` : ""} : ${K.w.title}. Dis si elle est réussie, pour passer au palier suivant.`;
   if (K) { const main = K.w.steps.find(x => x.n && x.pace), pace = main ? ` à ${fmtPace(main.pace)} /km` : "";
     if (!K.days.length) return `Séance clé de la semaine : ${K.w.title}${pace}. Plus de jour idéal d'ici dimanche (vélo dur, sortie longue ou jambes à côté) : fais-la seulement si tu te sens frais, sinon laisse-la.`;
     return `Séance clé de la semaine : ${K.w.title}${pace}, le jour qui t'arrange : ${K.days.length >= 5 ? "n'importe quel jour" : list(K.days.map(dayName))}${K.loose ? " (sans jour idéal, choisis le moins chargé)" : ""}.`; }

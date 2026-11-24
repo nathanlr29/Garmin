@@ -38,6 +38,19 @@ def log(msg):
     print(f"Montre : {msg}")
 
 
+def why(x):
+    """Erreur → texte sûr pour le journal public : type et code HTTP seulement (le message d'une erreur réseau contient l'adresse du
+    script de synchro, qui ne doit jamais être publiée)."""
+    code = getattr(getattr(x, "response", None), "status_code", None) or getattr(x, "status_code", None)
+    return f"{type(x).__name__}{f' (HTTP {code})' if isinstance(code, int) else ''}"
+
+
+def gone(x):
+    """Garmin répond « introuvable » (séance retirée à la main) : seul cas où l'on oublie ce qu'on avait mis au calendrier."""
+    code = getattr(getattr(x, "response", None), "status_code", None) or getattr(x, "status_code", None)
+    return code == 404 or type(x).__name__ == "GarminConnectNotFoundError" or bool(re.search(r"\b404\b", str(x)))
+
+
 # ------------------------------------------------------------------ Lecture de la synchro
 def parse_link(raw, why=None):
     """Lien « …#sync=<base64> » (ou le code seul) → (url, clé), None si illisible ; why (liste) reçoit la raison, sans rien du secret.
@@ -233,22 +246,28 @@ def sync_watch(api, items, state, today):
             if e and not e.get("done") and e.get("sid") and e.get("date") and e["date"] <= today:
                 try:
                     r = api.get_scheduled_workout_by_id(e["sid"])
-                except Exception as x:                      # retirée à la main du calendrier Garmin : on la remettra
-                    log(f"get_scheduled_workout_by_id {e['sid']} : {type(x).__name__}")
-                    r, e["sid"], e["date"] = None, None, None
+                except Exception as x:
+                    log(f"get_scheduled_workout_by_id {e['sid']} : {why(x)}")
+                    if not gone(x):                         # panne passagère : on ne touche à rien cette semaine (sinon doublon)
+                        continue
+                    r, e["sid"], e["date"] = None, None, None   # retirée à la main du calendrier Garmin : on la remettra
                 act = r.get("associatedActivityId") if isinstance(r, dict) else None
                 if act:
                     e["done"] = act if isinstance(act, int) else True
                     acts.append(f"{mon} faite le {e['date']} (suivie sur la montre)")
+            v = want[mon]
+            if e and e.get("site") and v is not None and not v.get("done"):   # validation annulée sur le site : elle revient
+                W.pop(mon)
+                e = None
+                acts.append(f"{mon} validation annulée sur le site")
             if e and e.get("done"):
                 continue
-            v = want[mon]
             if v is None or v.get("done"):                  # plus de séance clé, ou validée sur le site sans la montre
                 if e:
                     _drop(api, e)
                 W.pop(mon, None)
                 if v is not None:
-                    W[mon] = {"s": v["sig"], "done": True}
+                    W[mon] = {"s": v["sig"], "done": True, "site": True}
                 if e or v is not None:
                     acts.append(f"{mon} {'validée sur le site' if v else 'retirée'}")
                 continue
@@ -278,7 +297,7 @@ def sync_watch(api, items, state, today):
                     e["sid"], e["date"] = _sched_id(api.schedule_workout(e["id"], target)), target
                     acts.append(f"{mon} séance du jour le {target}")
     except Exception as x:
-        log(f"erreur {type(x).__name__} : {x}")
+        log(f"erreur {why(x)}")
         err = type(x).__name__
     log(f"{len(items)} élément(s) dans la synchro, {sum(1 for v in want.values() if v)} séance(s) clé(s) ; " + ("; ".join(acts) if acts else "rien à changer"))
     out = {**state, "cfg": True, "w": dict(sorted(W.items()))}
@@ -308,8 +327,7 @@ def probe(api, today):
         log(f"essai : séance créée et mise au calendrier (champs de la réponse : {sorted(sr) if isinstance(sr, dict) else type(sr).__name__})")
         out = {"ok": True, "d": today}
     except Exception as e:
-        msg = str(e)[:300]
-        log(f"essai refusé par Garmin : {type(e).__name__} : {msg}")
+        log(f"essai refusé par Garmin : {why(e)}")
         out = {"ok": False, "d": today, "err": type(e).__name__}
     finally:
         if wid:
@@ -334,7 +352,7 @@ def run(api, today=None, env=os.environ, post=requests.post):
         try:
             new = sync_watch(api, read_collection(*cfg, post=post), {**st, "v": 1}, today)
         except Exception as e:
-            log(f"erreur {type(e).__name__} : {e}")
+            log(f"erreur {why(e)}")
             new = {**st, "v": 1, "cfg": True, "err": type(e).__name__}
     if {k: x for k, x in new.items() if k != "at"} != {k: x for k, x in old.items() if k != "at"}:
         new["at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")

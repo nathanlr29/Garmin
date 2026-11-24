@@ -49,8 +49,8 @@ for (const t of ["rthr", "rvo2", "rhill", "rstrides", "rtempo"]) for (const d of
 }
 let w = B("rthr", 40, { k: 1 });
 assert.equal(w.title, "Seuil #2 · 4 × 4'"); assert.equal(w.cut, null);
-const rep = w.steps.find(s => s.n); assert.equal(rep.pace, P.T); assert.equal(rep.plo, P.T - 4); assert.equal(rep.phi, P.T + 4);
-assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [P.T - 4, P.T + 4], "fourchette envoyée à la montre");
+const rep = w.steps.find(s => s.n); assert.equal(rep.pace, P.T); assert.equal(rep.plo, P.T - 6); assert.equal(rep.phi, P.T + 6);
+assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [P.T - 6, P.T + 6], "fourchette envoyée à la montre");
 // règle de Daniels : 25 km par semaine → 2,7 km au seuil au plus (plancher) → 3 × 4' au lieu de 4 × 4'
 w = B("rthr", 40, { k: 1, wkKm: 25 }); assert.equal(w.title, "Seuil #2 · 3 × 4'"); assert.match(w.cut, /limité à 10 % de tes km .*3 répétitions au lieu de 4/);
 w = B("rthr", 40, { k: 1, wkKm: 40 }); assert.equal(w.title, "Seuil #2 · 4 × 4'", "40 km : palier complet");
@@ -89,6 +89,7 @@ d = X.diff({}, { "2026-11-23": X.fp(cur) }, today, 5); assert.equal(JSON.stringi
 assert.equal(X.diff({ "2026-11-23": wv("2026-11-23", ["2026-11-27"]) }, { "2026-11-23": X.fp(cur) }, today).length, 1, "jours conseillés changés : renvoyée");
 assert.equal(X.diff({ "2026-11-23": wv("2026-11-23", cur.days, true) }, { "2026-11-23": X.fp(cur) }, today).length, 1, "faite : renvoyée (le workflow la fige)");
 assert.equal(X.diff({ "2026-11-23": cur }, null, today).length, 0, "Sheet jamais lue sur cet appareil : on attend");
+assert.ok(X.inWin("2027-10-25", "2027-10-31"), "dimanche du passage à l'heure d'hiver : la semaine est encore utile");
 assert.ok(X.inWin("2026-11-23", today) && X.inWin("2026-11-30", today) && !X.inWin("2026-12-07", "2026-11-24") && !X.inWin("2026-11-16", today));
 assert.equal(cur.sig, S.sig(spec1), "l'empreinte ne porte que sur la séance : changer de jour ne recrée pas la séance chez Garmin");
 
@@ -101,6 +102,9 @@ ctx.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ v: 1
 await S.loadState();
 assert.equal(S.status("2026-11-23", spec).k, "ok"); assert.match(S.status("2026-11-23", spec).txt, /mercredi 25 novembre/);
 assert.equal(S.status("2026-11-30", spec).k, "wait"); assert.equal(S.status("2026-11-16", spec).k, "done");
+{ const w16 = { mon: "2026-11-16", w: B("rthr", 40, { k: 1 }), days: [], done: null };
+  assert.match(X.answer({ key: w16 }), /faite ✓ en suivant ta montre \(mercredi 18 novembre\).*Dis si elle est réussie/, "faite sur la montre, sans validation sur le site");
+  assert.match(X.answer({ key: { ...w16, done: { d: "2026-11-18", ok: true } } }), /faite ✓ : .*réussie/); }
 const W = B("rthr", 40, { k: 1 }), key = { mon: "2026-11-23", t: "rthr", w: W, days: ["2026-11-25", "2026-11-27"], loose: false, avoid: "Jours durs de ta semaine : jeudi (seuil).", done: null, run: { d: "2026-11-23", label: "course de lundi, 6,1 km" } };
 const card = o => S.cardHtml({ P, key, next: null, pal: { rthr: 1, rhill: 0, rvo2: 0 }, palDone: { rthr: new Set([0]) }, lt: { pace: 252 }, reprise: null, ...o });
 let html = card({});

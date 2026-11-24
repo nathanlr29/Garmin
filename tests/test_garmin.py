@@ -139,6 +139,15 @@ class Series(unittest.TestCase):
             self.assertEqual(rc.read_vo2_run(empty), [])
 
 
+    def test_vo2_velo_sans_melange(self):
+        mm = [{"generic": {"calendarDate": "2026-03-01", "vo2MaxPreciseValue": 57.3}},
+              {"generic": {"calendarDate": "2026-03-10", "vo2MaxPreciseValue": 57.5}, "cycling": {"calendarDate": "2026-03-10", "vo2MaxPreciseValue": 59.0}},
+              {"generic": {"calendarDate": "2026-11-22", "vo2MaxPreciseValue": 58.0}},
+              {"cycling": {"calendarDate": "2026-11-21", "vo2MaxValue": 61}}]
+        self.assertEqual(rc.read_vo2_bike(mm), [("2026-03-01", 57.3), ("2026-03-10", 59.0), ("2026-11-21", 61.0)], "course seulement avant le premier vélo")
+        self.assertEqual(rc.read_vo2_bike([mm[0]]), [("2026-03-01", 57.3)], "sans vélo : la valeur générique")
+        self.assertEqual(rc.read_vo2_bike(None), [])
+
 # ---------------------------------------------------------------- fetch_run_profile : appels indépendants
 class FakeApi:
     def __init__(self, **resp):
@@ -664,7 +673,12 @@ class Montre(unittest.TestCase):
         self.assertNotEqual(st2["w"][mon]["id"], wid)
         # validée sur le site sans la montre : retirée du calendrier et de la bibliothèque, marquée faite
         st3 = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"], done=True)], st2, "2026-11-24")
-        self.assertEqual(st3["w"][mon], {"s": SEANCES[1]["sig"], "done": True})
+        self.assertEqual(st3["w"][mon], {"s": SEANCES[1]["sig"], "done": True, "site": True})
+        # validation annulée sur le site : elle revient sur la montre
+        st3b = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"])], st3, "2026-11-24")
+        self.assertEqual(st3b["w"][mon]["date"], "2026-11-25")
+        self.assertNotIn("done", st3b["w"][mon])
+        st3 = mt.sync_watch(api, [_wk(1, mon, ["2026-11-25"], done=True)], st3b, "2026-11-24")
         # semaine suivante sans séance clé (null) : rien créé ; plus de jour conseillé : rien créé
         st4 = mt.sync_watch(api, [{"id": "key:2026-11-30", "v": None}, _wk(0, "2026-12-07", [])], st3, "2026-11-24")
         self.assertNotIn("2026-11-30", st4["w"])
@@ -686,6 +700,42 @@ class Montre(unittest.TestCase):
         self.assertEqual(st["w"], {})
         st2 = mt.sync_watch(_WatchApi(), [_wk(0, "2026-11-23", ["2026-11-25"])], st, "2026-11-24")
         self.assertNotIn("err", st2, "réussite : l'erreur disparaît")
+
+    def test_panne_passagere_pas_de_doublon(self):
+        api, mon = _WatchApi(), "2026-11-23"
+        items = [_wk(0, mon, ["2026-11-25", "2026-11-27"])]
+        st = mt.sync_watch(api, items, {"v": 1, "w": {}}, "2026-11-24")
+
+        def panne(sid):
+            raise RuntimeError("Connection reset")
+        api.get_scheduled_workout_by_id = panne
+        api.calls.clear()
+        st2 = mt.sync_watch(api, items, st, "2026-11-26")
+        self.assertEqual(st2["w"][mon], st["w"][mon], "panne : rien ne change")
+        self.assertEqual(api.calls, [], "ni création ni mise au calendrier")
+
+        class NotFound(Exception):
+            status_code = 404
+
+        def introuvable(sid):
+            raise NotFound("introuvable")
+        api.get_scheduled_workout_by_id = introuvable
+        st3 = mt.sync_watch(api, items, st, "2026-11-26")
+        self.assertEqual(st3["w"][mon]["id"], st["w"][mon]["id"], "même séance, pas de doublon dans la bibliothèque")
+        self.assertEqual(st3["w"][mon]["date"], "2026-11-27", "retirée à la main : remise au calendrier")
+
+    def test_journal_sans_adresse(self):
+        import io
+        import contextlib
+        url = "https://script.google.com/macros/s/SECRET123/exec"
+
+        class E(Exception):
+            pass
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mt.log("erreur " + mt.why(E(f"Max retries exceeded with url: {url}")))
+        self.assertNotIn("SECRET123", out.getvalue())
+        self.assertIn("E", out.getvalue())
 
     def test_essai_reel_une_fois(self):
         api = _WatchApi()

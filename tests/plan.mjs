@@ -510,6 +510,25 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   // petite sortie la veille : rien
   const h2 = load({ acts: [{ ...big, mt: 2 * 3600, np: 150, w: 140 }] }); h2.clock.t = h.clock.t;
   assert.ok(!h2.Plan._eff(mon, CFGS.six, ctx).changes.some(x => /^big-/.test(x.id || "")), "2 h tranquilles la veille : pas de repos imposé");
+  // scénario de la relecture du 24/11/2026 : séance clé lundi, 45 min faciles faites lundi soir → le repos reste, la clé reste déplacée (une fois)
+  const hk = load({ acts: [big] }); hk.store.set("planOv:2026-11-02", JSON.stringify({ 0: { t: "vo2r" } }));
+  hk.clock.t = new Date(2026, 10, 2, 8, 0, 0).getTime();
+  const K1 = hk.Plan._eff(mon, CFGS.six, ctx), mv = K1.changes.find(x => x.id === "move-0");
+  assert.ok(K1.changes.some(x => x.id === "big-0") && mv, "repos lundi et VO2max déplacée : " + K1.changes.map(x => x.text).join(" | "));
+  assert.match(mv.text, /remplacée par du repos : déplacée à/); const tgt = K1.items.findIndex(it => it.bike && it.bike.moved === 0); assert.ok(tgt > 0);
+  const easy = { id: 7100, n: "Récup", t: "VirtualRide", dt: new Date(2026, 10, 2, 18), d: "2026-11-02T18:00:00", mt: 45 * 60, km: 0, np: 120, w: 115, te: 1.2, hr: 115 };
+  const hk2 = load({ acts: [big, easy] }); hk2.store.set("planOv:2026-11-02", JSON.stringify({ 0: { t: "vo2r" } })); hk2.clock.t = new Date(2026, 10, 2, 19, 0, 0).getTime();
+  const K2 = hk2.Plan._eff(mon, CFGS.six, ctx);
+  assert.equal(K2.items[0].bike.t, "rec"); assert.equal(K2.items[0].bike.rest, true); assert.equal(K2.items[0].bike.st, "done", "45 min faites : repos fait, pas « VO2max faite »");
+  assert.equal(K2.items[tgt].bike.t, "vo2r", "la VO2max reste déplacée");
+  hk2.clock.t = new Date(2026, 10, 3, 9, 0, 0).getTime();
+  const K3 = hk2.Plan._eff(mon, CFGS.six, ctx); assert.equal(K3.items[0].bike.t, "rec", "le lendemain, lundi reste un repos");
+  assert.equal(K3.items.filter(it => it.bike && it.bike.moved === 0).length, 1, "la clé de lundi n'est déplacée qu'une fois");
+  // séance clé course : jamais le lundi qui suit 5 h de vélo le dimanche (jour de repos R4), ni le mardi pour une séance dure (lendemain du repos)
+  { const hs = load({ acts: [big], course: COURSE }); hs.store.set("planCfg", JSON.stringify(CFGS.six)); hs.store.set("planSince", '"2026-10-01"');
+    hs.clock.t = new Date(2026, 10, 2, 7, 0, 0).getTime(); const kk = hs.Plan._key.week(mon);
+    assert.ok(kk && !kk.days.includes("2026-11-02"), "pas le lundi : " + JSON.stringify(kk && kk.days));
+    if (TY[kk.t].hard) assert.ok(!kk.days.includes("2026-11-03"), "pas le mardi pour une séance dure : " + JSON.stringify(kk.days)); }
   // grosse journée aujourd'hui (dimanche) : demain lundi n'est pas dans la semaine ; mercredi grosse journée faite → jeudi repos dès mercredi soir
   const wed = { ...big, id: 7002, dt: new Date(2026, 10, 4, 9), d: "2026-11-04T09:00:00" };
   const h3 = load({ acts: [wed] }); h3.clock.t = new Date(2026, 10, 4, 18, 0, 0).getTime();

@@ -212,8 +212,10 @@ function autoAvail(mon, acts = S.all || [], depth = AUTO.depth) {
   autoMemo.set(key, out); return out;
 }
 // réglages d'une semaine : objectif et départ enregistrés, jours déduits des habitudes
+// une semaine à venir prend la semaine type de la semaine en cours : sa propre estimation compterait la semaine en cours, pas finie,
+// comme une semaine où il n'a pas roulé les jours qui restent (aperçu de la semaine prochaine qui change chaque jour)
 function cfgFor(mon) {
-  const c = getCfg(), A = autoAvail(mondayOf(mon));
+  const m = mondayOf(mon), cur = mondayOf(new Date()), c = getCfg(), A = autoAvail(+m > +cur ? cur : m);
   return A ? { ...c, days: A.days, auto: A } : c;
 }
 function getCfg() {
@@ -717,14 +719,32 @@ function effective(mon, c, ctx) {
       const t = b.t, tgt = keySlot(items, Math.max(x + 1, td + (now.getHours() >= 20 ? 1 : 0)), F, ftp, { ignore: x }), easy = x === d ? "rec" : "end";
       step(`legs-${x}`, `Legs faite ${dl(d)} matin : ${TYPES[t].l} de ${dl(x)} ${tgt != null ? `décalée à ${dl(tgt)}` : "remplacée (pas d'autre jour possible cette semaine)"}, ${easy === "rec" ? "récupération" : "endurance"} ${x === td ? "ce soir" : dl(x)} : pas de séance clé le jour des jambes ni le lendemain.`,
         () => { if (tgt != null) { const B = items[tgt].bike; B.t = t; B.dur = Math.max(B.dur, 60); B.moved = x; } b.t = easy; b.dur = Math.min(b.dur, easy === "rec" ? 60 : b.dur); b.changed = true; }); }); });
+  // --- R4 (24/11/2026, demande de Nathan : « une grosse sortie de 5 h le dimanche, le lundi c'est repos ») : lendemain d'une grosse journée,
+  // prévue ou non (≥ 4 h de vélo ou ≥ 250 de charge, tous sports : ≈ 97e centile de ses journées) → repos, au plus 45 min très faciles.
+  // Appliquée à tous les jours de la semaine jusqu'à demain (pas seulement aujourd'hui), avant R1 : le repos reste affiché une fois le jour passé
+  // (même s'il a roulé les 45 min), et une séance clé prévue ce jour-là devient « perdue » (keyLost) : R1 la déplace comme une clé ratée, une seule
+  // fois (le compte des séances dures faites l'arrête ensuite). Une vraie séance dure faite ce jour-là quand même : on n'y touche pas.
+  // Sur 18 mois, après de telles journées il s'est reposé ou a roulé facile 30 fois sur 36 ; VFC −29 % la nuit suivante (17 journées ≥ 250).
+  for (let d = 0; d <= Math.min(6, td + 1); d++) { const it = items[d], b = it.bike, prev = addDays(mon, d - 1);
+    if (!b || b.t === "rec" || b.t === "grp" || ymd(prev) > ymd(now)) continue;
+    if (b.st === "done" && (b.acts || []).some(a => hardRide(a, ftp))) continue;
+    const pa = (S.all || []).filter(a => a.d.slice(0, 10) === ymd(prev)), rideH = pa.filter(a => RIDE_TYPES.has(a.t)).reduce((x, a) => x + a.mt, 0) / 3600, load = Charge.dayLoad(prev);
+    if (rideH < BIG_DAY.rideH && load < BIG_DAY.load) continue;
+    const t0 = b.t, key = isKey(t0), nm = TYPES[t0].l, what = `${rideH >= 1 ? `${fmtMin(Math.round(rideH * 12) * 5)} de vélo, ` : ""}charge ${Math.round(load)}`;
+    const prevTxt = d - 1 === td ? "aujourd'hui" : d === 0 ? "dimanche" : dl(d - 1), when = d === td ? "aujourd'hui" : dl(d);
+    step(`big-${d}`, `Grosse journée ${prevTxt} (${what}) : repos ${when}${key ? ` ; ${nm} replacée un autre jour si possible` : d >= td ? ` (${nm.toLowerCase()} retirée ; au plus 45 min très faciles si tu as envie de rouler)` : ""}.`,
+      () => { b.t = "rec"; b.dur = Math.min(b.dur, 45); b.rest = true; b.changed = true; if (key) b.keyLost = t0; });
+  }
   // --- R1 : séance clé ratée → déplacée si possible
-  items.forEach(it => { if (!it.bike || it.bike.st !== "missed" || !isKey(it.bike.t) || it.bike.t === "grp") return;  // une sortie de groupe ne se déplace pas
+  // (aussi une clé remplacée par du repos le lendemain d'une grosse journée : keyLost, R4)
+  items.forEach(it => { const lost = it.bike && it.bike.keyLost;
+    if (!it.bike || it.bike.t === "grp" || (!lost && (it.bike.st !== "missed" || !isKey(it.bike.t)))) return;  // une sortie de groupe ne se déplace pas
     const future = items.filter(x => x.day >= td && x.bike && x.bike.st === "plan" && isKey(x.bike.t)).length;
     if (hardDays + future >= plannedKeys) return;
     const from = td + (now.getHours() >= 20 ? 1 : 0), tgt = keySlot(items, from, F, ftp, { ignore: it.day });  // le vélo se fait le soir
-    const t = it.bike.t, nm = TYPES[t].l;
-    if (tgt == null) { info(`${nm} de ${dl(it.day)} non faite : pas de place cette semaine sans enchaîner deux jours durs, on la laisse passer.`); return; }
-    step(`move-${it.day}`, `${nm} de ${dl(it.day)} non faite : déplacée à ${dl(tgt)}.`, () => { const b = items[tgt].bike; b.t = t; b.dur = Math.max(b.dur, 60); b.moved = it.day; it.bike.movedTo = tgt; });
+    const t = lost || it.bike.t, nm = TYPES[t].l, why = lost ? "remplacée par du repos" : "non faite";
+    if (tgt == null) { info(`${nm} de ${dl(it.day)} ${why} : pas de place cette semaine sans enchaîner deux jours durs, on la laisse passer.`); return; }
+    step(`move-${it.day}`, `${nm} de ${dl(it.day)} ${why} : déplacée à ${dl(tgt)}.`, () => { const b = items[tgt].bike; b.t = t; b.dur = Math.max(b.dur, 60); b.moved = it.day; it.bike.movedTo = tgt; });
   });
   // --- R2 : récupération basse ce matin et séance clé prévue aujourd'hui
   const T = td < 7 ? items[td] : null;
@@ -736,20 +756,6 @@ function effective(mon, c, ctx) {
   // --- R2 bis : récupération très basse, séance facile prévue ce soir → récupération courte
   if (isCur && T && T.bike && T.bike.st === "plan" && !T.bike.changed && (T.bike.t === "end" || T.bike.t === "tempo") && ready.today != null && ready.today < 35)
     step(`easy-${ymd(now)}`, `Récupération à ${ready.today}/100 ce matin : ${TYPES[T.bike.t].l.toLowerCase()} remplacée par 45 min de récupération (ou repos).`, () => { T.bike.t = "rec"; T.bike.dur = 45; T.bike.changed = true; });
-  // --- R4 (24/11/2026, demande de Nathan : « une grosse sortie de 5 h le dimanche, le lundi c'est repos ») : lendemain d'une grosse journée,
-  // prévue ou non (≥ 4 h de vélo ou ≥ 250 de charge, tous sports : 3 % de ses journées) → repos, au plus 45 min très faciles ; une séance clé
-  // prévue ce jour-là est décalée (keySlot) ou laissée. Sur 18 mois, après de telles journées il s'est reposé ou a roulé facile 30 fois sur 36.
-  for (const d of [td, td + 1]) { const it = items[d], b = it && it.bike, prev = addDays(mon, d - 1);
-    if (d > 6 || !b || b.st !== "plan" || b.t === "rec" || ymd(prev) > ymd(now)) continue;
-    const pa = (S.all || []).filter(a => a.d.slice(0, 10) === ymd(prev)), rideH = pa.filter(a => RIDE_TYPES.has(a.t)).reduce((x, a) => x + a.mt, 0) / 3600, load = Charge.dayLoad(prev);
-    if (rideH < BIG_DAY.rideH && load < BIG_DAY.load) continue;
-    const what = `${rideH >= 1 ? `${fmtMin(Math.round(rideH * 12) * 5)} de vélo, ` : ""}charge ${Math.round(load)}`, nm = TYPES[b.t].l, when = d === td ? "aujourd'hui" : dl(d);
-    if (isKey(b.t) && b.t !== "grp") { const tgt = keySlot(items, d + 1, F, ftp, { ignore: d });
-      step(`big-${d}`, `Grosse journée ${d - 1 === td ? "aujourd'hui" : d === 0 ? "dimanche" : dl(d - 1)} (${what}) : repos ${when}, ${nm} ${tgt != null ? `décalée à ${dl(tgt)}` : "laissée (pas d'autre jour possible cette semaine)"}.`,
-        () => { if (tgt != null) { const B = items[tgt].bike; B.t = b.t; B.dur = Math.max(B.dur, 60); B.moved = d; } b.t = "rec"; b.dur = 45; b.rest = true; b.changed = true; }); }
-    else if (b.t !== "grp") step(`big-${d}`, `Grosse journée ${d - 1 === td ? "aujourd'hui" : d === 0 ? "dimanche" : dl(d - 1)} (${what}) : repos ${when} (${nm.toLowerCase()} retirée ; au plus 45 min très faciles si tu as envie de rouler).`,
-      () => { b.t = "rec"; b.dur = 45; b.rest = true; b.changed = true; });
-  }
   // --- R3 : séances intenses déjà faites (y compris imprévues) → on n'en rajoute pas
   const fut = items.filter(x => x.day >= td && x.bike && x.bike.st === "plan" && isKey(x.bike.t));
   let excess = hardDays + fut.length - Math.max(plannedKeys, hardDays);
@@ -1267,10 +1273,15 @@ function weekKey(W) {
   const w = buildRun(t, dur, Charge.params().runPace, { ...runKeyCtx(), k });
   // jours conseillés : à partir d'aujourd'hui (demain après 20 h)
   const F = weekFacts(mon), ftp = profile().ftp, now = new Date(), from = ymd(now.getHours() >= 20 ? addDays(now, 1) : now);
-  const hard = d => { if (d < 0 || d > 6) return false; const it = W.items[d], b = it.bike;
-    return !!((b && b.st !== "missed" && (isKey(b.t) || isLong(b.t) || b.t === "grp" || b.t.startsWith("test"))) || (it.muscu && it.muscu.s === "legs" && it.muscu.st !== "missed")
-      || F[d].rides.some(a => hardRide(a, ftp) || a.mt >= 3 * 3600) || F[d].runs.some(a => hardRun(a, Charge.params().runPace))); };
-  const why = d => { const it = W.items[d], b = it.bike; return b && (isKey(b.t) || b.t === "grp" || b.t.startsWith("test")) ? b.w.title.split(" · ")[0].toLowerCase() : b && isLong(b.t) ? "sortie longue" : it.muscu && it.muscu.s === "legs" ? "jambes" : "grosse séance faite"; };
+  // jour dur : séance dure prévue (vélo, jambes), repos imposé après une grosse journée (R4), ou grosse séance faite ; le dimanche d'avant compte
+  // pour le lundi (relecture du 24/11/2026 : après 5 h de vélo le dimanche, la séance clé était conseillée le lundi)
+  const pace = Charge.params().runPace, doneHard = (acts, date) => acts.some(a => (RIDE_TYPES.has(a.t) && (hardRide(a, ftp) || a.mt >= 3 * 3600)) || (Charge.RUN_TYPES.has(a.t) && hardRun(a, pace)))
+    || Charge.dayLoad(date) >= BIG_DAY.load;
+  const hard = d => { if (d === -1) { const ps = addDays(mon, -1); return doneHard((S.all || []).filter(a => a.d.slice(0, 10) === ymd(ps)), ps); }
+    if (d < 0 || d > 6) return false; const it = W.items[d], b = it.bike;
+    return !!((b && b.st !== "missed" && (isKey(b.t) || isLong(b.t) || b.t === "grp" || b.t.startsWith("test") || b.rest)) || (it.muscu && it.muscu.s === "legs" && it.muscu.st !== "missed")
+      || doneHard(F[d].rides.concat(F[d].runs), addDays(mon, d))); };
+  const why = d => { const it = W.items[d], b = it.bike; return b && b.rest ? "repos après une grosse journée" : b && (isKey(b.t) || b.t === "grp" || b.t.startsWith("test")) ? b.w.title.split(" · ")[0].toLowerCase() : b && isLong(b.t) ? "sortie longue" : it.muscu && it.muscu.s === "legs" ? "jambes" : "grosse séance faite"; };
   const near = TYPES[t].hard, free = d => !hard(d) && !(near && (hard(d - 1) || hard(d + 1)));
   const rest = [0, 1, 2, 3, 4, 5, 6].filter(d => wk(d) >= from);
   let days = rest.filter(free), loose = false;
@@ -1289,6 +1300,8 @@ function keyWeeks(Wc) {
   return { cur: weekKey(Wc), next: weekKey(Wn) };
 }
 function offerWatch(KW) {
+  // activités pas encore chargées (ou fichier en échec) : rien n'est envoyé, sinon la Sheet recevrait « pas de séance clé » et le workflow la retirerait
+  if (!(S.all || []).length) return;
   // « faite » ici = validée sur le site ; faite en suivant la séance de la montre, le workflow le voit lui-même (associatedActivityId)
   try { Seances.offer(ymd(new Date()), [KW.cur, KW.next].filter(Boolean).map(x => ({ mon: x.mon, spec: x.w.spec, days: x.days, done: !!x.done }))); } catch (e) { console.error(e); }
 }
