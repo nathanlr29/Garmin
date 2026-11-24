@@ -467,6 +467,83 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   assert.equal(one({ kg: 20 }).get("bwWeight"), undefined); assert.equal(one({ kg: 200 }).get("bwWeight"), undefined); assert.equal(one({ kg: "80" }).get("bwWeight"), undefined); assert.equal(one({ ftp: 50 }).get("planFtp"), undefined);
   assert.equal(one({ age: "constructor" }).get("bwAge"), undefined, "âge « constructor » rejeté (pas de clé héritée)"); assert.equal(one({ age: "<30" }).get("bwAge"), '"<30"', "« <30 » est dans la liste (affiché échappé)");
 }
+// ---- 3.10 bis séance clé course de la semaine, sans jour fixe (24/11/2026)
+{
+  const h = load({ acts: [], course: COURSE }), K = h.Plan._key;
+  h.store.set("planCfg", JSON.stringify(CFGS.cinq)); h.store.set("planSince", '"2026-10-01"');
+  h.clock.t = new Date(2026, 10, 3, 9, 0, 0).getTime();          // mardi 3 novembre, 9 h (sans reprise.js : seuil / VO2max en alternance)
+  const W = h.Plan._eff(new Date(2026, 10, 2), CFGS.cinq, { ...SIT.frais, prev: PREV[0], rc: null, noRuns: true });
+  const k = K.week(new Date(2026, 10, 2));
+  assert.ok(k && ["rthr", "rvo2"].includes(k.t) && k.w.spec && k.w.title, "une séance clé, avec sa version montre");
+  const di = s => Math.round((new Date(s + "T12:00:00") - new Date(2026, 10, 2, 12)) / 864e5);
+  // jours durs vus par le Plan lui-même (même calcul que weekKey : plannedFor et muscuOn)
+  const hardD = [0, 1, 2, 3, 4, 5, 6].filter(d => { const key = `2026-11-0${2 + d}`, b = h.Plan.plannedFor(key, "bike"), m = h.Plan.muscuOn(key);
+    return (b && (P.isKey(b.t) || b.t === "long" || b.t === "grp" || /^test/.test(b.t))) || (m && m.s === "legs"); });
+  assert.ok(k.days.length >= 1, "au moins un jour conseillé : " + JSON.stringify(k.days));
+  // semaine chargée (vélo dur mercredi, jeudi, samedi, dimanche) : aucun jour sans voisin dur, donc repli « loose » sur les jours non durs
+  k.days.forEach(s => { const d = di(s); assert.ok(d >= 1, "jamais un jour passé"); assert.ok(!hardD.includes(d), `${s} : jamais un jour dur (${hardD})`);
+    if (!k.loose) assert.ok(![d - 1, d + 1].some(x => hardD.includes(x)), `${s} : ni la veille ni le lendemain d'un jour dur (${hardD})`); });
+  assert.equal(k.loose, ![1, 2, 3, 4, 5, 6].some(d => ![d - 1, d, d + 1].some(x => hardD.includes(x))), "repli seulement s'il n'y a aucun jour idéal");
+  assert.match(k.avoid, /Jours durs de ta semaine : mercredi/);
+  assert.equal(k.done, null);
+  // validée : faite pour la semaine, palier enregistré (seuil et VO2max ont des paliers)
+  K.set(k.mon, k.t, "2026-11-04", true);
+  const k2 = K.week(new Date(2026, 10, 2)); assert.equal(JSON.stringify(k2.done), JSON.stringify({ d: "2026-11-04", ok: true }));
+  assert.ok(JSON.parse(h.store.get("palLog")).some(x => x.t === k.t && x.d === "2026-11-04" && x.ok), "palier réussi enregistré");
+  K.set(k.mon, k.t, "2026-11-04", null); assert.equal(K.week(new Date(2026, 10, 2)).done, null, "annulée");
+  assert.ok(!JSON.parse(h.store.get("palLog") || "[]").some(x => x.d === "2026-11-04"), "palier retiré aussi");
+  // aucune course placée par le Plan, quels que soient les anciens réglages
+  assert.ok(W.items.every(it => !it.run), "plus de course placée");
+}
+// ---- 3.10 ter lendemain de grosse journée (R4, 24/11/2026) : repos, séance clé décalée
+{
+  const big = { id: 7001, n: "Grosse sortie", t: "Ride", dt: new Date(2026, 10, 1, 9), d: "2026-11-01T09:00:00", mt: 5 * 3600, km: 150, np: 190, w: 180, te: 4, hr: 140 };
+  const h = load({ acts: [big] }); h.clock.t = new Date(2026, 10, 2, 8, 0, 0).getTime();   // lundi 2 novembre, 8 h, après 5 h de vélo dimanche
+  const ctx = { ...SIT.frais, prev: PREV[0], rc: null, noRuns: true }, mon = new Date(2026, 10, 2);
+  const W = h.Plan._eff(mon, CFGS.six, ctx), b = W.items[0].bike;
+  const ch = W.changes.find(x => x.id === "big-0");
+  assert.ok(ch, "règle appliquée : " + W.changes.map(x => x.text).join(" | ")); assert.match(ch.text, /^Grosse journée dimanche \(5 h de vélo, charge \d+\) : repos aujourd'hui/);
+  assert.equal(b.t, "rec"); assert.equal(b.rest, true); assert.ok(b.dur <= 45);
+  if (W.items[0].bike && P.isKey(h.Plan._eff(mon, CFGS.six, { ...ctx }).items[0].bike.t)) assert.match(ch.text, /décalée|laissée/);
+  // annulable
+  h.store.set("planUndo:2026-11-02", JSON.stringify(["big-0"])); assert.equal(h.Plan._eff(mon, CFGS.six, ctx).items[0].bike.rest, undefined, "annulée : séance d'origine");
+  // petite sortie la veille : rien
+  const h2 = load({ acts: [{ ...big, mt: 2 * 3600, np: 150, w: 140 }] }); h2.clock.t = h.clock.t;
+  assert.ok(!h2.Plan._eff(mon, CFGS.six, ctx).changes.some(x => /^big-/.test(x.id || "")), "2 h tranquilles la veille : pas de repos imposé");
+  // grosse journée aujourd'hui (dimanche) : demain lundi n'est pas dans la semaine ; mercredi grosse journée faite → jeudi repos dès mercredi soir
+  const wed = { ...big, id: 7002, dt: new Date(2026, 10, 4, 9), d: "2026-11-04T09:00:00" };
+  const h3 = load({ acts: [wed] }); h3.clock.t = new Date(2026, 10, 4, 18, 0, 0).getTime();
+  const W3 = h3.Plan._eff(mon, CFGS.six, ctx);
+  if (W3.items[3].bike) assert.ok(W3.changes.some(x => x.id === "big-3" && /aujourd'hui/.test(x.text)), "jeudi : repos annoncé dès mercredi");
+}
+// ---- 3.10 quater semaine type déduite des habitudes (24/11/2026 : plus de menu « Mes disponibilités »)
+{
+  const MON = new Date(2026, 10, 23); let id = 9000;
+  const at = (w, d, h, o) => { const dt = new Date(MON); dt.setDate(dt.getDate() - 7 * w + d); dt.setHours(h, 0, 0, 0); return { id: id++, n: "x", t: "Ride", dt, d: `${ymd(dt)}T${pad(h)}:00:00`, mt: 3600, km: 30, ...o }; };
+  // 16 semaines : mardi 45 min et jeudi 1 h au home trainer le soir, samedi 2 h et dimanche 4 h dehors ; muscu lundi, mardi, mercredi à 6 h ;
+  // semaines 5 et 6 = vacances (rien) ; une seule sortie un lundi (semaine 10)
+  const acts = [];
+  for (let w = 1; w <= 16; w++) { if (w === 5 || w === 6) continue;
+    acts.push(at(w, 1, 18, { t: "VirtualRide", mt: 2700 }), at(w, 3, 18, { t: "VirtualRide", mt: 3600 }), at(w, 5, 9, { mt: 7200 }), at(w, 6, 9, { mt: 4 * 3600 }));
+    [0, 1, 2].forEach(d => acts.push(at(w, d, 6, { t: "strength_training", mt: 3000, km: 0 }))); }
+  acts.push(at(10, 0, 18, { mt: 3600 }));
+  const h = load({ acts }), A = h.Plan._auto(MON, acts);
+  same(A.bike, [1, 3, 5, 6], "mardi, jeudi, samedi, dimanche ; le lundi isolé ne compte pas");
+  assert.equal(A.weeks, 14, "les 2 semaines de vacances sont ignorées");
+  same(A.days.map(x => x.bike), ["none", "mw", "none", "mw", "none", "any", "any"], "MyWhoosh en semaine, au choix le week-end");
+  same([A.days[1].dur, A.days[3].dur], [45, 60], "durée médiane en semaine, arrondie au palier supérieur");
+  assert.ok(A.days[6].dur >= 240 && A.days[5].dur >= 120, "week-end : 75e centile (dimanche 4 h, samedi 2 h)");
+  same(A.days.map(x => x.muscu), [true, true, true, false, false, false, false], "muscu les matins habituels");
+  // hystérésis : plus de jeudi depuis 4 semaines (p ≈ 0,48) : il reste, car il était là la semaine d'avant
+  const acts2 = acts.filter(a => !(a.t === "VirtualRide" && a.dt.getDay() === 4 && a.dt >= addD(MON, -35)));
+  const A2 = h.Plan._auto(MON, acts2);
+  assert.ok(A2.p[3] < .5 && A2.p[3] >= .3, "p du jeudi entre 0,3 et 0,5 : " + A2.p[3]); assert.ok(A2.bike.includes(3), "jeudi gardé (hystérésis)");
+  // historique trop court : pas de semaine type (le Plan garde le réglage enregistré ou celui par défaut)
+  assert.equal(h.Plan._auto(MON, acts.filter(a => a.dt >= addD(MON, -21))), null);
+  // les réglages d'une semaine utilisent ces jours ; l'objectif et le départ enregistrés restent
+  const c = h.Plan._cfgFor(MON); same(c.days.map(x => x.bike), A.days.map(x => x.bike)); assert.ok(c.goal && c.start);
+  function addD(d, n) { const t = new Date(d); t.setDate(t.getDate() + n); return t; }
+}
 // ---- 3.11 jauge de reprise et plannedFor
 {
   const mon = (m, d) => new Date(2026, m, d).getTime();
@@ -492,6 +569,11 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   const c = cfgRun(CFGS.cinq, { 0: ["alt"], 2: ["add"], 4: ["add"] }, 3, "entretien"); h.store.set("planCfg", JSON.stringify(c)); h.store.set("planSince", '"2026-10-01"');
   h.clock.t = new Date(2026, 10, 1, 12, 0, 0).getTime(); RUN_(h).setRc(c);   // dimanche : valable dès le lundi 2 novembre
   h.clock.t = new Date(2026, 10, 3, 12, 0, 0).getTime();
+  // depuis le 24/11/2026 le Plan ne place plus de courses (plus de jours de course) : les réglages course ne donnent rien…
+  const none = [0, 1, 2, 3, 4, 5, 6].map(d => h.Plan.plannedFor(`2026-11-0${2 + d}`, "run"));
+  assert.ok(none.every(x => !x), "plus aucune course placée par les réglages");
+  // … seule une course ajoutée à la main (+ course) apparaît : lundi (vélo) et vendredi (pas de vélo)
+  h.store.set("planOv:2026-11-02", JSON.stringify({ 0: { run: { t: "rfoot", dur: 40 } }, 4: { run: { t: "rthr", dur: 45 } } }));
   const days = [0, 1, 2, 3, 4, 5, 6].map(d => { const k = `2026-11-0${2 + d}`; return { d, any: h.Plan.plannedFor(k), run: h.Plan.plannedFor(k, "run"), bike: h.Plan.plannedFor(k, "bike") }; });
   assert.ok(days.some(x => x.run), "plannedFor(…, 'run') renvoie la course du jour");
   days.forEach(x => { assert.equal(!!x.run, !!(x.any && (x.any.sport === "run" || x.any.run)), "plannedFor sans argument voit aussi la course"); if (x.bike) assert.notEqual(x.bike.sport, "run"); });

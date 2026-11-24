@@ -50,19 +50,10 @@ const W2 = X.week(2, [{ d: 0, min: 41 }], 45);
 same(W2.rows.map(r => r.done), [41, null, null], "la course faite coche la plus longue"); same(W2.left, [30, 30]);
 assert.match(X.answer({ started: true, k: 2, last: { res: "down", min: 30, T: 90 } }, W2, Date.now()), /Palier 3 sur 17 : 3 sorties de 30, 30 et 40 min.*33 % du prévu : un palier en arrière.*il reste 30 et 30 min/);
 
-// ------------------------------------------------------------------ Créneaux
-const hard = t => ["vo2r", "ss", "thr", "grp", "long", "test"].includes(t);
-const items = [{ bike: { t: "end", st: "done" } }, { bike: { t: "ss", st: "plan" } }, { bike: { t: "tempo", st: "plan" } }, { muscu: { s: "legs", st: "plan" } }, {}, { bike: { t: "grp", st: "plan" } }, {}];
-same(X.slots(items, 0, [0], 2, 0, hard).map(s => s.d), [4, 6], "ni clé, ni jambes, ni groupe ; jours sans vélo d'abord");
-same(X.slots(items, 0, [0], 3, 0, hard).map(s => s.what), ["en plus du vélo facile", "pas de vélo", "pas de vélo"], "mercredi : endurance + tempo");
-same(X.slots(items, 3, [0], 3, 0, hard).map(s => s.d), [4, 6], "à partir de jeudi");
-const empty = Array.from({ length: 7 }, () => ({}));
-same(X.slots(empty, 0, [5], 1, 0, hard).map(s => s.d), [0], "pas la veille ni le lendemain d'une course avant le palier 9");
-same(X.slots(empty, 0, [5], 1, 9, hard).map(s => s.d), [6], "à partir du palier 9, deux jours de suite permis");
-same(X.slots(items, 0, [], 0, 0, hard), []);
-
 // ------------------------------------------------------------------ Rendu
+const items = Array.from({ length: 7 }, () => ({}));
 const h = R.html({ acts, items, now: day("2026-11-24", 12).getTime() });
+assert.match(h, /pas de jour fixe/); assert.doesNotMatch(h, /Où les caser/);
 assert.match(h, /Ta reprise course/); assert.match(h, /Palier 3 sur 17/); assert.doesNotMatch(h, /undefined|NaN/);
 assert.match(R.html({ acts: [], items, now: day("2026-10-23", 12).getTime() }), /démarre le lundi 2 novembre/);
 console.log("reprise : ok");

@@ -1,6 +1,5 @@
 [
  {
-  "date": "2026-11-26",
   "v": 1,
   "name": "Seuil #2 · 4×4'",
   "steps": [
@@ -37,10 +36,9 @@
     "n": "Retour au calme"
    }
   ],
-  "sig": "e21f1a2b"
+  "sig": "e9fda19f"
  },
  {
-  "date": "2026-11-28",
   "v": 1,
   "name": "VO2max #3 · 2×10×30/30",
   "steps": [
@@ -103,10 +101,9 @@
     "n": "Retour au calme"
    }
   ],
-  "sig": "3a96942c"
+  "sig": "c93cb5ba"
  },
  {
-  "date": "2026-11-30",
   "v": 1,
   "name": "Côtes #1 · 6×10\"",
   "steps": [
@@ -140,6 +137,6 @@
     "n": "Retour au calme"
    }
   ],
-  "sig": "6b47c1f9"
+  "sig": "e7340586"
  }
 ]
