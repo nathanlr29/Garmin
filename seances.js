@@ -61,16 +61,16 @@ const range = (p, tol) => [p - tol, p + tol];
 // VO2max : 30/30 de Billat (temps près de la VO2max sans trop de casse) puis blocs de 2 à 4 min (Helgerud 2007 : 4 × 4).
 // Côtes : sprints de 10 s (force, foulée, presque sans fatigue) puis 45 à 90 s à l'effort 5 km (puissance aérobie, moins d'impact qu'à plat).
 const LADDERS = {
-  // seuil court façon norvégienne (demande de Nathan du 25/11/2026) : répétitions de 3 min, 1 min de trot, on ajoute des répétitions
-  // (+3 min de seuil par palier) ; la règle des 10 % de Daniels (CAP) coupe le nombre de répétitions tant que le volume de la semaine ne suit pas
-  rthr: [4, 5, 6, 7, 8, 9, 10].map(n => ({ n, on: 180, off: 60 })),
+  // seuil court façon norvégienne (demande de Nathan du 25/11/2026) : répétitions de 4 min, 1 min de trot, on ajoute des répétitions
+  // (+4 min de seuil par palier) ; la règle des 10 % de Daniels (CAP) coupe le nombre de répétitions tant que le volume de la semaine ne suit pas
+  rthr: [3, 4, 5, 6, 7, 8, 9].map(n => ({ n, on: 240, off: 60 })),
   rvo2: [{ n: 12, on: 30, off: 30 }, { n: 16, on: 30, off: 30 }, { n: 10, on: 30, off: 30, sets: 2, rs: 180 },
     { n: 5, on: 120, off: 120 }, { n: 5, on: 180, off: 150 }, { n: 4, on: 240, off: 180 }, { n: 5, on: 240, off: 180 }],
   rhill: [{ n: 6, on: 10, off: 120 }, { n: 8, on: 10, off: 120 }, { n: 8, on: 45, off: 90 }, { n: 10, on: 45, off: 90 },
     { n: 8, on: 60, off: 120 }, { n: 10, on: 60, off: 120 }, { n: 6, on: 90, off: 150 }],
 };
 const NAME = { rthr: "Seuil", rvo2: "VO2max", rhill: "Côtes", rstrides: "Lignes droites", rtempo: "Allure semi" };
-const NMIN = { rthr: 4, rvo2: 3, rhill: 4 };                 // en dessous, la séance n'a plus de sens : on garde ce minimum
+const NMIN = { rthr: 3, rvo2: 3, rhill: 4 };                 // en dessous, la séance n'a plus de sens : on garde ce minimum
 const CAP = { rthr: [.10, 2.7], rvo2: [.08, 1.5] };          // km de qualité ≤ part des km de la semaine (Daniels), jamais sous le plancher (km)
 const KEY = new Set(["rstrides", "rtempo", "rthr", "rvo2", "rhill"]);   // séances structurées : celles qui vont sur la montre
 const is3030 = s => s.on <= 30 && s.off === s.on;
@@ -125,7 +125,7 @@ function build(type, durMin, o = {}) {
     reps(s.n, s.on, s.off, P.T, TOL.T, `${s.n} × ${fmtD(s.on)} au seuil`, `récup ${fmtD(s.off)} en trottinant`, RPE.thr, `Seuil ${fmtPace(P.T)}`, "Trot");
     cd();
     title = `Seuil #${k + 1} · ${s.n} × ${fmtD(s.on)}`;
-    goal = `Le seuil (allure tenable environ 1 h, ${fmtPace(P.T)} /km) est la séance la plus rentable pour le 10 km et le semi. Des répétitions de 3 min avec 1 min de trot : on accumule du temps au seuil sans passer dans le rouge, c'est le principe des Norvégiens. On progresse en ajoutant des répétitions, jamais en les allongeant. Régulier du premier au dernier bloc${hrTxt} ; tu dois finir en te disant que tu en avais encore un.`;
+    goal = `Le seuil (allure tenable environ 1 h, ${fmtPace(P.T)} /km) est la séance la plus rentable pour le 10 km et le semi. Des répétitions de 4 min avec 1 min de trot : on accumule du temps au seuil sans passer dans le rouge, c'est le principe des Norvégiens. On progresse en ajoutant des répétitions, jamais en les allongeant. Régulier du premier au dernier bloc${hrTxt} ; tu dois finir en te disant que tu en avais encore un.`;
   } else if (type === "rvo2") {
     fill(work()); wu("footing facile, finis par 3 accélérations de 15 s");
     const p = pFor, short = is3030(s), lab = short ? `${s.n} × 30/30` : `${s.n} × ${fmtD(s.on)} vite`, sub = short ? "30 s vite, 30 s en trottinant" : `récup ${fmtD(s.off)} en trottinant`;
