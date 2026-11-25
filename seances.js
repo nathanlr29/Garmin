@@ -53,6 +53,9 @@ function paces(src) {
   return { V, src, E: [r(paceAt(V, PCT.E[0])), r(paceAt(V, PCT.E[1]))], T: r(paceAt(V, PCT.T)), I: r(paceAt(V, PCT.I)), VV: r(paceAt(V, PCT.VV)),
     HM: r(raceTime(V, 21097.5) / 21.0975), M: r(raceTime(V, 42195) / 42.195), k10: r(raceTime(V, 10000)) };
 }
+// allure « sous le seuil » des répétitions de seuil (demande de Nathan du 25/11/2026, façon norvégienne : 2 à 3,5 mmol de lactate, un cran
+// sous le seuil pour en faire plus) : l'allure semi, entre 4 et 12 s/km plus lente que le seuil
+const subT = P => Math.min(P.T + 12, Math.max(P.T + 4, P.HM));
 const range = (p, tol) => [p - tol, p + tol];
 
 // ------------------------------------------------------------------ Échelles de paliers
@@ -71,14 +74,15 @@ const LADDERS = {
 };
 const NAME = { rthr: "Seuil", rvo2: "VO2max", rhill: "Côtes", rstrides: "Lignes droites", rtempo: "Allure semi" };
 const NMIN = { rthr: 3, rvo2: 3, rhill: 4 };                 // en dessous, la séance n'a plus de sens : on garde ce minimum
-const CAP = { rthr: [.10, 2.7], rvo2: [.08, 1.5] };          // km de qualité ≤ part des km de la semaine (Daniels), jamais sous le plancher (km)
+const CAP = { rthr: [.15, 2.7], rvo2: [.08, 1.5] };          // km de qualité ≤ part des km de la semaine, jamais sous le plancher (km) : VO2max 8 % (Daniels),
+// sous le seuil 15 % (Daniels met 10 % à l'allure seuil ; un cran plus lent, les Norvégiens en font bien plus, sur 2 à 3 séances)
 const KEY = new Set(["rstrides", "rtempo", "rthr", "rvo2", "rhill"]);   // séances structurées : celles qui vont sur la montre
 const is3030 = s => s.on <= 30 && s.off === s.on;
 function stepL(t, k) {
   const s = LADDERS[t][k], set = s.sets ? `${s.sets} × ` : "";
   if (t === "rhill") return `#${k + 1} · ${s.n} × ${fmtD(s.on)} en côte`;
   if (t === "rvo2" && is3030(s)) return `#${k + 1} · ${set}${s.n} × 30/30`;
-  return `#${k + 1} · ${s.n} × ${fmtD(s.on)}${t === "rthr" ? " au seuil" : ""}`;
+  return `#${k + 1} · ${s.n} × ${fmtD(s.on)}${t === "rthr" ? " sous le seuil" : ""}`;
 }
 
 // durée naturelle d'un palier (15 min d'échauffement, 10 de retour au calme), arrondie à 5 min : fichier .fit d'un palier hors du Plan
@@ -96,12 +100,12 @@ function build(type, durMin, o = {}) {
   const L = LADDERS[type], k = L ? clamp(Number.isInteger(o.k) ? o.k : 0, 0, L.length - 1) : null;
   let lastOff = 0, s = L ? { ...L[k] } : null, cut = null, warm = durMin >= 45 ? 900 : 720, cool = durMin >= 45 ? 600 : 480;
   const sets = () => (s.sets || 1), work = () => sets() * (s.n * s.on + (s.n - 1) * s.off) + (sets() - 1) * (s.rs || 0);
-  const pFor = { rthr: s && P.T, rvo2: s && (is3030(s) ? P.VV : P.I) }[type];
+  const pFor = { rthr: s && subT(P), rvo2: s && (is3030(s) ? P.VV : P.I) }[type];
   if (s) {
     const n0 = s.n, full = Math.ceil((900 + 600 + work()) / 300) * 5;
     // volume de qualité : règle de Daniels (km de la semaine), avec un plancher pour que le palier 1 passe toujours
     if (CAP[type] && o.wkKm != null) { const capKm = Math.max(CAP[type][0] * o.wkKm, CAP[type][1]), nCap = Math.floor(capKm * pFor / (sets() * s.on));
-      if (Math.max(NMIN[type], nCap) < s.n) { s.n = Math.max(NMIN[type], nCap); cut = `volume ${type === "rthr" ? "au seuil" : "rapide"} limité à ${Math.round(CAP[type][0] * 100)} % de tes km de la semaine (${nf(o.wkKm, 0)} km en moyenne sur 4 semaines, règle de Daniels)`; } }
+      if (Math.max(NMIN[type], nCap) < s.n) { s.n = Math.max(NMIN[type], nCap); cut = `volume ${type === "rthr" ? "sous le seuil" : "rapide"} limité à ${Math.round(CAP[type][0] * 100)} % de tes km de la semaine (${nf(o.wkKm, 0)} km en moyenne sur 4 semaines${type === "rthr" ? "" : ", règle de Daniels"})`; } }
     // séance trop courte : moins de répétitions, puis échauffement et retour au calme plus courts
     while (warm + cool + work() > T && s.n > NMIN[type]) { s.n--; if (!cut) cut = `séance trop courte pour le palier complet (il demande ${full} min)`; }
     if (warm + cool + work() > T) { warm = 600; cool = 300; }
@@ -122,10 +126,10 @@ function build(type, durMin, o = {}) {
   const hrTxt = o.hr ? `, le cardio finit vers ${o.hr - 8}-${o.hr} bpm en fin de bloc, pas au-dessus` : "";
   if (type === "rthr") {
     fill(work()); wu("footing facile, finis par 3 accélérations de 15 s");
-    reps(s.n, s.on, s.off, P.T, TOL.T, `${s.n} × ${fmtD(s.on)} au seuil`, `récup ${fmtD(s.off)} en trottinant`, RPE.thr, `Seuil ${fmtPace(P.T)}`, "Trot");
+    reps(s.n, s.on, s.off, subT(P), TOL.T, `${s.n} × ${fmtD(s.on)} sous le seuil`, `récup ${fmtD(s.off)} en trottinant`, RPE.thr, `Sous-seuil ${fmtPace(subT(P))}`, "Trot");
     cd();
     title = `Seuil #${k + 1} · ${s.n} × ${fmtD(s.on)}`;
-    goal = `Le seuil (allure tenable environ 1 h, ${fmtPace(P.T)} /km) est la séance la plus rentable pour le 10 km et le semi. Des répétitions de 4 min avec 1 min de trot : on accumule du temps au seuil sans passer dans le rouge, c'est le principe des Norvégiens. On progresse en ajoutant des répétitions, jamais en les allongeant. Régulier du premier au dernier bloc${hrTxt} ; tu dois finir en te disant que tu en avais encore un.`;
+    goal = `Seuil à la norvégienne : des répétitions de 4 min à ${fmtPace(subT(P))} /km, un cran sous ton seuil (${fmtPace(P.T)} /km), avec 1 min de trot. Courir un peu moins vite permet d'en faire plus sans passer dans le rouge : jusqu'à 15 % de tes km de la semaine. On progresse en ajoutant des répétitions, jamais en les allongeant ni en accélérant. Régulier du premier au dernier bloc${hrTxt} ; tu dois finir en te disant que tu en avais encore un.`;
   } else if (type === "rvo2") {
     fill(work()); wu("footing facile, finis par 3 accélérations de 15 s");
     const p = pFor, short = is3030(s), lab = short ? `${s.n} × 30/30` : `${s.n} × ${fmtD(s.on)} vite`, sub = short ? "30 s vite, 30 s en trottinant" : `récup ${fmtD(s.off)} en trottinant`;
@@ -282,7 +286,7 @@ function cardHtml(o) {
   }
   const N = o.next, nextTxt = N ? `<p class="note">Semaine prochaine : ${esc(N.w.title)}${N.days.length && N.days.length < 5 ? `, de préférence ${list(N.days.map(dayName))}` : ""}.</p>` : "";
   const gLt = o.lt && o.lt.pace ? o.lt.pace : null;
-  const allures = `Footing ${fmtPace(P.E[0])}-${fmtPace(P.E[1])} · allure semi ${fmtPace(P.HM)} · <b>seuil ${fmtPace(P.T)}</b> · VO2max ${fmtPace(P.I)} · 30/30 ${fmtPace(P.VV)} (/km)`;
+  const allures = `Footing ${fmtPace(P.E[0])}-${fmtPace(P.E[1])} · allure semi ${fmtPace(P.HM)} · <b>sous le seuil ${fmtPace(subT(P))}</b> · seuil ${fmtPace(P.T)} · VO2max ${fmtPace(P.I)} · 30/30 ${fmtPace(P.VV)} (/km)`;
   const ltNote = gLt && P.src.how !== "own" && P.src.how !== "lt" && Math.abs(gLt - P.T) >= 6 ? ` Le seuil Garmin (${fmtPace(gLt)} /km) reste celui de la charge ; il est ${gLt < P.T ? "plus rapide" : "plus lent"} de ${Math.abs(gLt - P.T)} s que ta forme du moment${gLt < P.T ? " : tes blocs au seuil seraient à l'allure d'un 10 km" : ""}.` : "";
   const repTxt = o.reprise ? "Pendant ta reprise, une séance clé par semaine au plus, jamais en semaine allégée : lignes droites au palier 5, côtes au 6, seuil au 7, puis seuil et côtes en alternance, VO2max à partir du palier 14. Tibia au-dessus de 2/10 pendant ou le lendemain : la séance suivante redevient un footing." : "";
   return `<section class="card span12 pgram keyrun" id="pKey"><h2>Tes séances clés course <small>une par semaine, sans jour fixe</small></h2>
