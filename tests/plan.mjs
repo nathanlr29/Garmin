@@ -169,7 +169,7 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
   { const q = load(), D = d => new Date(2026, 9, d), sig = w => w.title.replace(/ ·.*/, "") + " " + w.steps.filter(st => /^(Sweet spot|Bloc seuil) \d/.test(st.label)).map(st => `${st.d / 60}@${st.lo}`).join(" ");
     const B = (t, d, x = {}) => q.Plan._build(t, 75, { wk: 1, deload: false, date: D(d), ...x }), v2 = a => JSON.stringify(a.map(x => ({ ...x, v: 2 })));
     assert.equal(sig(B("ss", 21)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "sweet spot #1 : 3 × 8 à 86 % (MyWhoosh Sweetspot #1)"); assert.equal(B("ss", 21).k, 0);
-    assert.ok(B("ss", 21).steps.filter(st => st.label === "Récupération").every(st => st.d === 300), "5 min de récup");
+    assert.ok(B("ss", 21).steps.filter(st => st.label === "Récupération").every(st => st.d === 240), "4 min de récup");
     assert.equal(sig(B("thr", 21)), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "seuil #1 : 5 × 4 à 95 %");
     const vo = B("vo2r", 21); assert.match(vo.title, /^VO2max #1 · 2 × 10 × 30\/15/); assert.equal(vo.steps.filter(st => /^Série/.test(st.label)).length, 20);
     assert.ok(vo.steps.filter(st => /^Série/.test(st.label)).every(st => st.lo === 1.15 && st.d === 30), "VO2max #1 : 2 × 10 × 30 s à 115 %");
@@ -178,14 +178,14 @@ console.log(`ok plan (garde-fou n°1) : ${Object.keys(ref.cases).length} cas ide
     assert.equal(sig(B("ss", 28)), "Sweet spot #2 10@0.88 10@0.88 10@0.88", "réussi : palier suivant");
     assert.equal(sig(B("thr", 29)), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "à refaire : même palier");
     assert.match(B("vo2r", 28).title, /^VO2max #5 · 3 × 13 × 30\/15/, "VO2max réussie : palier suivant");
-    assert.equal(sig(B("ss", 28, { k: 4 })), "Sweet spot #5 20@0.88 20@0.88", "palier choisi dans le sous-menu");
+    assert.equal(sig(B("ss", 28, { k: 4 })), "Sweet spot #5 10@0.88 10@0.88 10@0.88 10@0.88", "palier choisi dans le sous-menu (6 × 10 : 4 blocs tiennent en 75 min)");
     assert.equal(sig(B("thr", 28, { k: 9 })), "Seuil #1 4@0.95 4@0.95 4@0.95 4@0.95 4@0.95", "palier choisi hors plage ignoré");
-    q.store.set("palLog", v2([{ d: "2026-10-01", t: "thr", k: 6, ok: true }])); assert.equal(sig(B("thr", 28)), "Seuil #7 20@1 20@1", "après le dernier palier on y reste");
+    q.store.set("palLog", v2([{ d: "2026-10-01", t: "thr", k: 6, ok: true }])); assert.equal(sig(B("thr", 28)), "Seuil #7 10@1 10@1 10@1 10@1", "après le dernier palier on y reste (5 × 10 à 100 % : 4 blocs en 75 min)");
     q.store.set("palLog", JSON.stringify([{ d: "2026-10-01", t: "thr", k: 3, ok: true }])); assert.match(B("thr", 28).title, /^Seuil #1/, "entrée sans version (anciens paliers) ignorée");
-    const c45 = q.Plan._build("ss", 45, { wk: 1, deload: false, k: 3 }); assert.equal(sig(c45), "Sweet spot #4 15@0.88 15@0.88", "séance courte : moins de blocs, jamais moins de 2"); assert.match(c45.goal, /trop courte/);
+    const c45 = q.Plan._build("ss", 45, { wk: 1, deload: false, k: 3 }); assert.equal(sig(c45), "Sweet spot #4 10@0.88 10@0.88", "séance courte : moins de blocs, jamais moins de 2"); assert.match(c45.goal, /trop courte/);
     q.store.set("palLog", "\"x\""); assert.equal(sig(B("ss", 28)), "Sweet spot #1 8@0.86 8@0.86 8@0.86", "suivi illisible ignoré"); }
   const tp = P._build("tempo", 75, { wk: 2, deload: false });
-  assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 2); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
+  assert.equal(tp.steps.filter(st => /^Tempo/.test(st.label)).length, 3); assert.ok(tp.steps.filter(st => /^Tempo/.test(st.label)).every(st => st.d === 480), "tempo : 3 × 8 min"); assert.equal(tp.steps.reduce((a, st) => a + st.d, 0), 4500, "tempo : durée exacte");
   // plus de séance de moins de 45 min : une ancienne config à 30 min passe à 45
   const h = load(); h.store.set("planCfg", JSON.stringify({ ...CFGS.cinq, days: CFGS.cinq.days.map((d, i) => i === 1 ? { ...d, dur: 30 } : d) }));
   assert.equal(h.Plan._cfg().days[1].dur, 45);
@@ -362,7 +362,7 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   assert.ok(v(mainPace("rtempo")) >= .93 && v(mainPace("rtempo")) < .995, "tempo = allure semi, un cran sous le seuil (Daniels : ≈ 97 % de la vitesse seuil)");
   assert.ok(v(mainPace("rthr")) >= .95 && v(mainPace("rthr")) <= 1.02, "seuil en zone 4"); assert.ok(v(mainPace("rvo2")) > 1.02, "VO2max en zone 5");
   assert.ok(v(mainPace("rlong")) < v(mainPace("rfoot")), "sortie longue plus lente que le footing");
-  assert.match(W.rthr.title, /^Seuil #1 · 3 × 4'$/); assert.match(W.rvo2.title, /^VO2max #1 · 12 × 30\/30$/); assert.ok(W.rthr.key && W.rthr.spec && W.rthr.thr === thr, "séance clé : seances.js, avec sa version montre"); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
+  assert.match(W.rthr.title, /^Seuil #1 · 4 × 3'$/); assert.match(W.rvo2.title, /^VO2max #1 · 12 × 30\/30$/); assert.ok(W.rthr.key && W.rthr.spec && W.rthr.thr === thr, "séance clé : seances.js, avec sa version montre"); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
   assert.ok(W.rstrides.steps.some(s => s.n === 6 && s.on === 20), "6 lignes droites");
 }
 // ---- 3.7 génération complète : le vélo et la muscu ne changent pas ; invariants sur beaucoup de réglages

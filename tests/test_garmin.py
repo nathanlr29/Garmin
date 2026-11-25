@@ -591,20 +591,20 @@ class Montre(unittest.TestCase):
             self.assertNotIn("k" * 20, why[0])
 
     def test_format_garmin(self):
-        v = SEANCES[0]   # seuil : échauffement, 4 × (4 min au seuil, 1 min trot), retour au calme
+        v = SEANCES[0]   # seuil : échauffement, 5 × (3 min au seuil, 1 min trot), retour au calme
         j = mt.garmin_json(v)
         self.assertEqual(j["sportType"]["sportTypeKey"], "running")
         st = j["workoutSegments"][0]["workoutSteps"]
         self.assertEqual([x["type"] for x in st], ["ExecutableStepDTO", "RepeatGroupDTO", "ExecutableStepDTO"])
         self.assertEqual([x["stepOrder"] for x in st], [1, 2, 5])
         rep = st[1]
-        self.assertEqual(rep["numberOfIterations"], 4)
+        self.assertEqual(rep["numberOfIterations"], 5)
         run = rep["workoutSteps"][0]
         self.assertEqual(run["targetType"]["workoutTargetTypeKey"], "pace.zone")
         fast, slow = v["steps"][1]["steps"][0]["p"]
         self.assertAlmostEqual(run["targetValueOne"], 1000 / slow, 3)   # la plus lente d'abord (m/s)
         self.assertLess(run["targetValueOne"], run["targetValueTwo"])
-        self.assertEqual(run["endConditionValue"], 240.0)
+        self.assertEqual(run["endConditionValue"], 180.0)
         self.assertEqual(j["estimatedDurationInSecs"], mt.total(v["steps"]))
         h = mt.garmin_json(SEANCES[2])["workoutSegments"][0]["workoutSteps"]
         self.assertEqual(h[0]["endCondition"]["conditionTypeKey"], "lap.button")

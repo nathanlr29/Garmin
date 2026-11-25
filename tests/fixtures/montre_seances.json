@@ -1,7 +1,7 @@
 [
  {
   "v": 1,
-  "name": "Seuil #2 · 4×4'",
+  "name": "Seuil #2 · 5×3'",
   "steps": [
    {
     "t": "warmup",
@@ -10,11 +10,11 @@
     "n": "Échauffement"
    },
    {
-    "rep": 4,
+    "rep": 5,
     "steps": [
      {
       "t": "interval",
-      "s": 240,
+      "s": 180,
       "p": [
        262,
        274
@@ -36,7 +36,7 @@
     "n": "Retour au calme"
    }
   ],
-  "sig": "5e7c153b"
+  "sig": "9ef9a2f3"
  },
  {
   "v": 1,
