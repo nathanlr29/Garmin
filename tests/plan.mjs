@@ -362,7 +362,7 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
   assert.ok(v(mainPace("rtempo")) >= .93 && v(mainPace("rtempo")) < .995, "tempo = allure semi, un cran sous le seuil (Daniels : ≈ 97 % de la vitesse seuil)");
   assert.ok(v(mainPace("rthr")) >= .95 && v(mainPace("rthr")) <= 1.02, "seuil en zone 4"); assert.ok(v(mainPace("rvo2")) > 1.02, "VO2max en zone 5");
   assert.ok(v(mainPace("rlong")) < v(mainPace("rfoot")), "sortie longue plus lente que le footing");
-  assert.match(W.rthr.title, /^Seuil #1 · 4 × 3'$/); assert.match(W.rvo2.title, /^VO2max #1 · 12 × 30\/30$/); assert.ok(W.rthr.key && W.rthr.spec && W.rthr.thr === thr, "séance clé : seances.js, avec sa version montre"); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
+  assert.match(W.rthr.title, /^Seuil #1 · 3 × 4'$/); assert.match(W.rvo2.title, /^VO2max #1 · 12 × 30\/30$/); assert.ok(W.rthr.key && W.rthr.spec && W.rthr.thr === thr, "séance clé : seances.js, avec sa version montre"); assert.equal(RUN.build("rfoot", 20, thr).steps.reduce((a, s) => a + s.d, 0), 1200);
   assert.ok(W.rstrides.steps.some(s => s.n === 6 && s.on === 20), "6 lignes droites");
 }
 // ---- 3.7 génération complète : le vélo et la muscu ne changent pas ; invariants sur beaucoup de réglages
