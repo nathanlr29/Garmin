@@ -34,7 +34,7 @@ for (const [t, L] of Object.entries(S.LADDERS)) {
   const work = s => (s.sets || 1) * s.n * s.on;
   L.forEach((s, k) => { if (k) assert.ok(work(s) >= work(L[k - 1]) || s.on > L[k - 1].on, `${t} #${k + 1} : jamais moins de travail, sauf blocs plus longs`); });
 }
-assert.equal(S.stepL("rthr", 0), "#1 · 3 × 4' au seuil"); assert.equal(S.LADDERS.rthr.length, 7); assert.ok(S.LADDERS.rthr.every((s, k) => s.on === 240 && s.off === 60 && s.n === 3 + k), "seuil court : 4 min, on ajoute des répétitions"); assert.equal(S.stepL("rvo2", 2), "#3 · 2 × 10 × 30/30"); assert.equal(S.stepL("rhill", 0), "#1 · 6 × 10\" en côte");
+assert.equal(S.stepL("rthr", 0), "#1 · 3 × 4' sous le seuil"); assert.equal(S.LADDERS.rthr.length, 7); assert.ok(S.LADDERS.rthr.every((s, k) => s.on === 240 && s.off === 60 && s.n === 3 + k), "seuil court : 4 min, on ajoute des répétitions"); assert.equal(S.stepL("rvo2", 2), "#3 · 2 × 10 × 30/30"); assert.equal(S.stepL("rhill", 0), "#1 · 6 × 10\" en côte");
 
 // ------------------------------------------------------------------ 3. Séances : durée, palier, volume
 const B = (t, d, o = {}) => S.build(t, d, { P, ...o });
@@ -49,10 +49,12 @@ for (const t of ["rthr", "rvo2", "rhill", "rstrides", "rtempo"]) for (const d of
 }
 let w = B("rthr", 40, { k: 1 });
 assert.equal(w.title, "Seuil #2 · 4 × 4'"); assert.equal(w.cut, null);
-const rep = w.steps.find(s => s.n); assert.equal(rep.pace, P.T); assert.equal(rep.plo, P.T - 6); assert.equal(rep.phi, P.T + 6);
-assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [P.T - 6, P.T + 6], "fourchette envoyée à la montre");
-// règle de Daniels : 25 km par semaine → 2,7 km au seuil au plus (plancher) → 3 × 4' au lieu de 4 × 4'
-w = B("rthr", 40, { k: 1, wkKm: 25 }); assert.equal(w.title, "Seuil #2 · 3 × 4'"); assert.match(w.cut, /limité à 10 % de tes km .*3 répétitions au lieu de 4/);
+const ST = P.HM; assert.ok(ST >= P.T + 4 && ST <= P.T + 12, "sous le seuil : allure semi, 4 à 12 s/km plus lente que le seuil");
+const rep = w.steps.find(s => s.n); assert.equal(rep.pace, ST); assert.equal(rep.plo, ST - 6); assert.equal(rep.phi, ST + 6);
+assert.deepEqual(JSON.parse(JSON.stringify(w.spec.steps[1].steps[0].p)), [ST - 6, ST + 6], "fourchette envoyée à la montre");
+// sous le seuil : 15 % des km de la semaine ; 15 km par semaine → 2,7 km au plus (plancher) → 3 × 4' au lieu de 4 × 4'
+w = B("rthr", 40, { k: 1, wkKm: 15 }); assert.equal(w.title, "Seuil #2 · 3 × 4'"); assert.match(w.cut, /sous le seuil limité à 15 % de tes km .*3 répétitions au lieu de 4/);
+w = B("rthr", 40, { k: 1, wkKm: 25 }); assert.equal(w.title, "Seuil #2 · 4 × 4'", "25 km : 3,75 km sous le seuil, palier complet");
 w = B("rthr", 40, { k: 1, wkKm: 40 }); assert.equal(w.title, "Seuil #2 · 4 × 4'", "40 km : palier complet");
 // séance trop courte : moins de répétitions, jamais sous le minimum
 w = B("rthr", 25, { k: 6 }); assert.equal(w.steps.find(s => s.n).n, 3, "minimum gardé (3 × 4')"); assert.match(w.cut, /trop courte : même réduite à 3 répétitions, elle dure 29 min/);
@@ -108,7 +110,7 @@ assert.equal(S.status("2026-11-30", spec).k, "wait"); assert.equal(S.status("202
 const W = B("rthr", 40, { k: 1 }), key = { mon: "2026-11-23", t: "rthr", w: W, days: ["2026-11-25", "2026-11-27"], loose: false, avoid: "Jours durs de ta semaine : jeudi (seuil).", done: null, run: { d: "2026-11-23", label: "course de lundi, 6,1 km" } };
 const card = o => S.cardHtml({ P, key, next: null, pal: { rthr: 1, rhill: 0, rvo2: 0 }, palDone: { rthr: new Set([0]) }, lt: { pace: 252 }, reprise: null, ...o });
 let html = card({});
-assert.match(html, /Séance clé de la semaine : Seuil #2 · 4 × 4' à 4:28 \/km, le jour qui t'arrange : mercredi et vendredi\./);
+assert.match(html, /Séance clé de la semaine : Seuil #2 · 4 × 4' à 4:35 \/km, le jour qui t'arrange : mercredi et vendredi\./);
 assert.match(html, /Sur ta montre comme séance du jour, mercredi 25 novembre/); assert.match(html, /data-kdone="2026-11-23:2026-11-23:1"/);
 assert.match(html, /seuil 4:28/); assert.match(html, /Le seuil Garmin \(4:12 \/km\) reste celui de la charge ; il est plus rapide de 16 s/);
 assert.match(html, /SYNC_LINK/); assert.ok(!/<script/i.test(html));

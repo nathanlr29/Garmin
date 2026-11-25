@@ -16,10 +16,10 @@
       "t": "interval",
       "s": 240,
       "p": [
-       262,
-       274
+       269,
+       281
       ],
-      "n": "Seuil 4:28"
+      "n": "Sous-seuil 4:35"
      },
      {
       "t": "recovery",
@@ -36,7 +36,7 @@
     "n": "Retour au calme"
    }
   ],
-  "sig": "5e7c153b"
+  "sig": "d7951435"
  },
  {
   "v": 1,
