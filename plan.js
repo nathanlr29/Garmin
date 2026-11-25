@@ -55,12 +55,15 @@ const POOLS = [["vo2r", "thr"], ["vo2r", "ss"], ["thr", "vo2r"], ["ss", "thr"]];
 const GRP_POOL = wi => wi % 2 ? ["thr", "ss"] : ["ss", "thr"];
 // sweet spot et seuil par paliers (demande du 21/10/2026) : [blocs, durée d'un bloc (s), % de la FTP, récup (s)]
 // Programme FTP (demande du 21/10/2026), inspiré des plans de MyWhoosh (Sweetspot #1 = 3 × 8' à 86 %, « 4min FTP » = 6 × 4' à 96 %) et de Zwift
-// (FTP Builder : on démarre facile, on allonge avant d'intensifier), et de la progression seuil 3 × 8 → 3 × 12 → 2 × 20 : on ne change qu'une
+// (FTP Builder : on démarre facile, on allonge avant d'intensifier), et de la progression seuil 3 × 8 → 3 × 10 → 5 × 10 : on ne change qu'une
 // chose à la fois (durée, puis intensité). Sweet spot / seuil : [blocs, durée d'un bloc (s), % de la FTP, récup (s)] ;
 // VO2max 30/15 : [séries, répétitions par série, % de la FTP, récup entre séries (s)]. Environ 12 semaines avec une séance de chaque tous les 7 à 10 jours.
+// Blocs de 10 min au plus (demande de Nathan du 25/11/2026) : on progresse par le nombre de blocs, puis l'intensité. Ce qui compte est le temps
+// cumulé à une intensité tenable du début à la fin (Seiler 2013 : 4 × 8 min a fait mieux que 4 × 16 et 4 × 4) ; les anciens 2 × 15 et 2 × 20
+// sont remplacés par 4 et 5 × 10 (40 et 50 min cumulées au lieu de 30 et 40).
 const STEPS = {
-  ss: [[3, 480, .86, 300], [3, 600, .88, 240], [3, 720, .88, 240], [3, 900, .88, 240], [2, 1200, .88, 300], [2, 1200, .9, 300]],
-  thr: [[5, 240, .95, 120], [3, 480, .95, 240], [3, 600, .96, 240], [3, 720, .97, 300], [2, 900, .98, 300], [2, 1200, .98, 300], [2, 1200, 1, 300]],
+  ss: [[3, 480, .86, 240], [3, 600, .88, 240], [4, 600, .88, 180], [5, 600, .88, 180], [6, 600, .88, 180], [6, 600, .9, 180]],
+  thr: [[5, 240, .95, 120], [3, 480, .95, 240], [3, 600, .96, 240], [4, 600, .96, 240], [4, 600, .98, 240], [5, 600, .98, 240], [5, 600, 1, 240]],
   vo2r: [[2, 10, 1.15, 180], [2, 13, 1.15, 180], [3, 13, 1.15, 180], [3, 13, 1.18, 180], [3, 13, 1.2, 180]],
 };
 const STEP_NAME = { ss: "Sweet spot", thr: "Seuil", vo2r: "VO2max 30/15" };
@@ -352,7 +355,7 @@ function fillEasy(items, ph, tired, nKeys, from = 0) {
   const hardAt = d => { const b = items[d] && items[d].bike; return !!(b && b.t && TYPES[b.t].hard); };
   items.forEach(it => { const b = it.bike; if (!b || b.t || it.day < from) return; const d = it.day;
     const afterHard = hardAt(d - 1), legs = it.muscu === "legs", legsBefore = items[d - 1] && items[d - 1].muscu === "legs";
-    // lendemain d'une séance clé : endurance + tempo (2 × 12 min) ; récupération seulement les jours de jambes ou après le groupe / un test
+    // lendemain d'une séance clé : endurance + tempo (3 × 8 min) ; récupération seulement les jours de jambes ou après le groupe / un test
     const afterGrp = afterHard && ["grp", "test"].includes(items[d - 1].bike.t);
     if ((afterGrp || legs) && b.dur <= 75) { b.t = "rec"; b.dur = Math.min(b.dur, 60); }
     else if (!ph.deload && !ph.final && !tired && nKeys < 3 && b.dur >= 60 && afterHard && !legs && !legsBefore && !hardAt(d + 1)) b.t = "tempo";
@@ -826,12 +829,12 @@ function build(type, durMin, ph) {
     if (th) { fill(480); cool(clamp(T - used(), 300, 480)); } else { fill(360); cool(clamp(T - used(), 300, 360)); }
     title = `${th ? "Seuil" : "Sweet spot"} #${k + 1} · ${reps} × ${L / 60}'`; palier = k;
     goal = `Palier ${k + 1}/${S_.length} : ${reps} blocs de ${L / 60} min à ${Math.round(pct * 100)} % de ta FTP, ${R / 60} min souples entre deux, cadence ${th ? "85-95" : "88-95"}, assis. ${pct > .9 ? "Effort 7/10, régulier du début à la fin." : "Effort 6/10 : tu dois finir le dernier bloc en te disant que tu en aurais tenu un de plus. Seiler (2013) : 30 à 40 min cumulées à une intensité tenable du début à la fin font progresser."} Séance faite : dis si elle est réussie (tous les blocs finis sans baisse de puissance ni effort maximal), « Palier » dans « Changer » pour en prendre un autre. Réussie, la suivante passe au palier d'après ; sinon tu refais celui-ci. Si ta FC monte sans plateau jusqu'à près de ta FC max, baisse de 3 % et finis le bloc.${reps < n ? ` La séance est trop courte pour ${n} blocs : allonge-la pour faire le palier complet.` : ""}${L >= 1200 ? vo2note : ""}`;
-  } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 2 × 12 min de tempo en fin de séance
-    ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 2 * 720 - 240;
+  } else if (type === "tempo") {  // lendemain de la séance clé (proposition du 20/10/2026) : zone 2, puis 3 × 8 min de tempo en fin de séance
+    ramp(420, .5, .65, "Échauffement"); const M = T - used() - 300 - 3 * 480 - 2 * 180;   // blocs de 10 min au plus (25/11/2026) : 3 × 8 au lieu de 2 × 12
     if (M >= 120) st(M, .67, "Zone 2");
-    for (let i = 0; i < 2; i++) { st(720, .83, `Tempo ${i + 1}/2`); if (!i) st(240, .6, "Souple"); }
-    cool(clamp(T - used(), 120, 300)); title = "Endurance + 2 × 12' tempo";
-    goal = "Zone 2 à 67 %, puis 2 blocs de 12 min à 83 % en fin de séance, quand les jambes sont déjà chargées : c'est ce qui prépare à tenir des watts au bout de 200 km. Effort 5/10, respiration appuyée mais régulière, cadence 85-95. Si la séance de la veille t'a vidé, garde seulement la zone 2.";
+    for (let i = 0; i < 3; i++) { st(480, .83, `Tempo ${i + 1}/3`); if (i < 2) st(180, .6, "Souple"); }
+    cool(clamp(T - used(), 120, 300)); title = "Endurance + 3 × 8' tempo";
+    goal = "Zone 2 à 67 %, puis 3 blocs de 8 min à 83 % en fin de séance, quand les jambes sont déjà chargées : c'est ce qui prépare à tenir des watts au bout de 200 km. Effort 5/10, respiration appuyée mais régulière, cadence 85-95. Si la séance de la veille t'a vidé, garde seulement la zone 2.";
   } else if (type === "end") {  // Z2 de la proposition du 14/10/2026 : régulière, sans relances
     ramp(420, .5, .65, "Échauffement"); fill(300, .67, "Zone 2"); cool(300); title = `Endurance ${fmtMin(durMin)}`;
     goal = "Zone 2 régulière à 67 % (65-70 %), sans relances : la base aérobie qui soutient FTP et VO2max. Tu dois pouvoir parler en phrases complètes. Dehors, au cardio : environ 120 à 138 bpm, 142 au plus sur le plat, et ne cours pas après la FC dans les bosses courtes (elle réagit avec 30 à 90 s de retard).";
