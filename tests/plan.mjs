@@ -834,3 +834,21 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   h.store.set("planOv:2026-11-02", JSON.stringify({})); assert.equal(h.Plan._eff(MON, cfg, ctx).items[d].bike.t, W0.items[d].bike.t, "remise");
   console.log("ok plan (séance vélo supprimée) : repos vélo, reste inchangé, sortie faite en plus, remise");
 }
+// ---- 10. séance vélo ajoutée un jour sans vélo (planOv[jour].bike = {}, 26/11/2026) : endurance 1 h par défaut, type changeable, jamais bloquée par R4
+{
+  const MON = new Date(2026, 10, 2), cfg = CFGS.cinq, ctx = { form: SIT.frais.form, ready: SIT.frais.ready, prev: PREV[0] };
+  const h = load(); h.clock.t = new Date(2026, 10, 2, 5).getTime(); const W0 = h.Plan._eff(MON, cfg, ctx);
+  const d = W0.items.findIndex(it => !it.bike); assert.ok(d >= 0, "un jour sans vélo");
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { bike: {} } }));
+  const b = h.Plan._eff(MON, cfg, ctx).items[d].bike; assert.ok(b && b.added && b.t === "end" && b.dur === 60);
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { bike: {}, t: "ss", dur: 90 } }));
+  const b2 = h.Plan._eff(MON, cfg, ctx).items[d].bike; assert.equal(b2.t, "ss"); assert.equal(b2.dur, 90);
+  same(h.Plan._eff(MON, cfg, ctx).items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), W0.items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), "le reste de la semaine ne bouge pas");
+  // lendemain d'une grosse journée (R4) : la séance ajoutée reste telle quelle
+  const dd = W0.items.findIndex((it, i) => i >= 1 && !it.bike); assert.ok(dd >= 1, "un jour sans vélo après lundi"); const prev = new Date(2026, 10, 1 + dd, 9);
+  const big = { id: 9913, n: "Grosse sortie", t: "Ride", dt: prev, d: `2026-11-0${1 + dd}T09:00:00`, mt: 5 * 3600, km: 140, np: 180, w: 170, te: 3, hr: 140 };
+  const h2 = load({ acts: [big] }); h2.clock.t = new Date(2026, 10, 1 + dd, 20).getTime();
+  h2.store.set("planOv:2026-11-02", JSON.stringify({ [dd]: { bike: {}, t: "ss" } }));
+  const b3 = h2.Plan._eff(MON, cfg, ctx).items[dd].bike; assert.equal(b3.t, "ss", "R4 ne bloque pas une séance ajoutée"); assert.ok(!b3.rest);
+  console.log("ok plan (séance vélo ajoutée) : par défaut, type changeable, reste inchangé, pas de repos imposé");
+}

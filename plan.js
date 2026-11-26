@@ -581,7 +581,7 @@ function keySlot(items, from, F, ftp, opt = {}) {
   const legs = d => d >= 0 && d <= 6 && items[d].muscu && items[d].muscu.s === "legs" && items[d].muscu.st !== "missed";
   let best = null;
   for (let d = from; d < 7; d++) { const b = items[d].bike;
-    if (!b || b.st !== "plan" || TYPES[b.t].hard || isLong(b.t) || b.dur < 45 || d === opt.ignore) continue;
+    if (!b || b.st !== "plan" || b.added || TYPES[b.t].hard || isLong(b.t) || b.dur < 45 || d === opt.ignore) continue;
     if (items[d].run && items[d].run.st !== "missed") continue;   // pas de séance clé le jour d'une course prévue
     if (hardDay(d - 1, true) || hardDay(d + 1, false) || legs(d) || legs(d - 1)) continue;
     const sc = (b.place === "mw" ? 10 : 0) - d;
@@ -673,6 +673,8 @@ function effective(mon, c, ctx) {
   const cur = mondayOf(new Date()), isCur = +mon === +cur, now = new Date();
   const base = baseWeek(mon, c, ctx), ph = phase(mon, c), key = ymd(mon), ov = store2.get("planOv:" + key) || {};
   const items = base.items.map((it, d) => { const o = ov[d] || {}; let bike = it.bike ? { ...it.bike, st: "plan" } : null;
+    // vélo ajouté à la main un jour sans vélo (planOv[jour].bike = {}, demande de Nathan du 26/11/2026) : endurance 1 h MyWhoosh par défaut, « Changer » ensuite
+    if (!bike && o.bike && typeof o.bike === "object" && !Array.isArray(o.bike)) bike = { t: "end", dur: 60, place: "mw", st: "plan", own: true, added: true };
     if (bike && o.t && TYPES[o.t]) { bike.t = o.t; bike.own = true; } if (bike && o.dur) { bike.dur = o.dur; bike.own = true; } if (bike && o.place) { bike.place = o.place; bike.own = true; } if (bike && Number.isInteger(o.k) && STEPS[bike.t] && o.k < STEPS[bike.t].length) { bike.k = o.k; bike.own = true; }
     // vélo retiré à la main (planOv[jour].bike = 0, demande de Nathan du 26/11/2026) : le jour passe en repos vélo, une sortie faite quand même compte « en plus »
     const bikeOff = !!(bike && o.bike === 0); if (bikeOff) bike = null;
@@ -731,7 +733,7 @@ function effective(mon, c, ctx) {
   // fois (le compte des séances dures faites l'arrête ensuite). Une vraie séance dure faite ce jour-là quand même : on n'y touche pas.
   // Sur 18 mois, après de telles journées il s'est reposé ou a roulé facile 30 fois sur 36 ; VFC −29 % la nuit suivante (17 journées ≥ 250).
   for (let d = 0; d <= Math.min(6, td + 1); d++) { const it = items[d], b = it.bike, prev = addDays(mon, d - 1);
-    if (!b || b.t === "rec" || b.t === "grp" || ymd(prev) > ymd(now)) continue;
+    if (!b || b.t === "rec" || b.t === "grp" || b.added || ymd(prev) > ymd(now)) continue;   // séance ajoutée à la main : jamais bloquée (le reste : « Annuler »)
     if (b.st === "done" && (b.acts || []).some(a => hardRide(a, ftp))) continue;
     const pa = (S.all || []).filter(a => a.d.slice(0, 10) === ymd(prev)), rideH = pa.filter(a => RIDE_TYPES.has(a.t)).reduce((x, a) => x + a.mt, 0) / 3600, load = Charge.dayLoad(prev);
     if (rideH < BIG_DAY.rideH && load < BIG_DAY.load) continue;
@@ -998,6 +1000,7 @@ function bikeStatus(b) {
   if (b.st === "missed") return `<span class="stg ko">${b.movedTo != null ? `déplacée à ${dl(b.movedTo)}` : "non faite"}</span>`;
   if (b.moved != null) return `<span class="stg mv">vient de ${dl(b.moved)}</span>`;
   if (b.changed) return `<span class="stg mv">allégée</span>`;
+  if (b.added) return `<span class="stg">ajoutée</span>`;
   if (b.own) return `<span class="stg">modifiée</span>`;
   return "";
 }
@@ -1107,7 +1110,7 @@ ${b.relab && STEPS[b.t] ? `<select data-ov="fk" aria-label="Palier fait">${palOp
     h += `<div class="dmod"><span>Changer :</span><select data-ov="t" aria-label="Type">${Object.entries(TYPES).filter(([k, t]) => !t.sport && (!t.old || k === b.t)).map(([k, t]) => opt(k, b.t, t.l)).join("")}</select>
 ${STEPS[b.t] ? `<select data-ov="k" aria-label="Palier">${palOpts(b.w.k)}</select>` : ""}
       <select data-ov="dur" aria-label="Durée">${DURS.map(d => opt(d, b.dur, fmtMin(d))).join("")}</select><select data-ov="place" aria-label="Lieu">${opt("mw", b.place, "MyWhoosh")}${opt("out", b.place, "Dehors")}</select>
-      ${b.own ? `<button class="lnk" data-ovreset="1">Revenir au plan</button>` : ""}<button class="lnk" data-ovbdel="1">Supprimer cette séance</button></div>`;
+      ${b.own && !b.added ? `<button class="lnk" data-ovreset="1">Revenir au plan</button>` : ""}<button class="lnk" data-ovbdel="1">${b.added ? "Retirer cette séance" : "Supprimer cette séance"}</button></div>`;
   }
   return `<div class="wdet" data-d="${it.day}">${h}</div>`;
 }
@@ -1119,7 +1122,7 @@ function weekRow(W, it, prof) {
   const runH = rn ? `<button class="wsess" data-open="${ymd(it.date)}:r" style="--tc:${TYPES[rn.t].c}" aria-expanded="${openR}"><span class="badge">${TYPES[rn.t].l}</span><span class="wt">${esc(rn.w.title)}</span><small>${rn.st === "done" ? runDone(rn.acts) : `${fmtMin(rn.dur)} · ${rn.slot === "add" ? "midi" : "soir"}${rn.cool ? " · très facile" : ""} · ≈ ${rn.w.tss} de charge`}</small>${runStatus(rn)}</button>` : "";
   return `<div class="wrow${now ? " now" : ""}${past ? " past" : ""}"><div class="wday"><b>${DAYN[it.day].slice(0, 3)}</b><span>${it.date.getDate()} ${it.date.toLocaleDateString("fr-FR", { month: "short" })}</span></div>
     <div class="wmus">${it.muscu ? muscuChip(it, W) : it.muscuExtra ? `<span class="mchip done"><b>✓ Muscu</b><small>en plus</small></span>` : muscuAdd(W, it)}</div>
-    <div class="wbike">${bikeH}${runH}${extra}${keyChip(W, it)}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo${it.bikeOff ? " (séance supprimée)" : ""}</span>` : ""}${it.bikeOff && editable(W, it) ? `<button class="wadd" data-ovbback="${ymd(it.date)}">Remettre la séance vélo</button>` : ""}${!rn && editable(W, it) ? addRunBtn(it) : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(W, it) : ""}`;
+    <div class="wbike">${bikeH}${runH}${extra}${keyChip(W, it)}${!b && !rn && !it.extra.length ? `<span class="wrest">Repos vélo${it.bikeOff ? " (séance supprimée)" : ""}</span>` : ""}${it.bikeOff && editable(W, it) ? `<button class="wadd" data-ovbback="${ymd(it.date)}">Remettre la séance vélo</button>` : !b && editable(W, it) ? `<button class="wadd" data-addbike="${ymd(it.date)}" title="Ajouter une séance vélo ce jour-là">+ vélo</button>` : ""}${!rn && editable(W, it) ? addRunBtn(it) : ""}</div></div>${open && b ? detailHtml(W, it, prof) : ""}${openR && rn ? runDetail(W, it) : ""}`;
 }
 // semaine en cours : les jours déjà passés tiennent en une ligne (« Lun → jeu : 4 séances faites »), dépliable ;
 // dépliés d'office si l'un d'eux a son détail ouvert
@@ -1430,7 +1433,12 @@ function bind(c, prof) {
   box.querySelectorAll("[data-ovfreset]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
     if (ov[d]) { delete ov[d].ft; delete ov[d].fk; if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
   box.querySelectorAll("[data-ovbdel]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
-    ov[d] = { ...(ov[d] || {}), bike: 0 }; store2.set(k, ov); delete PS.open[ymd(PS.W.items[d].date)]; toast(`Séance vélo de ${DAYN[d].toLowerCase()} supprimée.`); render(); });
+    if (PS.W.items[d].bike && PS.W.items[d].bike.added) { const o = { ...(ov[d] || {}) }; ["bike", "t", "dur", "place", "k"].forEach(x => delete o[x]); if (Object.keys(o).length) ov[d] = o; else delete ov[d]; }
+    else ov[d] = { ...(ov[d] || {}), bike: 0 };
+    store2.set(k, ov); delete PS.open[ymd(PS.W.items[d].date)]; toast(`Séance vélo de ${DAYN[d].toLowerCase()} supprimée.`); render(); });
+  box.querySelectorAll("[data-addbike]").forEach(b => b.onclick = () => { const date = b.dataset.addbike, dt = parseYmd(date), mon = mondayOf(dt), k = "planOv:" + ymd(mon), d = dayIndex(dt, mon), ov = store2.get(k) || {};
+    const o = { ...(ov[d] || {}) }; ["t", "dur", "place", "k"].forEach(x => delete o[x]); o.bike = {}; ov[d] = o; store2.set(k, ov);
+    if (+mon !== +PS.mon) { PS.mon = mon; PS.open = {}; } PS.open[date] = true; render(); });
   box.querySelectorAll("[data-ovbback]").forEach(b => b.onclick = () => { const dt = parseYmd(b.dataset.ovbback), k = "planOv:" + ymd(mondayOf(dt)), d = dayIndex(dt, mondayOf(dt)), ov = store2.get(k) || {};
     if (ov[d]) { delete ov[d].bike; if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
   box.querySelectorAll("[data-kskip]").forEach(b => b.onclick = () => { const [m, on] = b.dataset.kskip.split(":"); setKeySkip(m, on === "1");
