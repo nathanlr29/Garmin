@@ -814,3 +814,18 @@ console.log("ok plan (course) : modes, volumes, plafonds, placement, liens valid
   assert.equal(h2.Plan._eff(MON, cfg, ctx).items[d].bike.t, W0.items[d].bike.t, "séance pas encore faite : ft sans effet");
   console.log("ok plan (séance faite autre que prévue) : type, palier, durée, reste de la semaine inchangé");
 }
+// ---- 9. séance vélo supprimée à la main (planOv[jour].bike = 0, 26/11/2026) : jour en repos vélo, sortie faite quand même = « en plus », remise possible
+{
+  const MON = new Date(2026, 10, 2), cfg = CFGS.cinq, ctx = { form: SIT.frais.form, ready: SIT.frais.ready, prev: PREV[0] };
+  const h = load(); h.clock.t = new Date(2026, 10, 2, 5).getTime(); const W0 = h.Plan._eff(MON, cfg, ctx);
+  const d = W0.items.findIndex(it => it.bike);
+  h.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { bike: 0 } }));
+  const W1 = h.Plan._eff(MON, cfg, ctx);
+  assert.equal(W1.items[d].bike, null, "séance retirée"); assert.ok(W1.items[d].bikeOff);
+  same(W1.items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), W0.items.filter((_, i) => i !== d).map(it => it.bike && it.bike.t), "le reste de la semaine ne bouge pas");
+  const ride = { id: 9912, n: "Sortie", t: "Ride", dt: new Date(2026, 10, 2 + d, 18), d: `2026-11-0${2 + d}T18:00:00`, mt: 3600, km: 30, np: 180, w: 170, te: 2.5, hr: 140 };
+  const h2 = load({ acts: [ride] }); h2.store.set("planWk:2026-11-02", h.store.get("planWk:2026-11-02")); h2.store.set("planOv:2026-11-02", JSON.stringify({ [d]: { bike: 0 } })); h2.clock.t = new Date(2026, 10, 2 + d, 21).getTime();
+  const W2 = h2.Plan._eff(MON, cfg, ctx); assert.equal(W2.items[d].bike, null); assert.equal(W2.items[d].extra.length, 1, "sortie faite quand même : en plus");
+  h.store.set("planOv:2026-11-02", JSON.stringify({})); assert.equal(h.Plan._eff(MON, cfg, ctx).items[d].bike.t, W0.items[d].bike.t, "remise");
+  console.log("ok plan (séance vélo supprimée) : repos vélo, reste inchangé, sortie faite en plus, remise");
+}
