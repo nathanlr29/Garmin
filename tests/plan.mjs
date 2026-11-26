@@ -529,6 +529,11 @@ const near = (x, y, e, m) => assert.ok(Math.abs(x - y) <= e, `${m} : ${x} ≠ ${
     hs.clock.t = new Date(2026, 10, 2, 7, 0, 0).getTime(); const kk = hs.Plan._key.week(mon);
     assert.ok(kk && !kk.days.includes("2026-11-02"), "pas le lundi : " + JSON.stringify(kk && kk.days));
     if (TY[kk.t].hard) assert.ok(!kk.days.includes("2026-11-03"), "pas le mardi pour une séance dure : " + JSON.stringify(kk.days)); }
+  // séance clé passée à la main (keySkip, 26/11/2026) : plus de séance clé cette semaine, remise possible
+  { const hs = load({ acts: [big], course: COURSE }); hs.store.set("planCfg", JSON.stringify(CFGS.six)); hs.store.set("planSince", '"2026-10-01"');
+    hs.clock.t = new Date(2026, 10, 2, 7, 0, 0).getTime(); assert.ok(hs.Plan._key.week(mon));
+    hs.Plan._skip("2026-11-02", true); assert.equal(hs.Plan._key.week(mon), null, "séance clé passée");
+    hs.Plan._skip("2026-11-02", false); assert.ok(hs.Plan._key.week(mon), "séance clé remise"); }
   // grosse journée aujourd'hui (dimanche) : demain lundi n'est pas dans la semaine ; mercredi grosse journée faite → jeudi repos dès mercredi soir
   const wed = { ...big, id: 7002, dt: new Date(2026, 10, 4, 9), d: "2026-11-04T09:00:00" };
   const h3 = load({ acts: [wed] }); h3.clock.t = new Date(2026, 10, 4, 18, 0, 0).getTime();

@@ -6,7 +6,7 @@
 const SY = window.Sync;
 const K_TS = "planSyncTs", K_SNAP = "planSyncSnap";   // horodatage de chaque élément ; dernier état connu (sert à voir ce qui a changé)
 const WEEKS = 8, MAX_V = 40000;                       // seules les 8 dernières semaines sont envoyées ; limite d'une cellule de la Sheet
-const SIMPLE = new Set(["planCfg", "planRc", "planFtp", "bwWeight", "bwAge", "planSince", "palLog", "keyLog"]);   // keyLog : séance clé course de la semaine faite (24/11/2026)
+const SIMPLE = new Set(["planCfg", "planRc", "planFtp", "bwWeight", "bwAge", "planSince", "palLog", "keyLog", "keySkip"]);   // keyLog : séance clé course de la semaine faite (24/11/2026)
 const DATE = "\\d{4}-\\d\\d-\\d\\d";
 const RE = { ov: new RegExp(`^planOv:(${DATE}):([0-6])$`), undo: new RegExp(`^planUndo:(${DATE}):([\\w-]{1,60})$`), wk: new RegExp(`^planWk:(${DATE})$`), lbl: /^muscuLbl:([\w-]{1,60})$/ };
 const ls = { get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }, del(k) { try { localStorage.removeItem(k); } catch (e) {} } };
@@ -48,6 +48,7 @@ function okValue(id, v) {
   if (id === "bwWeight") return num(35, 150);
   if (id === "palLog") return Array.isArray(v) && v.length <= 80 && v.every(x => x && ["ss", "thr", "vo2r", "rthr", "rvo2", "rhill"].includes(x.t) && typeof x.d === "string" && new RegExp(`^${DATE}$`).test(x.d) && Number.isInteger(x.k) && x.k >= 0 && x.k <= 9 && typeof x.ok === "boolean");
   if (id === "keyLog") return Array.isArray(v) && v.length <= 30 && v.every(x => x && typeof x.w === "string" && new RegExp(`^${DATE}$`).test(x.w) && typeof x.d === "string" && new RegExp(`^${DATE}$`).test(x.d) && /^r[a-z0-9]{2,8}$/.test(x.t) && typeof x.ok === "boolean");
+  if (id === "keySkip") return Array.isArray(v) && v.length <= 20 && v.every(x => typeof x === "string" && new RegExp(`^${DATE}$`).test(x));
   if (id === "bwAge") return typeof v === "string" && v.length < 12;
   if (id === "planSince") return typeof v === "string" && new RegExp(`^${DATE}$`).test(v);
   if (id === "planCfg") return !!v && typeof v === "object" && Array.isArray(v.days) && v.days.length === 7;

@@ -257,6 +257,7 @@ const list = a => a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} et $
 const dayName = d => new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long" });
 function answer(o) {
   const K = o.key;
+  if (!K && o.skip && o.skip.cur) return "Pas de séance clé cette semaine : tu l'as passée. Elle est retirée de ta montre ; tes footings restent.";
   if (K && K.done) return `Séance clé de la semaine faite ✓ : ${K.w.title}${K.done.ok === true ? ", réussie" : K.done.ok === false ? ", à refaire" : ""}.`;
   const g = K && !K.done && state && state.w && state.w[K.mon];
   if (g && g.done && !g.site) return `Séance clé de la semaine faite ✓ en suivant ta montre${g.date ? ` (${dLong(g.date)})` : ""} : ${K.w.title}. Dis si elle est réussie, pour passer au palier suivant.`;
@@ -281,10 +282,12 @@ function cardHtml(o) {
     body = `<div class="keyw">${runTableHtml(K.w)}</div>
       ${K.w.cut ? `<p class="note">${esc(K.w.cut.charAt(0).toUpperCase() + K.w.cut.slice(1))}.</p>` : ""}
       ${K.avoid ? `<p class="note">${esc(K.avoid)}</p>` : ""}
-      ${ask}${undo}
+      ${ask}${undo}${K.done ? "" : `<p class="note">Pas le moment cette semaine ? <button class="lnk" data-kskip="${K.mon}:1">Passer cette séance</button> (elle sera retirée de ta montre).</p>`}
       ${st ? `<div class="kwline"><span class="kst ${st.k}">${st.k === "ok" ? "✓ " : ""}${esc(st.txt)}</span><button class="btn2" data-kfitw="${K.mon}">Fichier pour la montre (.fit)</button></div>` : ""}`;
   }
-  const N = o.next, nextTxt = N ? `<p class="note">Semaine prochaine : ${esc(N.w.title)}${N.days.length && N.days.length < 5 ? `, de préférence ${list(N.days.map(dayName))}` : ""}.</p>` : "";
+  const sk = o.skip || {}, N = o.next, nextTxt = (sk.cur ? `<p class="note">Séance clé de cette semaine passée. <button class="lnk" data-kskip="${sk.cur}:0">La remettre</button></p>` : "")
+    + (N ? `<p class="note">Semaine prochaine : ${esc(N.w.title)}${N.days.length && N.days.length < 5 ? `, de préférence ${list(N.days.map(dayName))}` : ""}. <button class="lnk" data-kskip="${N.mon}:1">La passer</button></p>`
+      : sk.next ? `<p class="note">Séance clé de la semaine prochaine passée. <button class="lnk" data-kskip="${sk.next}:0">La remettre</button></p>` : "");
   const gLt = o.lt && o.lt.pace ? o.lt.pace : null;
   const allures = `Footing ${fmtPace(P.E[0])}-${fmtPace(P.E[1])} · allure semi ${fmtPace(P.HM)} · <b>sous le seuil ${fmtPace(subT(P))}</b> · seuil ${fmtPace(P.T)} · VO2max ${fmtPace(P.I)} · 30/30 ${fmtPace(P.VV)} (/km)`;
   const ltNote = gLt && P.src.how !== "own" && P.src.how !== "lt" && Math.abs(gLt - P.T) >= 6 ? ` Le seuil Garmin (${fmtPace(gLt)} /km) reste celui de la charge ; il est ${gLt < P.T ? "plus rapide" : "plus lent"} de ${Math.abs(gLt - P.T)} s que ta forme du moment${gLt < P.T ? " : tes blocs au seuil seraient à l'allure d'un 10 km" : ""}.` : "";

@@ -1272,8 +1272,12 @@ function setKeyLog(w, t, d, ok) {
   const L = keyLog().filter(x => x.w !== w); if (ok != null) L.push({ w, t, d, ok }); store2.set("keyLog", L.sort((a, b) => a.w < b.w ? -1 : 1).slice(-30));
   if (LAD(t)) { const k = palFor(t, parseYmd(d)); setPal(d, t, k, ok); }
 }
+// séance clé passée à la main pour une semaine (demande de Nathan du 26/11/2026) : lundis, synchronisés ; la semaine n'en a plus, la montre la retire
+const keySkip = () => { const L = store2.get("keySkip"); return Array.isArray(L) ? L.filter(x => /^\d{4}-\d\d-\d\d$/.test(x)) : []; };
+function setKeySkip(mon, on) { const L = keySkip().filter(x => x !== mon); if (on) L.push(mon); store2.set("keySkip", L.sort().slice(-20)); }
 function weekKey(W) {
   if (!window.Seances || !W) return null;
+  if (keySkip().includes(ymd(W.mon))) return null;
   const mon = W.mon, X = window.Reprise && Reprise._, wk = d => ymd(addDays(mon, d));
   if (X && ymd(mon) < X.START) return null;
   const L = ladderFor(S.all || [], mon);
@@ -1322,7 +1326,8 @@ function renderKey(Wc, KW) {
   if (!window.Seances) return "";
   const L = ladderFor(S.all || [], Wc.mon), X = window.Reprise && Reprise._, RK = runKeyCtx(), pr = (window.Recup && Recup.data && Recup.data.profile) || {};
   const pal = {}, palDone = {}; ["rthr", "rhill", "rvo2"].forEach(t => { pal[t] = palFor(t, addDays(new Date(), 1)); palDone[t] = new Set(palLog().filter(x => x.t === t && x.ok).map(x => x.k)); });
-  return Seances.cardHtml({ P: RK.P, key: KW.cur, next: KW.next, pal, palDone, lt: pr.run && pr.run.lt,
+  const sk = keySkip(), nm = ymd(addDays(Wc.mon, 7));
+  return Seances.cardHtml({ P: RK.P, key: KW.cur, next: KW.next, skip: { cur: sk.includes(ymd(Wc.mon)) ? ymd(Wc.mon) : null, next: sk.includes(nm) ? nm : null }, pal, palDone, lt: pr.run && pr.run.lt,
     reprise: L ? { k: L.k, light: L.light, nextKey: X && X.nextKey ? X.nextKey(L.k) : null } : null });
 }
 // sans ouvrir le Plan (appelé par la Synthèse) : la séance de la semaine part quand même vers la montre
@@ -1428,6 +1433,8 @@ function bind(c, prof) {
     ov[d] = { ...(ov[d] || {}), bike: 0 }; store2.set(k, ov); delete PS.open[ymd(PS.W.items[d].date)]; toast(`Séance vélo de ${DAYN[d].toLowerCase()} supprimée.`); render(); });
   box.querySelectorAll("[data-ovbback]").forEach(b => b.onclick = () => { const dt = parseYmd(b.dataset.ovbback), k = "planOv:" + ymd(mondayOf(dt)), d = dayIndex(dt, mondayOf(dt)), ov = store2.get(k) || {};
     if (ov[d]) { delete ov[d].bike; if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
+  box.querySelectorAll("[data-kskip]").forEach(b => b.onclick = () => { const [m, on] = b.dataset.kskip.split(":"); setKeySkip(m, on === "1");
+    toast(on === "1" ? "Séance clé course passée : elle sera retirée de ta montre au prochain passage du workflow." : "Séance clé course remise."); render(); });
   box.querySelectorAll("[data-gokey]").forEach(b => b.onclick = () => { const el = $("pKey"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); });
   box.querySelectorAll("[data-ovreset]").forEach(b => b.onclick = () => { const d = +b.closest(".wdet").dataset.d, k = "planOv:" + ymd(PS.W.mon), ov = store2.get(k) || {};
     if (ov[d]) { ["t", "dur", "place", "k"].forEach(x => delete ov[d][x]); if (!Object.keys(ov[d]).length) delete ov[d]; } store2.set(k, ov); render(); });
@@ -1518,7 +1525,7 @@ async function open() {
 }
 window.Plan = { open, refresh: () => { if (Nav.curTab() === "plan" && PS.W) render(); }, ftp: () => profile().ftp, plannedFor, watch,
   _auto: autoAvail, _cfgFor: cfgFor,
-  _key: { week: mon => weekKey(withWorkouts(effective(mon, cfgFor(mon), ctxFor(mon, fitness(), readiness())))), set: setKeyLog, log: keyLog }, muscuOn, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
+  _skip: setKeySkip, _key: { week: mon => weekKey(withWorkouts(effective(mon, cfgFor(mon), ctxFor(mon, fitness(), readiness())))), set: setKeyLog, log: keyLog }, muscuOn, doneOn, hardRide: a => hardRide(a, profile().ftp), TYPES, isKey, _build: build, _zwo: zwo, _gen: genWeek, _eff: effective, _cfg: getCfg, _phase: phase,
   _run: { place: placeRuns, hard: hardRun, slot: runSlot, cfg: runCfg, rcFor, setRc, ctx: runCtx, kinds: runKinds, build: buildRun, clean: cleanCfg, tss: runTss, RUN_EASY, RUN_V, RUN_IF, RUN_MIN, RUN_GROW, RUN_DELOAD, RUN_LONG, RUN_HARDMIN } };
 if (window.Seances) Seances.setTable(runTable);   // même tableau d'étapes que le détail d'une course
 migrateFtp();  // dès le chargement : la Synthèse et la charge lisent la même FTP que le Plan, même sans avoir ouvert le Plan
